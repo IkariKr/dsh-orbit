@@ -51,10 +51,21 @@ At minimum verify:
 - `settings.describe` succeeds through the authenticated gateway;
 - the response reports a writable settings provider when expected;
 - a no-op `settings.mutate` succeeds on a safe namespace;
+- at least one session created before the upgrade can be resumed and can re-select its current model;
 - a request without the internal proxy secret is rejected;
 - a cross-site request is rejected;
 - a local proxy cannot spoof an identity-provider assertion header;
 - WebSocket and long-running agent traffic still work.
+
+For the existing-session check, run against copied candidate data rather than production data:
+
+```sh
+DSH_SMOKE_URL=https://candidate.example.com \
+DSH_SMOKE_SESSION_ID=session-... \
+npm run smoke:session
+```
+
+The smoke test reads the session's current model and re-selects that same model. This exercises the cold-resume path without intentionally changing the model choice. Use a session that predates the candidate DSH version; a newly created session does not validate upgrade compatibility.
 
 ### 7. Promote and verify again
 

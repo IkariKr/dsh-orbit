@@ -115,7 +115,7 @@ The recommended flow is:
 2. build a candidate image;
 3. require the compatibility patch to match exactly;
 4. start the candidate with a copied data directory;
-5. run read, write, and negative-auth smoke tests;
+5. run settings, negative-auth, and pre-upgrade session-resume smoke tests;
 6. snapshot production data;
 7. promote the candidate only after the tests pass.
 
