@@ -15,4 +15,7 @@ The project follows Semantic Versioning once the public API and deployment contr
 - Docker and reverse-proxy examples;
 - compatibility, security, architecture, upgrade, and roadmap documentation;
 - unit tests for patch application, idempotency, unsupported versions, and source mismatch handling;
-- repository scan for common secret and site-specific data leaks.
+- repository scan for common secret and site-specific data leaks;
+- deterministic downstream runtime hooks with fail-closed execution;
+- graceful DSH Web restart command for in-container maintenance;
+- downstream production deployment pattern that separates public source from private state.

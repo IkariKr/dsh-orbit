@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+: "${DSH_HOME:=/data/dsh-home}"
+request_file="${DSH_HOME}/.dsh-web-restart.request"
+
+touch "$request_file"
+printf '%s\n' "DSH web restart requested"

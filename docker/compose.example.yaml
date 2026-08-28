@@ -15,10 +15,12 @@ services:
       DSH_PUBLIC_HOST: ${DSH_PUBLIC_HOST:?set DSH_PUBLIC_HOST in .env}
       DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
       DSH_PROFILE_ROOT: /data/dsh-home/profiles/web
+      DSH_ORBIT_HOOK_DIR: /opt/dsh-orbit/hooks
     volumes:
       - ../data:/data:rw
       - ../workspace:/workspace:rw
       - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+      - ../hooks:/opt/dsh-orbit/hooks:ro
     ports:
       - "127.0.0.1:${DSH_ORBIT_PORT:-18443}:9443"
     read_only: true

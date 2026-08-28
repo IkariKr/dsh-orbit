@@ -1,11 +1,14 @@
 #!/bin/sh
 set -eu
+umask 027
 
 READY_FILE="/tmp/dsh-orbit-ready"
 PROFILE_ROOT="${DSH_PROFILE_ROOT:-/data/dsh-home/profiles/web}"
 PROFILE_CONNECTION_ROOT="${DSH_PROFILE_CONNECTION_ROOT:-${PROFILE_ROOT}/node_modules/@deepseek-ai/dsh-client-connection/lib}"
+RESTART_REQUEST="${DSH_HOME:-/data/dsh-home}/.dsh-web-restart.request"
 DSH_BIN="/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js"
 PATCHER="/usr/local/lib/dsh-orbit/bin/dsh-orbit-patch.mjs"
+HOOK_RUNNER="/usr/local/lib/dsh-orbit/bin/dsh-orbit-run-hooks.mjs"
 dsh_pid=""
 
 rm -f "$READY_FILE"
@@ -65,6 +68,11 @@ wait_for_web() {
   return 1
 }
 
+prepare_runtime() {
+  node "$PATCHER" --runtime
+  node "$HOOK_RUNNER"
+}
+
 # A fresh profile may install its own client-connection package on first boot.
 # Bootstrap DSH while the gateway is still held unhealthy, then patch and restart.
 if [ ! -f "$PROFILE_CONNECTION_ROOT/index.js" ] || [ ! -f "$PROFILE_CONNECTION_ROOT/client.js" ]; then
@@ -73,11 +81,38 @@ if [ ! -f "$PROFILE_CONNECTION_ROOT/index.js" ] || [ ! -f "$PROFILE_CONNECTION_R
   stop_dsh
 fi
 
-node "$PATCHER" --runtime
-start_dsh
-wait_for_web
-node "$PATCHER" --check
+while :; do
+  rm -f "$READY_FILE"
+  prepare_runtime
+  start_dsh
+  wait_for_web
+  node "$PATCHER" --check
+  touch "$READY_FILE"
 
-touch "$READY_FILE"
-trap cleanup TERM INT EXIT
-wait "$dsh_pid"
+  restart_requested=false
+  while kill -0 "$dsh_pid" 2>/dev/null; do
+    if [ -f "$RESTART_REQUEST" ]; then
+      rm -f "$RESTART_REQUEST"
+      rm -f "$READY_FILE"
+      restart_requested=true
+      echo "DSH web restart requested"
+      kill -TERM "$dsh_pid" 2>/dev/null || true
+      break
+    fi
+    sleep 1
+  done
+
+  if wait "$dsh_pid"; then
+    exit_code=0
+  else
+    exit_code=$?
+  fi
+  dsh_pid=""
+
+  if [ "$restart_requested" = true ]; then
+    echo "Restarting DSH web"
+    continue
+  fi
+
+  exit "$exit_code"
+done

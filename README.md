@@ -79,6 +79,8 @@ docker compose -f docker/compose.example.yaml up -d
 
 At runtime, the profile-local DSH client package is checked and patched before the web process starts. This is necessary because DSH profiles can contain their own copy of `@deepseek-ai/dsh-client-connection`.
 
+Optional downstream hooks in `hooks/` run before each DSH Web start. They are intended for deployment-specific compatibility work that does not belong in the shared project. A failed hook stops startup.
+
 ### 4. Configure the reverse proxy
 
 Examples are provided for:
@@ -117,7 +119,7 @@ The recommended flow is:
 6. snapshot production data;
 7. promote the candidate only after the tests pass.
 
-See [Upgrade guide](docs/upgrade.md) and [Compatibility](docs/compatibility.md).
+See [Upgrade guide](docs/upgrade.md), [Compatibility](docs/compatibility.md), and [Downstream production deployment](docs/downstream-production.md).
 
 ## Development
 
