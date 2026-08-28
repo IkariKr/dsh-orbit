@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible DSH Orbit problem.
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: input
+    id: orbit-version
+    attributes:
+      label: DSH Orbit version
+    validations:
+      required: true
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DeepSeek Harness version
+    validations:
+      required: true
+  - type: textarea
+    id: topology
+    attributes:
+      label: Deployment topology
+      description: Describe the gateway, access layer, and DSH deployment without including secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, tokens, private addresses, and other sensitive deployment data.
+          required: true

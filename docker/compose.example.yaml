@@ -1,0 +1,70 @@
+services:
+  dsh:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        DSH_VERSION: ${DSH_VERSION:-0.1.1-rc.2}
+        DSH_PUBLIC_HOST: ${DSH_PUBLIC_HOST:?set DSH_PUBLIC_HOST in .env}
+    image: dsh-orbit:${DSH_VERSION:-0.1.1-rc.2}
+    env_file:
+      - ../.env
+    environment:
+      DSH_HOME: /data/dsh-home
+      HOME: /data/dsh-home
+      DSH_PUBLIC_HOST: ${DSH_PUBLIC_HOST:?set DSH_PUBLIC_HOST in .env}
+      DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
+      DSH_PROFILE_ROOT: /data/dsh-home/profiles/web
+    volumes:
+      - ../data:/data:rw
+      - ../workspace:/workspace:rw
+      - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+    ports:
+      - "127.0.0.1:${DSH_ORBIT_PORT:-18443}:9443"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/dsh-orbit-ready && wget -q -O /dev/null http://127.0.0.1:3080"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    network_mode: service:dsh
+    depends_on:
+      dsh:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - 'export DSH_PROXY_AUTH="$$(cat /run/secrets/dsh_proxy_auth)" DSH_LOCAL_USER="$$(cat /run/secrets/local_user)" DSH_LOCAL_PASSWORD_HASH="$$(cat /run/secrets/local_password_hash)"; exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile'
+    environment:
+      DSH_PUBLIC_HOST: ${DSH_PUBLIC_HOST:?set DSH_PUBLIC_HOST in .env}
+    volumes:
+      - ../proxy/Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+      - ../secrets/local_user:/run/secrets/local_user:ro
+      - ../secrets/local_password_hash:/run/secrets/local_password_hash:ro
+      - ../certs/fullchain.pem:/run/certs/fullchain.pem:ro
+      - ../certs/privkey.pem:/run/certs/privkey.pem:ro
+      - ../caddy-data:/data:rw
+      - ../caddy-config:/config:rw
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    restart: unless-stopped

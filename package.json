@@ -1,0 +1,15 @@
+{
+  "name": "dsh-orbit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Secure self-hosting and fleet layer for DeepSeek Harness.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node scripts/check-public-tree.mjs && node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

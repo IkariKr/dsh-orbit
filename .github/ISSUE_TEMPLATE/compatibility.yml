@@ -1,0 +1,38 @@
+name: DSH compatibility
+description: Request or report compatibility with a DeepSeek Harness release.
+title: "[Compatibility] DSH "
+labels: [compatibility]
+body:
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DeepSeek Harness version
+      placeholder: 0.x.y
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Current result
+      options:
+        - Not tested
+        - Build patch fails
+        - Runtime/profile patch fails
+        - Settings read fails
+        - Settings write fails
+        - Authentication boundary fails
+        - Appears compatible
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Include patch output or errors after removing credentials and deployment-specific information.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, tokens, private addresses, and other sensitive deployment data.
+          required: true
