@@ -13,7 +13,8 @@ The project follows Semantic Versioning once the public API and deployment contr
 
 ### Fixed
 
-- pass `DSH_PUBLIC_HOST` to the upstream `dsh web --trusted-host` option so authenticated reverse-proxy requests can reach plugin routes protected by DSH's browser-trust fence, including lazy-loaded UI bundles.
+- pass `DSH_PUBLIC_HOST` to the upstream `dsh web --trusted-host` option so authenticated reverse-proxy requests can reach plugin routes protected by DSH's browser-trust fence, including lazy-loaded UI bundles;
+- give the container `dsh` user an interactive Bash login shell and set `SHELL=/bin/bash`, avoiding terminal plugins resolving Alpine's default `/sbin/nologin` account shell.
 
 ## 0.1.0 - 2026-08-28
 

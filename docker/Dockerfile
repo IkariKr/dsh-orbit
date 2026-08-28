@@ -17,11 +17,12 @@ RUN apk add --no-cache \
       py3-virtualenv \
     && update-ca-certificates \
     && addgroup -S -g 10001 dsh \
-    && adduser -S -D -H -u 10001 -G dsh dsh \
+    && adduser -S -D -H -s /bin/bash -u 10001 -G dsh dsh \
     && npm install -g "@deepseek-ai/dsh@${DSH_VERSION}" "pnpm@${PNPM_VERSION}"
 
 ENV DSH_HOME=/data/dsh-home
 ENV HOME=/data/dsh-home
+ENV SHELL=/bin/bash
 ENV DSH_PUBLIC_HOST=${DSH_PUBLIC_HOST}
 ENV DSH_PROXY_AUTH_FILE=/run/secrets/dsh_proxy_auth
 ENV DSH_PROFILE_ROOT=/data/dsh-home/profiles/web
