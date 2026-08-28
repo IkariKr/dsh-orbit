@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { compatibilityFor } from "./compatibility.mjs";
 
 const SERVER_MARKER = 'const DSH_ORBIT_PROXY_HEADER = "x-dsh-orbit-authenticated-proxy";';
+const LEGACY_SERVER_MARKER = 'const REMOTE_PROXY_AUTH_HEADER = "x-dsh-authenticated-proxy";';
 
 function replaceExactlyOnce(source, needle, replacement, label) {
   const first = source.indexOf(needle);
@@ -28,13 +29,6 @@ function patchServer(source, { publicHost, proxyAuthFile }) {
     return { source, changed: false };
   }
 
-  source = replaceExactlyOnce(
-    source,
-    'import { randomUUID } from "node:crypto";\n',
-    'import { randomUUID } from "node:crypto";\nimport { readFileSync } from "node:fs";\n',
-    "client-connection crypto import",
-  );
-
   const authBlock = `
 ${SERVER_MARKER}
 const DSH_ORBIT_PROXY_HOST = ${JSON.stringify(publicHost)};
@@ -60,6 +54,33 @@ function isDshOrbitAuthenticatedProxyRequest(request, hostUrl) {
 \t}
 }
 `;
+
+  if (source.includes(LEGACY_SERVER_MARKER)) {
+    const trustedDeclaration = "function isTrustedApiRequest(request, trustedHosts) {";
+    const legacyStart = source.indexOf(LEGACY_SERVER_MARKER);
+    const trustedStart = source.indexOf(trustedDeclaration, legacyStart);
+    if (trustedStart < 0) {
+      throw new Error("DSH Orbit patch failed: legacy proxy block is missing isTrustedApiRequest");
+    }
+    if (source.indexOf(LEGACY_SERVER_MARKER, legacyStart + LEGACY_SERVER_MARKER.length) >= 0) {
+      throw new Error("DSH Orbit patch failed: legacy proxy marker is not unique");
+    }
+    source = source.slice(0, legacyStart) + authBlock + "\n" + source.slice(trustedStart);
+    source = replaceExactlyOnce(
+      source,
+      "\tif (isAuthenticatedReverseProxyRequest(request, hostUrl)) return true;\n",
+      "\tif (isDshOrbitAuthenticatedProxyRequest(request, hostUrl)) return true;\n",
+      "legacy authenticated proxy gate",
+    );
+    return { source, changed: true };
+  }
+
+  source = replaceExactlyOnce(
+    source,
+    'import { randomUUID } from "node:crypto";\n',
+    'import { randomUUID } from "node:crypto";\nimport { readFileSync } from "node:fs";\n',
+    "client-connection crypto import",
+  );
 
   source = replaceExactlyOnce(
     source,
