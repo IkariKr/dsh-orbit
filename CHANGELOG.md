@@ -4,12 +4,16 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
-## Unreleased
+## 0.1.1 - 2026-08-28
 
 ### Added
 
 - existing-session resume smoke test for candidate upgrades, including a clear diagnostic for the upstream `agent-presets` unscoped-context failure;
 - upgrade compatibility guidance requiring a pre-upgrade session resume check on copied data.
+
+### Fixed
+
+- pass `DSH_PUBLIC_HOST` to the upstream `dsh web --trusted-host` option so authenticated reverse-proxy requests can reach plugin routes protected by DSH's browser-trust fence, including lazy-loaded UI bundles.
 
 ## 0.1.0 - 2026-08-28
 

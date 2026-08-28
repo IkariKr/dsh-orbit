@@ -48,6 +48,7 @@ The container is considered ready only after the profile-local patch has been ap
 At minimum verify:
 
 - the DSH web UI loads;
+- a lazy-loaded plugin asset or route that uses the upstream browser-trust fence loads through the public host;
 - `settings.describe` succeeds through the authenticated gateway;
 - the response reports a writable settings provider when expected;
 - a no-op `settings.mutate` succeeds on a safe namespace;

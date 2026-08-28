@@ -14,7 +14,7 @@ dsh_pid=""
 rm -f "$READY_FILE"
 
 start_dsh() {
-  node --expose-internals "$DSH_BIN" web --no-open &
+  node --expose-internals "$DSH_BIN" web --no-open --trusted-host "$DSH_PUBLIC_HOST" &
   dsh_pid=$!
 }
 

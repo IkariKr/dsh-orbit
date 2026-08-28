@@ -26,6 +26,8 @@ If the gateway is directly reachable by untrusted clients, use a proxy configura
 
 The DSH web service should listen only inside its container or private network. The example Compose file exposes only the gateway listener on host loopback.
 
+Orbit starts `dsh web` with the upstream `--trusted-host "$DSH_PUBLIC_HOST"` option. This is host admission for DSH and plugin routes, not authentication. It allows authenticated reverse-proxy traffic carrying the public authority to reach routes that use DSH's browser-trust fence, including lazy-loaded plugin bundles. Authentication remains the responsibility of the gateway, and privileged settings RPCs still require the Orbit internal proxy secret.
+
 Do not publish DSH port `3080` on a LAN or public interface.
 
 ## Local access
