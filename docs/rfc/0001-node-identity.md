@@ -1,6 +1,6 @@
 # RFC 0001: Node identity
 
-Status: Draft — pending maintainer review
+Status: Accepted (2026-08-29) for the v0.3 architecture
 Target milestone: 0.3 (node identity and registry)
 Depends on: v0.2.0 compatibility evidence (see "Upgrade-guard integration")
 
@@ -29,9 +29,13 @@ Rules:
 
 The v0.2 compatibility report is keyed to an exact Orbit revision and candidate DSH version. A node registration message carries the node ID plus the same identity tuple (Orbit version/revision, DSH version, compatibility profile), so the Hub attaches each compatibility report to a stable node rather than to a hostname. Re-registering a node under a new address keeps its compatibility history; a DSH upgrade on the node produces a new report against the same node ID.
 
+## Implementation prerequisites
+
+Before any v0.3 node-registry code is written, the pairing/bootstrap flow must be designed and closed: who mints the stable node ID, where it is persisted on the node, and how the first node-to-Hub credential is issued. The pairing flow is assumed but not yet designed.
+
 ## Unresolved questions
 
-- Where the stable node ID is first minted (node self-registration vs. Hub-issued pairing) — pairing flow is assumed but not designed here.
+- Where the stable node ID is first minted (node self-registration vs. Hub-issued pairing) — see the implementation prerequisite above.
 - Whether installation IDs should be exposed in the 0.3 registry at all or deferred to multi-Hub work.
 - Retention policy for address metadata history.
 - How node deletion interacts with archived compatibility reports (keep or cascade).

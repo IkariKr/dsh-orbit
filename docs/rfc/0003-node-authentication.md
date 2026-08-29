@@ -1,6 +1,6 @@
 # RFC 0003: Node authentication
 
-Status: Draft — pending maintainer review
+Status: Accepted (2026-08-29) for the v0.3 architecture
 Target milestone: 0.3 (node identity and registry)
 Depends on: 0001-node-identity; the v0.2 trust boundary
 
@@ -13,7 +13,7 @@ The v0.2 security model already establishes the pattern this RFC extends: a gate
 Every node has its own credential set, bound to its stable node ID:
 
 1. **Per-node node-to-Hub credential** — one secret per node, generated at registration, presented by the node to authenticate registration refreshes and heartbeats. Stored hashed on the Hub side where the Hub keeps state.
-2. **Per-node Hub-to-node trust continuation** — the node keeps its existing v0.2 gateway model. The Hub is just another authenticated client: it authenticates at the node's gateway (as any operator does) and the node's gateway injects the internal proxy secret. The Hub never receives the node's internal proxy secret in its own right; that secret remains gateway-held.
+2. **Per-node Hub-to-node trust continuation** — the node keeps its existing v0.2 gateway model. The Hub talks to each node through a per-node Hub service identity (never a reused operator account, and never a fleet-wide credential), authenticating at the node's gateway as any client does; the node's gateway injects the internal proxy secret. The Hub never receives the node's internal proxy secret in its own right; that secret remains gateway-held.
 3. **Independent revocation** — deleting or suspending one node's credential affects exactly that node. A compromised node credential is revoked by the operator with a single action and no fleet-wide re-keying.
 4. **Rotation** — rotation generates a new credential and keeps the old one valid for a bounded overlap window (default: 24 hours, operator-adjustable), so a node can be rotated without an outage. Revocation is immediate and separate from rotation.
 5. **Least privilege** — a node credential authorizes only the node's own registration surface: identity refresh, heartbeat/health, capability advertisement, and compatibility-report upload. Anything that executes on or mutates a node (sessions, settings, terminals, agents) flows through the node's existing authenticated gateway path under the v0.2 trust boundary, never through the node-registry credential.
@@ -23,6 +23,10 @@ Rules:
 - No mandatory fleet-wide permanent shared secret may exist in any 0.3 design.
 - Credentials are never logged, never embedded in reports, and never derivable from node IDs.
 - Credential issuance, rotation, and revocation are audited events with operator attribution.
+
+## Implementation prerequisites
+
+Two security boundaries must be designed separately before implementation: the registry **machine API** (node-to-Hub registration refreshes, heartbeats, report uploads) and the **browser management API** (operator-facing Hub UI). They serve different clients, and the browser trust requirements documented in the v0.2 model — Origin and Sec-Fetch-Site checks — must not be mechanically applied to machine-to-machine heartbeats; each surface needs its own fail-closed acceptance criteria in the live smoke methodology.
 
 ## Upgrade-guard integration
 

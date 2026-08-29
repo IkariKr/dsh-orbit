@@ -1,6 +1,6 @@
 # RFC 0004: Node health model
 
-Status: Draft — pending maintainer review
+Status: Accepted (2026-08-29) for the v0.3 architecture
 Target milestone: 0.3 (node identity and registry)
 Depends on: 0001-node-identity, 0002-node-capabilities, 0003-node-authentication; v0.2.0 compatibility evidence
 
