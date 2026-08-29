@@ -17,7 +17,7 @@ dsh-orbit:0.1.2-orbit.1
 
 ### 2. Snapshot persistent data
 
-Back up the DSH data directory before starting the candidate against production data.
+Back up the DSH data directory before starting the candidate against production data. The snapshot hook contract in [Snapshot and rollback](snapshot-rollback.md) makes this step machine-checkable: a failed or incomplete snapshot denies promotion readiness.
 
 Prefer testing with a copy of the data first. Upstream migrations can make image rollback insufficient on their own.
 
