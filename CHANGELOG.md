@@ -4,6 +4,17 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
+## 0.2.1 - 2026-08-29
+
+### Fixed
+
+- the candidate upgrade runner now binds its configuration to the actual Docker execution: a compose override carries the candidate image, copied data and workspace roots, and isolated loopback port, and the resolved `docker compose config` is verified against the candidate specification — plus a per-run token probe on the started stack — before any check runs;
+- snapshot manifests are bound to the snapshot request: any pre-existing manifest is removed before the hook runs, and after a zero exit the manifest must match the requested snapshot id, data root, Orbit revision, and data-producing DSH version, with a creation timestamp not older than the request;
+- `verify` and `report` can no longer print `eligible for manual promotion`: reports separate `compatibility` from `promotion readiness`, promotion readiness is evaluated only for a full candidate run, and a persisted snapshot failure permanently denies eligibility including across report regeneration;
+- promotion eligibility requires the exact candidate Orbit revision and compatibility profile plus the exact baseline rollback target (image, Orbit revision, DSH version);
+- the authorization smoke treats 5xx responses as failed cases rather than authorization denials;
+- a snapshot manifest may record the optional `candidateDshVersion` alongside the version that produced the data.
+
 ## 0.2.0 - 2026-08-29
 
 ### Added
