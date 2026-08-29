@@ -7,12 +7,15 @@
 # and writes the required manifest to DSH_SNAPSHOT_MANIFEST.
 #
 # Required environment (provided by the DSH Orbit upgrade runner):
-#   DSH_SNAPSHOT_ID        requested snapshot identifier
-#   DSH_DATA_ROOT          persistent data root directory
-#   DSH_ORBIT_REVISION     exact DSH Orbit revision to record
-#   DSH_VERSION            candidate DSH version to record
-#   DSH_SNAPSHOT_MANIFEST  manifest output path (JSON)
+#   DSH_SNAPSHOT_ID           requested snapshot identifier
+#   DSH_DATA_ROOT             persistent data root directory
+#   DSH_ORBIT_REVISION        exact DSH Orbit revision to record
+#   DSH_VERSION               DSH version that produced the data (pre-upgrade)
+#   DSH_SNAPSHOT_MANIFEST     manifest output path (JSON)
 #   DSH_SNAPSHOT_ARCHIVE_DIR  optional archive directory (default: next to the manifest)
+#
+# Optional environment:
+#   DSH_CANDIDATE_DSH_VERSION candidate DSH version the upgrade moves to
 #
 # Exit behavior: 0 and a completed manifest on success, non-zero on failure.
 # The manifest must never contain storage credentials.
@@ -38,6 +41,12 @@ data_name="$(basename "$DSH_DATA_ROOT")"
 tar -czf "$archive" -C "$data_parent" "$data_name"
 
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+candidate_json=""
+if [ -n "${DSH_CANDIDATE_DSH_VERSION:-}" ]; then
+  candidate_json=",
+  \"candidateDshVersion\": \"$DSH_CANDIDATE_DSH_VERSION\""
+fi
+
 cat > "$DSH_SNAPSHOT_MANIFEST" <<EOF
 {
   "snapshotId": "$DSH_SNAPSHOT_ID",
@@ -47,7 +56,7 @@ cat > "$DSH_SNAPSHOT_MANIFEST" <<EOF
   "dataRoot": "$DSH_DATA_ROOT",
   "method": "tar-gz-reference",
   "restoreReference": "$archive",
-  "status": "complete"
+  "status": "complete"$candidate_json
 }
 EOF
 

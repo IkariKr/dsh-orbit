@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 
 export const SNAPSHOT_MANIFEST_FIELDS = Object.freeze([
@@ -12,7 +12,11 @@ export const SNAPSHOT_MANIFEST_FIELDS = Object.freeze([
   "status",
 ]);
 
+export const SNAPSHOT_OPTIONAL_MANIFEST_FIELDS = Object.freeze(["candidateDshVersion"]);
+
 export const SNAPSHOT_COMPLETED_STATUS = "complete";
+
+export const SNAPSHOT_CLOCK_TOLERANCE_MS = 5000;
 
 const RUNNERS = new Map([
   [".mjs", "node"],
@@ -36,7 +40,8 @@ export function validateSnapshotManifest(manifest) {
   if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) {
     return { ok: false, error: "snapshot manifest must be a JSON object" };
   }
-  const unknown = Object.keys(manifest).filter((field) => !SNAPSHOT_MANIFEST_FIELDS.includes(field));
+  const known = new Set([...SNAPSHOT_MANIFEST_FIELDS, ...SNAPSHOT_OPTIONAL_MANIFEST_FIELDS]);
+  const unknown = Object.keys(manifest).filter((field) => !known.has(field));
   if (unknown.length > 0) {
     return { ok: false, error: `snapshot manifest has unknown fields: ${unknown.join(", ")}` };
   }
@@ -45,6 +50,15 @@ export function validateSnapshotManifest(manifest) {
   );
   if (missing.length > 0) {
     return { ok: false, error: `snapshot manifest is missing required fields: ${missing.join(", ")}` };
+  }
+  const optionalInvalid = SNAPSHOT_OPTIONAL_MANIFEST_FIELDS.filter(
+    (field) => manifest[field] !== undefined && (typeof manifest[field] !== "string" || manifest[field].trim() === ""),
+  );
+  if (optionalInvalid.length > 0) {
+    return {
+      ok: false,
+      error: `snapshot manifest optional fields must be non-empty strings when present: ${optionalInvalid.join(", ")}`,
+    };
   }
   if (manifest.status !== SNAPSHOT_COMPLETED_STATUS) {
     return { ok: false, error: `snapshot manifest status is not ${SNAPSHOT_COMPLETED_STATUS}` };
@@ -76,6 +90,7 @@ export async function runSnapshotHook({
   dataRoot,
   orbitRevision,
   dshVersion,
+  candidateDshVersion,
   timeoutSeconds = 900,
   spawnImpl = spawn,
 }) {
@@ -86,18 +101,23 @@ export async function runSnapshotHook({
     return { ok: false, error: error.message };
   }
 
+  await rm(manifestPath, { force: true });
+  const startedAt = Date.now();
+
   const timedOut = { value: false };
+  const hookEnv = {
+    ...process.env,
+    DSH_SNAPSHOT_ID: snapshotId,
+    DSH_DATA_ROOT: dataRoot,
+    DSH_ORBIT_REVISION: orbitRevision,
+    DSH_VERSION: dshVersion,
+    DSH_SNAPSHOT_MANIFEST: manifestPath,
+  };
+  if (candidateDshVersion) hookEnv.DSH_CANDIDATE_DSH_VERSION = candidateDshVersion;
   try {
     const exit = await new Promise((resolve) => {
       const child = spawnImpl(runner, [hookPath], {
-        env: {
-          ...process.env,
-          DSH_SNAPSHOT_ID: snapshotId,
-          DSH_DATA_ROOT: dataRoot,
-          DSH_ORBIT_REVISION: orbitRevision,
-          DSH_VERSION: dshVersion,
-          DSH_SNAPSHOT_MANIFEST: manifestPath,
-        },
+        env: hookEnv,
         stdio: "inherit",
       });
       const guard = setTimeout(() => {
@@ -130,7 +150,35 @@ export async function runSnapshotHook({
   }
 
   const result = await readSnapshotManifest(manifestPath);
-  return result.ok ? result : { ...result, hookCompleted: true };
+  if (!result.ok) return result;
+  const binding = bindSnapshotManifest(result.manifest, {
+    snapshotId,
+    dataRoot,
+    orbitRevision,
+    dshVersion,
+    startedAt,
+  });
+  return binding.ok ? result : binding;
+}
+
+export function bindSnapshotManifest(manifest, request) {
+  const mismatched = ["snapshotId", "dataRoot", "orbitRevision", "dshVersion"].filter(
+    (field) => manifest[field] !== request[field],
+  );
+  if (mismatched.length > 0) {
+    return {
+      ok: false,
+      error: `snapshot manifest does not match this snapshot request (mismatched fields: ${mismatched.join(", ")})`,
+    };
+  }
+  const createdAt = Date.parse(manifest.createdAt);
+  if (Number.isNaN(createdAt)) {
+    return { ok: false, error: "snapshot manifest createdAt is not a valid timestamp" };
+  }
+  if (createdAt < request.startedAt - SNAPSHOT_CLOCK_TOLERANCE_MS) {
+    return { ok: false, error: "snapshot manifest createdAt predates the snapshot request" };
+  }
+  return { ok: true };
 }
 
 export function promotionReadiness(snapshotResult) {

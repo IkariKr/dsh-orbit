@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  bindSnapshotManifest,
   promotionReadiness,
   readSnapshotManifest,
   runSnapshotHook,
@@ -42,6 +43,7 @@ function hookArguments(dir, overrides = {}) {
     dataRoot: join(dir, "data"),
     orbitRevision: ORBIT_REVISION,
     dshVersion: "0.1.1-rc.2",
+    candidateDshVersion: "0.2.0-candidate",
     timeoutSeconds: 60,
     ...overrides,
   };
@@ -70,6 +72,7 @@ referenceHookTest("the reference snapshot hook completes and produces a valid ma
     assert.equal(result.manifest.status, "complete");
     assert.equal(result.manifest.orbitRevision, ORBIT_REVISION);
     assert.equal(result.manifest.dshVersion, "0.1.1-rc.2");
+    assert.equal(result.manifest.candidateDshVersion, "0.2.0-candidate");
     assert.equal(result.manifest.dataRoot, join(dir, "data"));
     assert.equal(result.manifest.method, "tar-gz-reference");
 
@@ -98,6 +101,84 @@ test("a hook that exits zero without writing a manifest is a failure", async () 
     assert.match(result.error, /manifest was not written/);
     assert.equal(promotionReadiness(result).ready, false);
   });
+});
+
+test("a manifest left over from a previous request cannot satisfy this request", async () => {
+  await withTempDir(async (dir) => {
+    const hookPath = await writeHook(dir, "silent.sh", "#!/bin/sh\nexit 0\n");
+    const manifestPath = join(dir, "manifest.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        snapshotId: "snap-OLD",
+        createdAt: "2026-08-29T00:00:00Z",
+        orbitRevision: "oldrev",
+        dshVersion: "oldver",
+        dataRoot: "/old/data",
+        method: "tar-gz-reference",
+        restoreReference: "/old/backups/snap-OLD.tar.gz",
+        status: "complete",
+      }),
+      "utf8",
+    );
+
+    const result = await runSnapshotHook(hookArguments(dir, { hookPath, manifestPath }));
+    assert.equal(result.ok, false, "a stale manifest must not be reported as a fresh snapshot");
+    assert.match(result.error, /manifest was not written/);
+    assert.equal(promotionReadiness(result).ready, false);
+  });
+});
+
+test("a manifest that does not match the request tuple is rejected", async () => {
+  await withTempDir(async (dir) => {
+    const hookPath = await writeHook(
+      dir,
+      "wrong-tuple.sh",
+      '#!/bin/sh\nprintf \'%s\' \'{"snapshotId":"snap-OTHER","createdAt":"%s","orbitRevision":"%s","dshVersion":"%s","dataRoot":"%s","method":"m","restoreReference":"rr","status":"complete"}\' > "$DSH_SNAPSHOT_MANIFEST"\n',
+    );
+    const result = await runSnapshotHook(hookArguments(dir, { hookPath }));
+    assert.equal(result.ok, false);
+    assert.match(
+      result.error,
+      /mismatched fields: snapshotId, dataRoot, orbitRevision, dshVersion/,
+    );
+    assert.equal(promotionReadiness(result).ready, false);
+  });
+});
+
+test("bindSnapshotManifest validates tuple and creation time", () => {
+  const request = {
+    snapshotId: "snap-1",
+    dataRoot: "/data",
+    orbitRevision: ORBIT_REVISION,
+    dshVersion: "0.1.1-rc.2",
+    startedAt: Date.parse("2026-08-29T08:00:00Z"),
+  };
+  const manifest = (createdAt) => ({
+    snapshotId: "snap-1",
+    createdAt,
+    orbitRevision: ORBIT_REVISION,
+    dshVersion: "0.1.1-rc.2",
+    dataRoot: "/data",
+    method: "tar-gz-reference",
+    restoreReference: "/backups/snap-1.tar.gz",
+    status: "complete",
+  });
+
+  assert.equal(bindSnapshotManifest(manifest("2026-08-29T08:00:02Z"), request).ok, true);
+  assert.equal(bindSnapshotManifest(manifest("2026-08-29T07:59:58Z"), request).ok, true, "within clock tolerance");
+
+  const stale = bindSnapshotManifest(manifest("2026-08-28T23:59:00Z"), request);
+  assert.equal(stale.ok, false);
+  assert.match(stale.error, /createdAt predates the snapshot request/);
+
+  const invalid = bindSnapshotManifest(manifest("not-a-timestamp"), request);
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.error, /createdAt is not a valid timestamp/);
+
+  const wrongId = bindSnapshotManifest({ ...manifest("2026-08-29T08:00:02Z"), snapshotId: "snap-2" }, request);
+  assert.equal(wrongId.ok, false);
+  assert.match(wrongId.error, /mismatched fields: snapshotId/);
 });
 
 test("incomplete manifests are rejected with field names only", async () => {
