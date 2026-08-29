@@ -158,16 +158,17 @@ npm run upgrade -- verify      # verification sequence plus report against a run
 npm run upgrade -- report      # regenerate the report from the run directory
 ```
 
-Configuration comes from the environment: `DSH_VERSION` (candidate), `DSH_PUBLIC_HOST`, `DSH_SMOKE_URL` (the isolated candidate endpoint), `DSH_SMOKE_BASIC_USER`/`DSH_SMOKE_BASIC_PASSWORD`, `DSH_SMOKE_SESSION_ID` (a pre-upgrade session), `DSH_DATA_ROOT` (production data), `DSH_CANDIDATE_DATA_ROOT` (the copied data the candidate uses), `DSH_BASELINE_IMAGE` (last known-good image tag), `DSH_ORBIT_REVISION`, and `DSH_SNAPSHOT_HOOK`. Optional: `DSH_CANDIDATE_IMAGE`, `DSH_UPGRADE_PROJECT`, `DSH_UPGRADE_COMPOSE`, `DSH_UPGRADE_WORKDIR`, `DSH_SNAPSHOT_TIMEOUT_SECONDS`.
+Configuration comes from the environment. Candidate identity: `DSH_VERSION` (candidate DSH version), `DSH_CANDIDATE_ORBIT_REVISION` (the Orbit revision the candidate is built from), `DSH_CANDIDATE_IMAGE`, `DSH_CANDIDATE_DATA_ROOT`, `DSH_CANDIDATE_WORKSPACE_ROOT`, `DSH_UPGRADE_HOST_PORT` (the isolated loopback port). Baseline identity (the rollback target): `DSH_BASELINE_IMAGE`, `DSH_BASELINE_ORBIT_REVISION`, `DSH_BASELINE_DSH_VERSION`. Gateway and checks: `DSH_PUBLIC_HOST`, `DSH_SMOKE_URL` (the candidate endpoint), `DSH_SMOKE_BASIC_USER`/`DSH_SMOKE_BASIC_PASSWORD`, `DSH_SMOKE_SESSION_ID` (a pre-upgrade session), `DSH_SMOKE_ORIGIN` (when the gateway rewrites the Host), `DSH_DATA_ROOT` (production data), `DSH_SNAPSHOT_HOOK`. Optional: `DSH_ORBIT_VERSION`, `DSH_UPGRADE_PROJECT`, `DSH_UPGRADE_COMPOSE`, `DSH_UPGRADE_WORKDIR`, `DSH_SNAPSHOT_TIMEOUT_SECONDS`.
 
 The runner:
 
-1. runs the production snapshot hook and denies promotion readiness when it fails;
-2. builds the candidate without replacing the last known-good image tag — the build fails on unsupported versions or source-layout mismatches;
-3. starts the candidate against the copied data on an isolated endpoint; production keeps running;
-4. executes the verification sequence in a deterministic order (runtime readiness, patch verification, settings read, no-op settings write, live authorization smoke, existing-session resume, web/plugin routes, and the release-limited long-lived transport and terminal checks);
+1. runs the production snapshot hook and denies promotion readiness when it fails; the failure is recorded in the run evidence, so regenerating a report cannot restore eligibility;
+2. generates a compose override from the candidate specification (image, copied data and workspace roots, isolated loopback port) and verifies the *resolved* `docker compose config` against it — image, `/data` and `/workspace` mounts, published port, project name, and a per-run candidate token must all match before anything is built or started;
+3. builds the candidate without replacing the last known-good image tag — the build fails on unsupported versions or source-layout mismatches — then starts it against the copied data on the isolated endpoint; production keeps running;
+4. verifies the running stack carries this run's candidate token, then executes the verification sequence in a deterministic order (runtime readiness, patch verification, settings read, no-op settings write, live authorization smoke, existing-session resume, web/plugin routes, and the release-limited long-lived transport and terminal checks);
 5. stops at the first required failure, marks the remaining checks `not_run`, and still produces a final sanitized report;
-6. exits `0` only for a passed candidate, `1` for a failed candidate, and `2` for configuration or usage errors.
+6. reports `compatibility` and `promotion readiness` separately: promotion readiness is eligible only when every required check passed, the exact candidate and baseline identities are recorded, and the snapshot completed; `verify` never evaluates promotion readiness;
+7. exits `0` only for a passed candidate or a passing verification, `1` for a failure, and `2` for configuration or binding errors.
 
 ## Development
 

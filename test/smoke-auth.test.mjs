@@ -181,6 +181,21 @@ test("reports gateway rejections without echoing response bodies", async () => {
   assert.ok(!stderr.includes(TEST_PASSWORD));
 });
 
+test("a server error is a failed case, not a denied case", async () => {
+  const { code, stderr } = await withServer(
+    async (req, res) => {
+      const request = await readRequest(req);
+      res.writeHead(503, { "content-type": "text/plain" });
+      res.end("gateway overloaded");
+    },
+    (baseUrl) => runSmoke(baseUrl),
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /FAIL authenticated same-origin settings\.describe: request error, expected allowed \(HTTP 503 server error\)/);
+  assert.match(stderr, /FAIL unauthenticated privileged RPC: request error, expected denied \(HTTP 503 server error\)/);
+  assert.ok(!stderr.includes("got denied (HTTP 503"), "server errors must not count as authorization denials");
+});
+
 test("honors DSH_SMOKE_ORIGIN when the gateway rewrites the Host", async () => {
   const captured = [];
   const { code, stdout } = await withServer(fenceHandler(captured, "https://dsh.example.com"), (baseUrl) =>

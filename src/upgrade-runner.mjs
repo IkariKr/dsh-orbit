@@ -1,12 +1,14 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
+import { randomUUID } from "node:crypto";
 
 import { compatibilityFor } from "./compatibility.mjs";
 import { validateHost } from "./remote-settings-patch.mjs";
 import { runSnapshotHook } from "./snapshot-contract.mjs";
 import {
-  DECISION_OUTCOMES,
+  COMPATIBILITY_OUTCOMES,
+  PROMOTION_OUTCOMES,
   createCompatibilityReport,
   renderReportJson,
   renderReportText,
@@ -18,6 +20,7 @@ const SMOKE_SETTINGS = fileURLToPath(new URL("../scripts/smoke-settings.mjs", im
 const SMOKE_AUTH = fileURLToPath(new URL("../scripts/smoke-auth.mjs", import.meta.url));
 const SMOKE_SESSION = fileURLToPath(new URL("../scripts/smoke-session-resume.mjs", import.meta.url));
 const PATCHER = "/usr/local/lib/dsh-orbit/bin/dsh-orbit-patch.mjs";
+const CANDIDATE_TOKEN_ENV = "DSH_ORBIT_CANDIDATE_TOKEN";
 
 export const UPGRADE_CHECK_ORDER = Object.freeze([
   "runtimeReadiness",
@@ -32,19 +35,114 @@ export const UPGRADE_CHECK_ORDER = Object.freeze([
   "terminalPtty",
 ]);
 
+export class UpgradeBindingError extends Error {}
+
+function quoteYaml(value) {
+  return JSON.stringify(String(value));
+}
+
+export function generateComposeOverride(config, candidateToken) {
+  return [
+    "services:",
+    "  dsh:",
+    `    image: ${quoteYaml(config.candidateImage)}`,
+    "    environment:",
+    `      ${CANDIDATE_TOKEN_ENV}: ${quoteYaml(candidateToken)}`,
+    "    volumes:",
+    `      - ${quoteYaml(`${config.candidateDataRoot}:/data:rw`)}`,
+    `      - ${quoteYaml(`${config.candidateWorkspaceRoot}:/workspace:rw`)}`,
+    "    ports:",
+    `      - ${quoteYaml(`127.0.0.1:${config.candidateHostPort}:9443`)}`,
+    "",
+  ].join("\n");
+}
+
+function resolvedPortOf(entry) {
+  const published = entry?.published ?? entry?.Published ?? "";
+  return String(published).split(":").pop();
+}
+
+function resolvedSourceOf(volume) {
+  return volume?.source ?? volume?.Source ?? "";
+}
+
+function resolvedTargetOf(volume) {
+  return volume?.target ?? volume?.Destination ?? "";
+}
+
+export function verifyResolvedComposeConfig(resolved, config) {
+  const problems = [];
+  if (resolved?.name !== config.project) {
+    problems.push(`resolved project name ${JSON.stringify(resolved?.name)} is not ${JSON.stringify(config.project)}`);
+  }
+  const dsh = resolved?.services?.dsh;
+  if (!dsh) {
+    problems.push("resolved configuration has no dsh service");
+    throw new UpgradeBindingError(`candidate compose binding verification failed: ${problems.join("; ")}`);
+  }
+  if (dsh.image !== config.candidateImage) {
+    problems.push(`resolved image ${JSON.stringify(dsh.image)} is not the candidate image ${JSON.stringify(config.candidateImage)}`);
+  }
+  const volumes = dsh.volumes ?? [];
+  const dataVolume = volumes.find((volume) => resolvedTargetOf(volume) === "/data");
+  if (!dataVolume || resolvedSourceOf(dataVolume) !== config.candidateDataRoot) {
+    problems.push(
+      `resolved /data mount ${JSON.stringify(dataVolume ? resolvedSourceOf(dataVolume) : null)}` +
+        ` is not the candidate data root ${JSON.stringify(config.candidateDataRoot)}`,
+    );
+  }
+  const workspaceVolume = volumes.find((volume) => resolvedTargetOf(volume) === "/workspace");
+  if (!workspaceVolume || resolvedSourceOf(workspaceVolume) !== config.candidateWorkspaceRoot) {
+    problems.push(
+      `resolved /workspace mount ${JSON.stringify(workspaceVolume ? resolvedSourceOf(workspaceVolume) : null)}` +
+        ` is not the candidate workspace root ${JSON.stringify(config.candidateWorkspaceRoot)}`,
+    );
+  }
+  const port = (dsh.ports ?? []).find((entry) => String(entry?.target) === "9443");
+  if (!port) {
+    problems.push("resolved configuration publishes no 9443 port");
+  } else {
+    const publishedPort = resolvedPortOf(port);
+    if (publishedPort !== String(config.candidateHostPort)) {
+      problems.push(
+        `resolved published port ${JSON.stringify(publishedPort)} is not the candidate port ${JSON.stringify(String(config.candidateHostPort))}`,
+      );
+    }
+  }
+  const environment = dsh.environment ?? {};
+  if (environment[CANDIDATE_TOKEN_ENV] !== undefined) {
+    const tokenValue =
+      typeof environment[CANDIDATE_TOKEN_ENV] === "string"
+        ? environment[CANDIDATE_TOKEN_ENV]
+        : environment[CANDIDATE_TOKEN_ENV]?.value;
+    if (tokenValue === undefined || tokenValue === "") {
+      problems.push(`resolved configuration does not set ${CANDIDATE_TOKEN_ENV}`);
+    }
+  } else {
+    problems.push(`resolved configuration does not set ${CANDIDATE_TOKEN_ENV}`);
+  }
+  if (problems.length > 0) {
+    throw new UpgradeBindingError(`candidate compose binding verification failed: ${problems.join("; ")}`);
+  }
+}
+
 export function loadUpgradeConfig(env) {
-  const dshVersion = env.DSH_VERSION;
   const required = {
-    "DSH_VERSION (candidate DSH version)": dshVersion,
+    "DSH_VERSION (candidate DSH version)": env.DSH_VERSION,
     "DSH_PUBLIC_HOST (bare public hostname)": env.DSH_PUBLIC_HOST,
+    "DSH_CANDIDATE_ORBIT_REVISION (candidate Orbit revision)": env.DSH_CANDIDATE_ORBIT_REVISION,
+    "DSH_BASELINE_IMAGE (last known-good image tag)": env.DSH_BASELINE_IMAGE,
+    "DSH_BASELINE_ORBIT_REVISION (production Orbit revision)": env.DSH_BASELINE_ORBIT_REVISION,
+    "DSH_BASELINE_DSH_VERSION (production DSH version)": env.DSH_BASELINE_DSH_VERSION,
+    "DSH_CANDIDATE_IMAGE (candidate image tag)": env.DSH_CANDIDATE_IMAGE,
+    "DSH_CANDIDATE_DATA_ROOT (copied candidate data)": env.DSH_CANDIDATE_DATA_ROOT,
+    "DSH_CANDIDATE_WORKSPACE_ROOT (copied candidate workspace)": env.DSH_CANDIDATE_WORKSPACE_ROOT,
+    "DSH_UPGRADE_HOST_PORT (candidate loopback port)": env.DSH_UPGRADE_HOST_PORT,
+    "DSH_DATA_ROOT (production data root)": env.DSH_DATA_ROOT,
     "DSH_SMOKE_URL (candidate endpoint)": env.DSH_SMOKE_URL,
     "DSH_SMOKE_BASIC_USER": env.DSH_SMOKE_BASIC_USER,
     "DSH_SMOKE_BASIC_PASSWORD": env.DSH_SMOKE_BASIC_PASSWORD,
     "DSH_SMOKE_SESSION_ID (historical session)": env.DSH_SMOKE_SESSION_ID,
-    "DSH_DATA_ROOT (production data root)": env.DSH_DATA_ROOT,
-    "DSH_CANDIDATE_DATA_ROOT (copied candidate data)": env.DSH_CANDIDATE_DATA_ROOT,
-    "DSH_BASELINE_IMAGE (last known-good image tag)": env.DSH_BASELINE_IMAGE,
-    "DSH_ORBIT_REVISION (baseline identity)": env.DSH_ORBIT_REVISION,
     "DSH_SNAPSHOT_HOOK (snapshot capability)": env.DSH_SNAPSHOT_HOOK,
   };
   const missing = Object.keys(required).filter((name) => !required[name]);
@@ -52,21 +150,25 @@ export function loadUpgradeConfig(env) {
   return {
     missing,
     config: {
-      dshVersion,
-      publicHost: env.DSH_PUBLIC_HOST,
+      dshVersion: env.DSH_VERSION,
+      orbitRevision: env.DSH_CANDIDATE_ORBIT_REVISION,
+      orbitVersion: env.DSH_ORBIT_VERSION ?? "0.2.0-snapshot",
+      baselineImage: env.DSH_BASELINE_IMAGE,
+      baselineOrbitRevision: env.DSH_BASELINE_ORBIT_REVISION,
+      baselineDshVersion: env.DSH_BASELINE_DSH_VERSION,
+      candidateImage: env.DSH_CANDIDATE_IMAGE,
+      candidateDataRoot: env.DSH_CANDIDATE_DATA_ROOT,
+      candidateWorkspaceRoot: env.DSH_CANDIDATE_WORKSPACE_ROOT,
+      candidateHostPort: env.DSH_UPGRADE_HOST_PORT ? Number(env.DSH_UPGRADE_HOST_PORT) : null,
+      productionDataRoot: env.DSH_DATA_ROOT,
       candidateEndpoint: env.DSH_SMOKE_URL,
+      publicHost: env.DSH_PUBLIC_HOST,
       basicUser: env.DSH_SMOKE_BASIC_USER,
       basicPassword: env.DSH_SMOKE_BASIC_PASSWORD,
-      sessionId: env.DSH_SMOKE_SESSION_ID,
-      dataRoot: env.DSH_DATA_ROOT,
-      candidateDataRoot: env.DSH_CANDIDATE_DATA_ROOT,
-      baselineImage: env.DSH_BASELINE_IMAGE,
-      orbitRevision: env.DSH_ORBIT_REVISION,
-      orbitVersion: env.DSH_ORBIT_VERSION ?? "0.2.0-snapshot",
-      snapshotHook: env.DSH_SNAPSHOT_HOOK,
       smokeOrigin: env.DSH_SMOKE_ORIGIN,
+      sessionId: env.DSH_SMOKE_SESSION_ID,
+      snapshotHook: env.DSH_SNAPSHOT_HOOK,
       snapshotTimeoutSeconds: Number(env.DSH_SNAPSHOT_TIMEOUT_SECONDS ?? 900),
-      candidateImage: env.DSH_CANDIDATE_IMAGE ?? `dsh-orbit:${dshVersion}`,
       project: env.DSH_UPGRADE_PROJECT ?? "dsh-orbit-candidate",
       composeFile: env.DSH_UPGRADE_COMPOSE ?? `${REPO_ROOT}docker/compose.example.yaml`,
       workdir: env.DSH_UPGRADE_WORKDIR ?? `${REPO_ROOT}.upgrade-run`,
@@ -86,6 +188,16 @@ export async function preflight(config) {
     config.candidateImage !== config.baselineImage,
     `candidate image ${config.candidateImage} must differ from the last known-good image ${config.baselineImage}`,
   );
+  check(
+    "candidate-host-port",
+    Number.isInteger(config.candidateHostPort) && config.candidateHostPort >= 1 && config.candidateHostPort <= 65535,
+    `candidate host port ${JSON.stringify(config.candidateHostPort)} must be an integer between 1 and 65535`,
+  );
+  check(
+    "copied-data-root",
+    config.candidateDataRoot !== config.productionDataRoot,
+    "the candidate data root must be a copy, not the production data root",
+  );
   try {
     validateHost(config.publicHost);
   } catch (error) {
@@ -96,20 +208,26 @@ export async function preflight(config) {
   } catch (error) {
     check("compatibility-profile", false, error.message);
   }
-  check(
-    "copied-data-root",
-    config.candidateDataRoot !== config.dataRoot,
-    "the candidate data root must be a copy, not the production data root",
-  );
   for (const [label, dir] of [
-    ["data-root", config.dataRoot],
+    ["production-data-root", config.productionDataRoot],
     ["candidate-data-root", config.candidateDataRoot],
+    ["candidate-workspace-root", config.candidateWorkspaceRoot],
   ]) {
     try {
       await access(dir);
     } catch {
       check(label, false, `${dir} is not available`);
     }
+  }
+  const endpointHost = new URL(config.candidateEndpoint).hostname;
+  if (["127.0.0.1", "localhost", "[::1]"].includes(endpointHost)) {
+    const endpointPort = new URL(config.candidateEndpoint).port;
+    check(
+      "endpoint-binding",
+      endpointPort === String(config.candidateHostPort),
+      `a loopback candidate endpoint must use the candidate host port ${config.candidateHostPort}` +
+        ` (endpoint uses ${endpointPort || "no port"})`,
+    );
   }
   check(
     "snapshot-capability",
@@ -151,6 +269,44 @@ function failDetail(output, fallback) {
   return line ?? fallback;
 }
 
+function composeArgs(config, ...subcommand) {
+  return [
+    "compose",
+    "-f",
+    config.composeFile,
+    "-f",
+    `${config.workdir}/compose.override.yaml`,
+    "-p",
+    config.project,
+    ...subcommand,
+  ];
+}
+
+export async function resolveCandidateBinding({ config, runCommand = defaultRunCommand }) {
+  const resolved = await runCommand("docker", composeArgs(config, "config", "--format", "json"));
+  if (resolved.code !== 0) {
+    throw new UpgradeBindingError(
+      `docker compose config failed: ${failDetail(resolved.stderr, `exit ${resolved.code}`)}`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(resolved.stdout);
+  } catch {
+    throw new UpgradeBindingError("docker compose config did not return valid JSON");
+  }
+  verifyResolvedComposeConfig(parsed, config);
+}
+
+export async function probeCandidateToken({ config, candidateToken, runCommand = defaultRunCommand }) {
+  const probe = await runCommand("docker", composeArgs(config, "exec", "-T", "dsh", "printenv", CANDIDATE_TOKEN_ENV));
+  if (probe.code !== 0 || probe.stdout.trim() !== candidateToken) {
+    throw new UpgradeBindingError(
+      `candidate stack identity mismatch: the running dsh container does not carry this run's candidate token`,
+    );
+  }
+}
+
 export async function runVerificationSequence({ config, runCommand = defaultRunCommand, fetchPage = defaultFetchPage }) {
   const checks = {};
   let stoppedAfter = null;
@@ -189,19 +345,7 @@ export async function runVerificationSequence({ config, runCommand = defaultRunC
       names: ["globalPatch", "profilePatch"],
       required: true,
       run: async () => {
-        const patch = await runCommand("docker", [
-          "compose",
-          "-f",
-          config.composeFile,
-          "-p",
-          config.project,
-          "exec",
-          "-T",
-          "dsh",
-          "node",
-          PATCHER,
-          "--check",
-        ]);
+        const patch = await runCommand("docker", composeArgs(config, "exec", "-T", "dsh", "node", PATCHER, "--check"));
         const roots = patch.stdout
           .split("\n")
           .filter((line) => line.startsWith("/"))
@@ -296,20 +440,8 @@ export async function runVerificationSequence({ config, runCommand = defaultRunC
   return { checks, stoppedAfter };
 }
 
-function applySnapshotGate(report, snapshotFailure) {
-  if (!snapshotFailure) return report;
-  const reasons = report.decision.reasons.includes(`snapshot=${snapshotFailure}`)
-    ? report.decision.reasons
-    : [...report.decision.reasons, `snapshot=${snapshotFailure}`];
-  return {
-    ...report,
-    snapshot: { reference: null },
-    decision: { outcome: DECISION_OUTCOMES.notEligible, reasons },
-  };
-}
-
-async function finalizeReport({ config, evidence, snapshotFailure, runCommand, fetchPage }) {
-  const report = applySnapshotGate(createCompatibilityReport(evidence), snapshotFailure);
+async function finalizeReport({ config, evidence }) {
+  const report = createCompatibilityReport(evidence);
   await mkdir(config.workdir, { recursive: true });
   await writeFile(`${config.workdir}/evidence.json`, JSON.stringify(evidence, null, 2) + "\n", "utf8");
   await writeFile(`${config.workdir}/report.json`, renderReportJson(report) + "\n", "utf8");
@@ -323,10 +455,21 @@ export async function runCandidateWorkflow({
   snapshotHook = runSnapshotHook,
 }) {
   const evidence = {
+    promotionEvaluated: true,
     orbit: { version: config.orbitVersion, revision: config.orbitRevision },
-    candidate: { dshVersion: config.dshVersion, profile: null },
+    baseline: {
+      image: config.baselineImage,
+      orbitRevision: config.baselineOrbitRevision,
+      dshVersion: config.baselineDshVersion,
+    },
+    candidate: {
+      dshVersion: config.dshVersion,
+      profile: null,
+      image: config.candidateImage,
+      endpoint: config.candidateEndpoint,
+    },
     checks: {},
-    snapshot: { reference: null },
+    snapshot: { reference: null, failure: null },
   };
   try {
     compatibilityFor(config.dshVersion);
@@ -335,62 +478,55 @@ export async function runCandidateWorkflow({
     evidence.candidate.profile = null;
   }
 
-  let snapshotFailure = null;
-  if (config.snapshotHook) {
-    const snapshot = await snapshotHook({
-      hookPath: config.snapshotHook,
-      manifestPath: `${config.workdir}/snapshot-manifest.json`,
-      snapshotId: `pre-candidate-${new Date().toISOString().replaceAll(/[:.]/g, "-")}`,
-      dataRoot: config.dataRoot,
-      orbitRevision: config.orbitRevision,
-      dshVersion: config.dshVersion,
-      timeoutSeconds: config.snapshotTimeoutSeconds,
-    });
-    if (snapshot.ok) {
-      evidence.snapshot.reference = snapshot.manifest.restoreReference;
-    } else {
-      snapshotFailure = snapshot.error;
-    }
+  await mkdir(config.workdir, { recursive: true });
+  const candidateToken = randomUUID().replaceAll("-", "");
+
+  const snapshot = await snapshotHook({
+    hookPath: config.snapshotHook,
+    manifestPath: `${config.workdir}/snapshot-manifest.json`,
+    snapshotId: `pre-candidate-${new Date().toISOString().replaceAll(/[:.]/g, "-")}`,
+    dataRoot: config.productionDataRoot,
+    orbitRevision: config.orbitRevision,
+    dshVersion: config.baselineDshVersion,
+    candidateDshVersion: config.dshVersion,
+    timeoutSeconds: config.snapshotTimeoutSeconds,
+  });
+  if (snapshot.ok) {
+    evidence.snapshot.reference = snapshot.manifest.restoreReference;
+  } else {
+    evidence.snapshot.failure = snapshot.error;
   }
 
-  {
-    const build = await runCommand(
-      "docker",
-      ["compose", "-f", config.composeFile, "-p", config.project, "build"],
-      { env: { DSH_VERSION: config.dshVersion, DSH_PUBLIC_HOST: config.publicHost } },
-    );
-    if (build.code !== 0) {
-      evidence.checks.globalPatch = {
+  await writeFile(`${config.workdir}/compose.override.yaml`, generateComposeOverride(config, candidateToken), "utf8");
+  await resolveCandidateBinding({ config, runCommand });
+
+  const build = await runCommand("docker", composeArgs(config, "build"), {
+    env: { DSH_VERSION: config.dshVersion, DSH_PUBLIC_HOST: config.publicHost },
+  });
+  if (build.code !== 0) {
+    evidence.checks.globalPatch = {
+      status: "fail",
+      detail: "candidate build failed: unsupported version, source mismatch, or unverifiable patch",
+    };
+  } else {
+    const up = await runCommand("docker", composeArgs(config, "up", "-d", "--wait"));
+    if (up.code !== 0) {
+      evidence.checks.runtimeReadiness = {
         status: "fail",
-        detail: "candidate build failed: unsupported version, source mismatch, or unverifiable patch",
+        detail: "candidate stack did not become healthy on the isolated endpoint",
       };
     } else {
-      const up = await runCommand("docker", [
-        "compose",
-        "-f",
-        config.composeFile,
-        "-p",
-        config.project,
-        "up",
-        "-d",
-        "--wait",
-      ]);
-      if (up.code !== 0) {
-        evidence.checks.runtimeReadiness = {
-          status: "fail",
-          detail: "candidate stack did not become healthy on the isolated endpoint",
-        };
-      } else {
-        const { checks } = await runVerificationSequence({ config, runCommand, fetchPage });
-        evidence.checks = checks;
-      }
+      await probeCandidateToken({ config, candidateToken, runCommand });
+      const { checks } = await runVerificationSequence({ config, runCommand, fetchPage });
+      evidence.checks = checks;
     }
   }
 
-  const { report, text } = await finalizeReport({ config, evidence, snapshotFailure, runCommand, fetchPage });
-  const eligible = report.decision.outcome === DECISION_OUTCOMES.eligible;
+  const { report, text } = await finalizeReport({ config, evidence });
+  const eligible = report.promotionReadiness.outcome === PROMOTION_OUTCOMES.eligible;
   return {
     eligible,
+    compatible: report.compatibility.outcome === COMPATIBILITY_OUTCOMES.pass,
     exitCode: eligible ? 0 : 1,
     banner: eligible ? "CANDIDATE PASSED - ELIGIBLE FOR MANUAL PROMOTION" : "CANDIDATE FAILED - NOT ELIGIBLE FOR PROMOTION",
     report,

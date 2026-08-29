@@ -15,7 +15,8 @@ The upgrade runner invokes one downstream snapshot hook before production promot
 | `DSH_SNAPSHOT_ID` | requested snapshot identifier |
 | `DSH_DATA_ROOT` | persistent data root directory, or the downstream logical name for it |
 | `DSH_ORBIT_REVISION` | exact DSH Orbit revision to record in the manifest |
-| `DSH_VERSION` | candidate DSH version to record in the manifest |
+| `DSH_VERSION` | the DSH version that produced the data being snapshotted (the pre-upgrade version) |
+| `DSH_CANDIDATE_DSH_VERSION` | optional; the candidate version the upgrade would move to |
 | `DSH_SNAPSHOT_MANIFEST` | output path the hook must write its manifest to |
 | `DSH_SNAPSHOT_TIMEOUT_SECONDS` | runner-side timeout in seconds (default `900`) |
 
@@ -24,13 +25,15 @@ The upgrade runner invokes one downstream snapshot hook before production promot
 - exit `0` plus a completed manifest at `DSH_SNAPSHOT_MANIFEST` — the snapshot is complete;
 - any non-zero exit, a timeout, or a missing/invalid manifest — the snapshot failed and promotion readiness is denied.
 
-A completed manifest is a JSON object with exactly these fields, all non-empty strings:
+A completed manifest is a JSON object with exactly these required fields, all non-empty strings:
 
 ```text
 snapshotId, createdAt, orbitRevision, dshVersion, dataRoot, method, restoreReference, status
 ```
 
-`status` must be `complete`. Unknown fields are rejected fail-closed so storage credentials cannot ride along in the manifest. The manifest identifies the recovery point and must never embed storage credentials; validation errors report field names, never values.
+plus the optional `candidateDshVersion` field. `status` must be `complete`, and `dshVersion` records the version that produced the snapshotted data. Unknown fields are rejected fail-closed so storage credentials cannot ride along in the manifest. The manifest identifies the recovery point and must never embed storage credentials; validation errors report field names, never values.
+
+The runner removes any pre-existing manifest before invoking the hook and, after a zero exit, binds the manifest to the current request: `snapshotId`, `dataRoot`, `orbitRevision`, and `dshVersion` must match the request, and `createdAt` must be a valid timestamp not older than the request (within a small clock tolerance). A manifest left behind by an earlier run therefore cannot be mistaken for a fresh snapshot.
 
 The runner enforces `DSH_SNAPSHOT_TIMEOUT_SECONDS`, kills the hook on timeout, and treats the timeout as a failed snapshot. Secrets may be passed to the hook through the environment; they must not be printed, logged, or written into the manifest.
 

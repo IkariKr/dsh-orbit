@@ -56,6 +56,10 @@ async function probe(headers) {
   } catch (error) {
     return { outcome: "error", detail: redact(error?.cause?.code ?? error?.message ?? error) };
   }
+  if (response.status >= 500) {
+    await response.text().catch(() => "");
+    return { outcome: "error", detail: `HTTP ${response.status} server error` };
+  }
   if (response.status !== 200) {
     await response.text().catch(() => "");
     return { outcome: "denied", detail: `HTTP ${response.status}` };

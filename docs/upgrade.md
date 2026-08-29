@@ -103,12 +103,14 @@ Every check has an explicit state; missing evidence is never treated as a pass:
 - `fail` — the check ran and failed;
 - `not_run` — the check did not run in this validation round.
 
-`globalPatch`, `profilePatch`, `runtimeReadiness`, `settingsRead`, `settingsNoopWrite`, `authorizationSmoke`, and `sessionResume` are required. `terminalPtty` is recorded when tested. A tested failure of any check blocks promotion eligibility, and an unexecuted required check also blocks eligibility:
+`globalPatch`, `profilePatch`, `runtimeReadiness`, `settingsRead`, `settingsNoopWrite`, `authorizationSmoke`, `sessionResume`, and `webPluginRoutes` are required. `longLivedTransport` and `terminalPtty` are recorded when automated support exists.
 
-- `eligible-for-manual-promotion` — every required check passed and no tested check failed. This is still not a promotion: promoting production remains an explicit operator decision.
-- `not-eligible-for-promotion` — at least one required check failed or was not executed, or a tested check failed. The decision reasons name the blocking checks.
+The report separates two outcomes:
 
-The report records the exact Orbit version and revision and the exact candidate DSH version and compatibility profile whenever the evidence provides them.
+- **`compatibility`** — did the candidate pass its checks? `pass` requires every required check to have passed and no tested check to have failed. A compatibility pass says nothing about identities or snapshots.
+- **`promotion readiness`** — may an operator promote? Evaluated only for a full candidate run (`verify` reports `NOT EVALUATED`). Eligible requires all of: compatibility `pass`; the exact candidate Orbit revision and DSH compatibility profile recorded; the exact baseline (last known-good image, its Orbit revision, and its DSH version) recorded as the rollback target; and a completed snapshot reference. A persisted snapshot failure permanently denies eligibility, including when the report is regenerated from evidence.
+
+The decision reasons name every blocking item. Promotion remains an explicit operator decision even when eligible.
 
 ## Rollback
 

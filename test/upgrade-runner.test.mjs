@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import {
+  UpgradeBindingError,
   loadUpgradeConfig,
   preflight,
+  probeCandidateToken,
   runCandidateWorkflow,
 } from "../src/upgrade-runner.mjs";
-import { DECISION_OUTCOMES } from "../src/compatibility-report.mjs";
+import {
+  COMPATIBILITY_OUTCOMES,
+  PROMOTION_OUTCOMES,
+  createCompatibilityReport,
+} from "../src/compatibility-report.mjs";
 
 const PLUGIN_ASSET = "/plugins/@deepseek-ai/dsh-client-modules/client.js?rev=abc123";
 const PATCH_CHECK_STDOUT = [
@@ -31,19 +37,24 @@ async function withTempDir(run) {
 function fixtureConfig(workdir, overrides = {}) {
   return {
     dshVersion: "0.1.1-rc.2",
+    orbitRevision: "386e4d1aa825c41446e2e5eebb67bfe7570564b1",
+    orbitVersion: "0.1.1",
+    baselineImage: "dsh-orbit:0.1.1-rc.2-production.4",
+    baselineOrbitRevision: "8f3094e6d09c9337569f5cc1f965f8bd3d01e7d9",
+    baselineDshVersion: "0.1.1-rc.2",
+    candidateImage: "dsh-orbit:0.1.1-rc.2",
+    candidateDataRoot: "/srv/dsh-candidate/data",
+    candidateWorkspaceRoot: "/srv/dsh-candidate/workspace",
+    candidateHostPort: 18444,
+    productionDataRoot: "/srv/dsh-production/data",
+    candidateEndpoint: "https://dsh.example.com:9443",
     publicHost: "dsh.example.com",
-    candidateEndpoint: "https://candidate.example.com",
     basicUser: "admin",
     basicPassword: "orbit-candidate-value",
+    smokeOrigin: null,
     sessionId: "session-historical",
-    dataRoot: "/srv/dsh-production/data",
-    candidateDataRoot: "/srv/dsh-candidate/data",
-    baselineImage: "dsh-orbit:0.1.1-rc.2-production.4",
-    orbitRevision: "8f3094e6d09c9337569f5cc1f965f8bd3d01e7d9",
-    orbitVersion: "0.1.1",
     snapshotHook: "/opt/dsh-orbit/hooks/snapshot.sh",
     snapshotTimeoutSeconds: 900,
-    candidateImage: "dsh-orbit:0.1.1-rc.2",
     project: "dsh-orbit-candidate",
     composeFile: "/opt/dsh-orbit/docker/compose.example.yaml",
     workdir,
@@ -51,15 +62,58 @@ function fixtureConfig(workdir, overrides = {}) {
   };
 }
 
-function fakeExecutors({ buildCode = 0, upCode = 0, authCode = 0, sessionCode = 0, settingsMutateOk = true } = {}) {
+function resolvedCompose(config, overrides = {}) {
+  return {
+    name: config.project,
+    services: {
+      dsh: {
+        image: config.candidateImage,
+        volumes: [
+          { source: config.candidateDataRoot, target: "/data" },
+          { source: config.candidateWorkspaceRoot, target: "/workspace" },
+        ],
+        ports: [{ target: 9443, published: String(config.candidateHostPort), host_ip: "127.0.0.1" }],
+        environment: { DSH_ORBIT_CANDIDATE_TOKEN: "tokenvalue" },
+      },
+    },
+    ...overrides,
+  };
+}
+
+function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessionCode = 0, settingsMutateOk = true, resolved = null, tokenMismatch = false } = {}) {
   const events = [];
   const runCommand = async (file, args, options = {}) => {
-    const key = args.includes("build") ? "build" : args.includes("up") ? "up" : args[0].includes("smoke-settings") ? "settings" : args[0].includes("smoke-auth") ? "auth" : args[0].includes("smoke-session") ? "session" : "patch";
-    events.push(`command:${key}`);
-    if (key === "build") return { code: buildCode, stdout: "", stderr: buildCode === 0 ? "" : "patch failed: missing isTrustedApiRequest declaration" };
-    if (key === "up") return { code: upCode, stdout: "", stderr: "" };
-    if (key === "patch") return { code: 0, stdout: PATCH_CHECK_STDOUT, stderr: "" };
-    if (key === "settings") {
+    if (file === "docker") {
+      if (args.includes("config")) {
+        events.push("command:config");
+        return { code: 0, stdout: JSON.stringify(resolved ?? resolvedCompose(config)), stderr: "" };
+      }
+      if (args.includes("build")) {
+        events.push("command:build");
+        return {
+          code: buildCode,
+          stdout: "",
+          stderr: buildCode === 0 ? "" : "patch failed: missing isTrustedApiRequest declaration",
+        };
+      }
+      if (args.includes("up")) {
+        events.push("command:up");
+        return { code: upCode, stdout: "", stderr: "" };
+      }
+      if (args.includes("printenv")) {
+        events.push("command:token");
+        const override = await readFile(join(config.workdir, "compose.override.yaml"), "utf8");
+        const candidateToken = override.match(/DSH_ORBIT_CANDIDATE_TOKEN: "?([0-9a-f]+)"?/)[1];
+        return { code: 0, stdout: tokenMismatch ? "a-different-token" : `${candidateToken}\n`, stderr: "" };
+      }
+      if (args.includes("--check")) {
+        events.push("command:patch");
+        return { code: 0, stdout: PATCH_CHECK_STDOUT, stderr: "" };
+      }
+    }
+    const script = args[0] ?? "";
+    if (script.includes("smoke-settings")) {
+      events.push("command:settings");
       return {
         code: settingsMutateOk ? 0 : 1,
         stdout: settingsMutateOk
@@ -68,8 +122,25 @@ function fakeExecutors({ buildCode = 0, upCode = 0, authCode = 0, sessionCode = 
         stderr: "",
       };
     }
-    if (key === "auth") return { code: authCode, stdout: "", stderr: authCode === 0 ? "" : "FAIL unexpected Origin: expected denied, got allowed" };
-    if (key === "session") return { code: sessionCode, stdout: "", stderr: sessionCode === 0 ? "" : "session.models: resume failed for session ... refusing to compose an unscoped context" };
+    if (script.includes("smoke-auth")) {
+      events.push("command:auth");
+      return {
+        code: authCode,
+        stdout: "",
+        stderr: authCode === 0 ? "" : "FAIL unexpected Origin: expected denied, got allowed",
+      };
+    }
+    if (script.includes("smoke-session")) {
+      events.push("command:session");
+      return {
+        code: sessionCode,
+        stdout: "",
+        stderr:
+          sessionCode === 0
+            ? ""
+            : "session.models: resume failed for session ... refusing to compose an unscoped context",
+      };
+    }
     throw new Error(`unexpected command: ${file} ${args.join(" ")}`);
   };
   const fetchPage = async (url, options = {}) => {
@@ -87,89 +158,93 @@ function fakeExecutors({ buildCode = 0, upCode = 0, authCode = 0, sessionCode = 
     }
     return { status: 404, body: "" };
   };
-  return { events, runCommand, fetchPage };
+  const snapshotEvents = [];
+  const snapshotHook = async (options) => {
+    snapshotEvents.push(options);
+    events.push("snapshot");
+    return {
+      ok: true,
+      manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
+    };
+  };
+  return { events, snapshotEvents, runCommand, fetchPage, snapshotHook };
 }
 
-function fakeSnapshotHook(events, outcome) {
-  return async (options) => {
-    events.push("snapshot");
-    if (outcome.ok) {
-      return { ok: true, manifest: { ...outcome.manifest } };
-    }
-    return { ok: false, error: outcome.error };
-  };
+function workdir(dir) {
+  return join(dir, "run");
 }
 
 test("preflight rejects invalid or unsafe upgrade configuration", async () => {
   await withTempDir(async (dir) => {
     const dataRoot = join(dir, "data");
     const candidateDataRoot = join(dir, "candidate-data");
-    await mkdir(dataRoot, { recursive: true });
-    await mkdir(candidateDataRoot, { recursive: true });
+    const workspaceRoot = join(dir, "candidate-workspace");
+    for (const d of [dataRoot, candidateDataRoot, workspaceRoot]) await mkdir(d, { recursive: true });
 
     const base = fixtureConfig(workdir(dir), {
-      dataRoot,
+      productionDataRoot: dataRoot,
       candidateDataRoot,
+      candidateWorkspaceRoot: workspaceRoot,
     });
 
-    const sameRoots = await preflight({ ...base, candidateDataRoot: dataRoot });
-    assert.equal(sameRoots.ok, false);
-    assert.ok(sameRoots.failures.some((failure) => failure.check === "copied-data-root"));
+    const cases = [
+      ["copied-data-root", { candidateDataRoot: dataRoot }],
+      ["candidate-image", { candidateImage: base.baselineImage }],
+      ["public-host", { publicHost: "https://dsh.example.com" }],
+      ["compatibility-profile", { dshVersion: "9.9.9-future" }],
+      ["candidate-data-root", { candidateDataRoot: join(dir, "absent") }],
+      ["candidate-workspace-root", { candidateWorkspaceRoot: join(dir, "absent") }],
+      ["production-data-root", { productionDataRoot: join(dir, "absent") }],
+      ["candidate-host-port", { candidateHostPort: 99999 }],
+      ["snapshot-capability", { snapshotHook: "" }],
+      [
+        "endpoint-binding",
+        { candidateEndpoint: "https://127.0.0.1:9999" },
+      ],
+    ];
+    for (const [expectedCheck, overrides] of cases) {
+      const result = await preflight({ ...base, ...overrides });
+      assert.equal(result.ok, false, `preflight should fail for ${expectedCheck}`);
+      assert.ok(
+        result.failures.some((failure) => failure.check === expectedCheck),
+        `preflight should name ${expectedCheck}: ${JSON.stringify(result.failures)}`,
+      );
+    }
 
-    const collidingImage = await preflight({ ...base, candidateImage: base.baselineImage });
-    assert.equal(collidingImage.ok, false);
-    assert.ok(collidingImage.failures.some((failure) => failure.check === "candidate-image"));
-
-    const badHost = await preflight({ ...base, publicHost: "https://dsh.example.com" });
-    assert.equal(badHost.ok, false);
-    assert.ok(badHost.failures.some((failure) => failure.check === "public-host"));
-
-    const unknownVersion = await preflight({ ...base, dshVersion: "9.9.9-future" });
-    assert.equal(unknownVersion.ok, false);
-    assert.ok(unknownVersion.failures.some((failure) => failure.check === "compatibility-profile"));
-
-    const missingDir = await preflight({ ...base, candidateDataRoot: join(dir, "absent") });
-    assert.equal(missingDir.ok, false);
-    assert.ok(missingDir.failures.some((failure) => failure.check === "candidate-data-root"));
-
-    const noSnapshot = await preflight({ ...base, snapshotHook: "" });
-    assert.equal(noSnapshot.ok, false);
-    assert.ok(noSnapshot.failures.some((failure) => failure.check === "snapshot-capability"));
-
-    const ok = await preflight(base);
-    assert.deepEqual(ok, { ok: true, failures: [] });
+    const loopbackMatched = await preflight({
+      ...base,
+      candidateEndpoint: "https://127.0.0.1:18444",
+    });
+    assert.deepEqual(loopbackMatched, { ok: true, failures: [] });
   });
 });
 
-function workdir(dir) {
-  return join(dir, "run");
-}
-
-test("candidate workflow runs snapshot, build, isolated start, and the ordered verification sequence", async () => {
+test("candidate workflow binds the verified compose configuration before starting", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage } = fakeExecutors();
-    const result = await runCandidateWorkflow({
-      config,
-      runCommand,
-      fetchPage,
-      snapshotHook: fakeSnapshotHook(events, {
-        ok: true,
-        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
-      }),
-    });
+    const { events, runCommand, fetchPage, snapshotHook } = fakeExecutors(config);
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
 
     assert.equal(result.eligible, true);
     assert.equal(result.exitCode, 0);
     assert.equal(result.banner, "CANDIDATE PASSED - ELIGIBLE FOR MANUAL PROMOTION");
-    assert.equal(result.report.decision.outcome, DECISION_OUTCOMES.eligible);
+    assert.equal(result.report.promotionReadiness.outcome, PROMOTION_OUTCOMES.eligible);
     assert.equal(result.report.snapshot.reference, "/srv/backups/pre-candidate.tar.gz");
 
     const commandKeys = events.filter((event) => event.startsWith("command:")).map((event) => event.slice(8));
-    assert.deepEqual(commandKeys, ["build", "up", "patch", "settings", "auth", "session"]);
+    assert.deepEqual(commandKeys, ["config", "build", "up", "token", "patch", "settings", "auth", "session"]);
 
-    const checkOrder = Object.entries(result.report.checks).map(([name, entry]) => `${name}:${entry.status}`);
-    assert.deepEqual(checkOrder, [
+    const snapshotIndex = events.indexOf("snapshot");
+    const configIndex = events.indexOf("command:config");
+    const buildIndex = events.indexOf("command:build");
+    const upIndex = events.indexOf("command:up");
+    assert.ok(
+      snapshotIndex < configIndex && configIndex < buildIndex && buildIndex < upIndex,
+      "snapshot and binding verification must precede build and start",
+    );
+
+    const checkStatuses = Object.entries(result.report.checks).map(([name, entry]) => `${name}:${entry.status}`);
+    assert.deepEqual(checkStatuses, [
       "globalPatch:pass",
       "profilePatch:pass",
       "runtimeReadiness:pass",
@@ -182,39 +257,49 @@ test("candidate workflow runs snapshot, build, isolated start, and the ordered v
       "terminalPtty:not_run",
     ]);
 
-    const snapshotIndex = events.indexOf("snapshot");
-    const buildIndex = events.indexOf("command:build");
-    const upIndex = events.indexOf("command:up");
-    assert.ok(snapshotIndex < buildIndex && buildIndex < upIndex, "snapshot must precede build and start");
+    const evidence = JSON.parse(await readFile(join(config.workdir, "evidence.json"), "utf8"));
+    assert.equal(evidence.promotionEvaluated, true);
+    assert.equal(evidence.baseline.image, config.baselineImage);
+    assert.equal(evidence.baseline.dshVersion, config.baselineDshVersion);
+    assert.equal(evidence.candidate.image, config.candidateImage);
+    assert.equal(evidence.snapshot.failure, null);
 
     const reportFromDisk = JSON.parse(await readFile(join(config.workdir, "report.json"), "utf8"));
-    assert.equal(reportFromDisk.decision.outcome, DECISION_OUTCOMES.eligible);
-    await readFile(join(config.workdir, "evidence.json"), "utf8");
+    assert.equal(reportFromDisk.promotionReadiness.outcome, PROMOTION_OUTCOMES.eligible);
   });
 });
 
-test("every docker command is scoped to the candidate project", async () => {
+test("the snapshot request carries the data version and the candidate version separately", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir), {
+      baselineDshVersion: "0.1.0-rc.1",
+      dshVersion: "0.1.1-rc.2",
+    });
+    const { snapshotEvents, runCommand, fetchPage, snapshotHook } = fakeExecutors(config);
+    await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
+
+    assert.equal(snapshotEvents.length, 1);
+    assert.equal(snapshotEvents[0].dshVersion, "0.1.0-rc.1", "the snapshot records the data-producing version");
+    assert.equal(snapshotEvents[0].candidateDshVersion, "0.1.1-rc.2", "the candidate version travels separately");
+  });
+});
+
+test("every docker command is scoped to the candidate project and both compose files", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage } = fakeExecutors();
+    const { events, runCommand, fetchPage, snapshotHook } = fakeExecutors(config);
     const seen = [];
     const wrapped = async (file, args, options) => {
       if (file === "docker") seen.push(args);
       return runCommand(file, args, options);
     };
-    await runCandidateWorkflow({
-      config,
-      runCommand: wrapped,
-      fetchPage,
-      snapshotHook: fakeSnapshotHook(events, {
-        ok: true,
-        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
-      }),
-    });
-    assert.ok(seen.length >= 3);
+    await runCandidateWorkflow({ config, runCommand: wrapped, fetchPage, snapshotHook });
+
+    assert.ok(seen.length >= 4);
     for (const args of seen) {
       assert.equal(args[0], "compose");
       assert.ok(args.includes(config.composeFile));
+      assert.ok(args.includes(`${config.workdir}/compose.override.yaml`));
       const projectIndex = args.indexOf("-p");
       assert.equal(args[projectIndex + 1], config.project);
     }
@@ -224,93 +309,112 @@ test("every docker command is scoped to the candidate project", async () => {
 test("a required verification failure stops the sequence and marks later checks not_run", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage } = fakeExecutors({ authCode: 1 });
-    const result = await runCandidateWorkflow({
-      config,
-      runCommand,
-      fetchPage,
-      snapshotHook: fakeSnapshotHook(events, {
-        ok: true,
-        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
-      }),
-    });
+    const { events, runCommand, fetchPage, snapshotHook } = fakeExecutors(config, { authCode: 1 });
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
 
     assert.equal(result.eligible, false);
     assert.equal(result.exitCode, 1);
     assert.equal(result.banner, "CANDIDATE FAILED - NOT ELIGIBLE FOR PROMOTION");
     assert.equal(result.report.checks.authorizationSmoke.status, "fail");
     assert.equal(result.report.checks.sessionResume.status, "not_run");
-    assert.equal(result.report.checks.webPluginRoutes.status, "not_run");
-    assert.equal(result.report.decision.outcome, DECISION_OUTCOMES.notEligible);
-    assert.ok(result.report.decision.reasons.includes("authorizationSmoke=fail"));
+    assert.equal(result.report.promotionReadiness.outcome, PROMOTION_OUTCOMES.notEligible);
+    assert.ok(result.report.promotionReadiness.reasons.includes("authorizationSmoke=fail"));
 
     const commandKeys = events.filter((event) => event.startsWith("command:")).map((event) => event.slice(8));
     assert.ok(!commandKeys.includes("session"), "checks after a hard failure must not execute");
   });
 });
 
-test("a failed no-op settings write blocks eligibility while the read may pass", async () => {
+test("a failed production snapshot is persisted and denies promotion even when checks pass", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage } = fakeExecutors({ settingsMutateOk: false });
-    const result = await runCandidateWorkflow({
-      config,
-      runCommand,
-      fetchPage,
-      snapshotHook: fakeSnapshotHook(events, {
-        ok: true,
-        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
-      }),
-    });
+    const { runCommand, fetchPage } = fakeExecutors(config);
+    const snapshotHook = async () => ({ ok: false, error: "snapshot hook exited with code 3" });
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
 
-    assert.equal(result.report.checks.settingsRead.status, "pass");
-    assert.equal(result.report.checks.settingsNoopWrite.status, "fail");
-    assert.equal(result.report.decision.outcome, DECISION_OUTCOMES.notEligible);
-    assert.ok(result.report.decision.reasons.includes("settingsNoopWrite=fail"));
-  });
-});
-
-test("a failed production snapshot denies promotion readiness even when checks pass", async () => {
-  await withTempDir(async (dir) => {
-    const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage } = fakeExecutors();
-    const result = await runCandidateWorkflow({
-      config,
-      runCommand,
-      fetchPage,
-      snapshotHook: fakeSnapshotHook(events, { ok: false, error: "snapshot hook exited with code 3" }),
-    });
-
-    assert.equal(events[0], "snapshot");
     assert.equal(result.eligible, false);
     assert.equal(result.exitCode, 1);
     assert.equal(result.banner, "CANDIDATE FAILED - NOT ELIGIBLE FOR PROMOTION");
     assert.equal(result.report.snapshot.reference, null);
-    assert.ok(result.report.decision.reasons.includes("snapshot=snapshot hook exited with code 3"));
+    assert.ok(result.report.promotionReadiness.reasons.includes("snapshot=snapshot hook exited with code 3"));
     assert.ok(result.report.checks.runtimeReadiness.status !== "not_run");
+
+    const evidence = JSON.parse(await readFile(join(config.workdir, "evidence.json"), "utf8"));
+    assert.equal(evidence.snapshot.failure, "snapshot hook exited with code 3");
+
+    const regenerated = createCompatibilityReport(evidence);
+    assert.equal(regenerated.promotionReadiness.outcome, PROMOTION_OUTCOMES.notEligible);
+    assert.ok(regenerated.promotionReadiness.reasons.includes("snapshot=snapshot hook exited with code 3"));
   });
 });
 
 test("a failed candidate build never starts the stack and reports the patch gate", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage } = fakeExecutors({ buildCode: 1 });
-    const result = await runCandidateWorkflow({
-      config,
-      runCommand,
-      fetchPage,
-      snapshotHook: fakeSnapshotHook(events, {
-        ok: true,
-        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
-      }),
-    });
+    const { events, runCommand, fetchPage, snapshotHook } = fakeExecutors(config, { buildCode: 1 });
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
 
     assert.equal(result.eligible, false);
     assert.equal(result.report.checks.globalPatch.status, "fail");
     assert.equal(result.report.checks.runtimeReadiness.status, "not_run");
     const commandKeys = events.filter((event) => event.startsWith("command:")).map((event) => event.slice(8));
     assert.ok(!commandKeys.includes("up"), "a failed build must not start the candidate stack");
-    assert.ok(result.report.decision.reasons.includes("globalPatch=fail"));
+    assert.ok(result.report.promotionReadiness.reasons.includes("globalPatch=fail"));
+  });
+});
+
+test("a resolved compose configuration that ignores the candidate spec fails closed", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir));
+    const misbound = resolvedCompose(config, {
+      services: {
+        dsh: {
+          image: config.candidateImage,
+          volumes: [{ source: "/srv/dsh-production/data", target: "/data" }],
+          ports: [{ target: 9443, published: String(config.candidateHostPort) }],
+          environment: { DSH_ORBIT_CANDIDATE_TOKEN: "tokenvalue" },
+        },
+      },
+    });
+    const { runCommand, fetchPage, snapshotHook } = fakeExecutors(config, { resolved: misbound });
+
+    await assert.rejects(
+      runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook }),
+      (error) => error instanceof UpgradeBindingError && /\/data mount/.test(error.message),
+    );
+    await assert.rejects(
+      readFile(join(config.workdir, "report.json"), "utf8"),
+      /ENOENT/,
+      "a binding failure must not produce a report",
+    );
+  });
+});
+
+test("a running stack without this run's candidate token fails closed", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir));
+    const { runCommand, fetchPage, snapshotHook } = fakeExecutors(config, { tokenMismatch: true });
+
+    await assert.rejects(
+      runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook }),
+      (error) => error instanceof UpgradeBindingError && /identity mismatch/.test(error.message),
+    );
+  });
+});
+
+test("probeCandidateToken verifies the running stack carries the run token", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir));
+    const { runCommand } = fakeExecutors(config);
+    const candidateToken = "abcdef1234567890";
+    await mkdir(config.workdir, { recursive: true });
+    await writeFile(join(config.workdir, "compose.override.yaml"), `services:\n  dsh:\n    environment:\n      DSH_ORBIT_CANDIDATE_TOKEN: "${candidateToken}"\n`, "utf8");
+    await probeCandidateToken({ config, candidateToken, runCommand });
+
+    await assert.rejects(
+      probeCandidateToken({ config, candidateToken: "wrong", runCommand }),
+      UpgradeBindingError,
+    );
   });
 });
 
@@ -319,97 +423,10 @@ test("loadUpgradeConfig reports missing environment configuration", () => {
     DSH_VERSION: "0.1.1-rc.2",
     DSH_PUBLIC_HOST: "dsh.example.com",
   });
-  assert.ok(missing.includes("DSH_SMOKE_URL (candidate endpoint)"));
+  assert.ok(missing.includes("DSH_CANDIDATE_ORBIT_REVISION (candidate Orbit revision)"));
+  assert.ok(missing.includes("DSH_BASELINE_ORBIT_REVISION (production Orbit revision)"));
+  assert.ok(missing.includes("DSH_UPGRADE_HOST_PORT (candidate loopback port)"));
   assert.ok(missing.includes("DSH_SNAPSHOT_HOOK (snapshot capability)"));
-  assert.equal(config.candidateImage, "dsh-orbit:0.1.1-rc.2");
+  assert.equal(config.candidateImage, undefined);
   assert.ok(config.workdir.endsWith(".upgrade-run"));
-});
-
-test("an unsupported DSH version is never marked supported or promotion-ready", async () => {
-  await withTempDir(async (dir) => {
-    const config = fixtureConfig(workdir(dir), { dshVersion: "9.9.9-future" });
-    const gate = await preflight(config);
-    assert.equal(gate.ok, false);
-    assert.ok(gate.failures.some((failure) => failure.check === "compatibility-profile"));
-
-    const { events, runCommand, fetchPage } = fakeExecutors({ buildCode: 1 });
-    const result = await runCandidateWorkflow({
-      config,
-      runCommand,
-      fetchPage,
-      snapshotHook: fakeSnapshotHook(events, {
-        ok: true,
-        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
-      }),
-    });
-    assert.equal(result.report.candidate.profile, null);
-    assert.equal(result.report.checks.globalPatch.status, "fail");
-    assert.equal(result.report.decision.outcome, DECISION_OUTCOMES.notEligible);
-    assert.equal(result.banner, "CANDIDATE FAILED - NOT ELIGIBLE FOR PROMOTION");
-  });
-});
-
-test("a missing profile-local patch verification fails the candidate", async () => {
-  await withTempDir(async (dir) => {
-    const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage } = fakeExecutors();
-    const wrapped = async (file, args, options) => {
-      if (args.includes("--check")) {
-        return {
-          code: 0,
-          stdout: `${PATCH_CHECK_STDOUT.split("\n")[0]}\n${PATCH_CHECK_STDOUT.split("\n")[1]}\n`,
-          stderr: "",
-        };
-      }
-      return runCommand(file, args, options);
-    };
-    const result = await runCandidateWorkflow({
-      config,
-      runCommand: wrapped,
-      fetchPage,
-      snapshotHook: fakeSnapshotHook(events, {
-        ok: true,
-        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
-      }),
-    });
-
-    assert.equal(result.report.checks.globalPatch.status, "pass");
-    assert.equal(result.report.checks.profilePatch.status, "fail");
-    assert.equal(result.report.checks.authorizationSmoke.status, "not_run");
-    assert.equal(result.report.decision.outcome, DECISION_OUTCOMES.notEligible);
-    assert.ok(result.report.decision.reasons.includes("profilePatch=fail"));
-    assert.equal(result.banner, "CANDIDATE FAILED - NOT ELIGIBLE FOR PROMOTION");
-  });
-});
-
-test("a session-resume regression fails the candidate while preserving a sanitized report", async () => {
-  await withTempDir(async (dir) => {
-    const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage } = fakeExecutors({ sessionCode: 1 });
-    const result = await runCandidateWorkflow({
-      config,
-      runCommand,
-      fetchPage,
-      snapshotHook: fakeSnapshotHook(events, {
-        ok: true,
-        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
-      }),
-    });
-
-    assert.equal(result.report.checks.sessionResume.status, "fail");
-    assert.match(
-      result.report.checks.sessionResume.detail,
-      /refusing to compose an unscoped context/,
-    );
-    assert.equal(result.report.decision.outcome, DECISION_OUTCOMES.notEligible);
-    assert.equal(result.report.checks.terminalPtty.status, "not_run");
-    assert.ok(!result.report.decision.reasons.includes("terminalPtty=pass"));
-
-    const text = result.text;
-    assert.match(text, /NOT ELIGIBLE FOR PROMOTION/);
-    assert.match(text, /refusing to compose an unscoped context/);
-    await readFile(join(config.workdir, "report.json"), "utf8");
-    const evidence = JSON.parse(await readFile(join(config.workdir, "evidence.json"), "utf8"));
-    assert.equal(evidence.checks.sessionResume.status, "fail");
-  });
 });
