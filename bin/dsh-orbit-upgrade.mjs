@@ -2,6 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import process from "node:process";
+import { X509Certificate } from "node:crypto";
 import {
   COMPATIBILITY_OUTCOMES,
   PROMOTION_OUTCOMES,
@@ -16,6 +17,7 @@ import {
   resolveCandidateBinding,
   runCandidateWorkflow,
   runVerificationSequence,
+  verifyGatewayIdentity,
 } from "../src/upgrade-runner.mjs";
 
 const USAGE = `usage: node bin/dsh-orbit-upgrade.mjs <command>
@@ -125,6 +127,9 @@ async function main() {
         return;
       }
       await probeCandidateToken({ config, candidateToken });
+      const identityCertPath = `${config.workdir}/gateway-identity-cert.pem`;
+      const identity = { fingerprint: new X509Certificate(await readFile(identityCertPath)).fingerprint256 };
+      await verifyGatewayIdentity({ config, identity });
       const { checks } = await runVerificationSequence({ config });
       const report = createCompatibilityReport({
         promotionEvaluated: false,

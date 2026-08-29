@@ -163,12 +163,14 @@ Configuration comes from the environment. Candidate identity: `DSH_VERSION` (can
 The runner:
 
 1. runs the production snapshot hook and denies promotion readiness when it fails; the failure is recorded in the run evidence, so regenerating a report cannot restore eligibility;
-2. generates a compose override from the candidate specification (image, copied data and workspace roots, isolated loopback port) and verifies the *resolved* `docker compose config` against it — image, `/data` and `/workspace` mounts, published port, project name, and a per-run candidate token must all match before anything is built or started;
-3. builds the candidate without replacing the last known-good image tag — the build fails on unsupported versions or source-layout mismatches — then starts it against the copied data on the isolated endpoint; production keeps running;
-4. verifies the running stack carries this run's candidate token, then executes the verification sequence in a deterministic order (runtime readiness, patch verification, settings read, no-op settings write, live authorization smoke, existing-session resume, web/plugin routes, and the release-limited long-lived transport and terminal checks);
-5. stops at the first required failure, marks the remaining checks `not_run`, and still produces a final sanitized report;
-6. reports `compatibility` and `promotion readiness` separately: promotion readiness is eligible only when every required check passed, the exact candidate and baseline identities are recorded, and the snapshot completed; `verify` never evaluates promotion readiness;
-7. exits `0` only for a passed candidate or a passing verification, `1` for a failure, and `2` for configuration or binding errors.
+2. generates a compose override from the candidate specification (image, copied data and workspace roots, isolated loopback port) and verifies the *resolved* `docker compose config` against it — image, `/data` and `/workspace` mounts, published loopback port (`127.0.0.1` or `::1` only), project name, and a per-run candidate token must all match before anything is built or started;
+3. generates a per-run gateway identity certificate (SAN matching the candidate endpoint host) and mounts it into the candidate gateway in place of the base certificate;
+4. builds the candidate without replacing the last known-good image tag — the build fails on unsupported versions or source-layout mismatches — then starts it against the copied data on the isolated endpoint; production keeps running;
+5. verifies the full identity chain before any check runs: the running stack carries this run's candidate token, and `DSH_SMOKE_URL` terminates at the candidate gateway (the TLS peer certificate must be the per-run identity certificate);
+6. executes the verification sequence in a deterministic order (runtime readiness, patch verification, settings read, no-op settings write, live authorization smoke, existing-session resume, web/plugin routes, and the release-limited long-lived transport and terminal checks), with the smoke suites trusting the per-run certificate through `NODE_EXTRA_CA_CERTS`;
+7. stops at the first required failure, marks the remaining checks `not_run`, and still produces a final sanitized report;
+8. reports `compatibility` and `promotion readiness` separately: promotion readiness is eligible only when every required check passed, the exact candidate and baseline identities are recorded, and the snapshot completed; `verify` never evaluates promotion readiness;
+9. exits `0` only for a passed candidate or a passing verification, `1` for a failure, and `2` for configuration or binding errors. The runner environment needs Docker, the compose plugin, and OpenSSL.
 
 ## Development
 

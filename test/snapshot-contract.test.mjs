@@ -179,6 +179,26 @@ test("bindSnapshotManifest validates tuple and creation time", () => {
   const wrongId = bindSnapshotManifest({ ...manifest("2026-08-29T08:00:02Z"), snapshotId: "snap-2" }, request);
   assert.equal(wrongId.ok, false);
   assert.match(wrongId.error, /mismatched fields: snapshotId/);
+
+  const candidateMissing = bindSnapshotManifest(
+    { ...manifest("2026-08-29T08:00:02Z"), candidateDshVersion: undefined },
+    { ...request, candidateDshVersion: "0.2.0-candidate" },
+  );
+  assert.equal(candidateMissing.ok, false);
+  assert.match(candidateMissing.error, /mismatched fields: candidateDshVersion/);
+
+  const candidateMismatch = bindSnapshotManifest(
+    { ...manifest("2026-08-29T08:00:02Z"), candidateDshVersion: "0.9.0-other" },
+    { ...request, candidateDshVersion: "0.2.0-candidate" },
+  );
+  assert.equal(candidateMismatch.ok, false);
+  assert.match(candidateMismatch.error, /mismatched fields: candidateDshVersion/);
+
+  const candidateMatch = bindSnapshotManifest(
+    { ...manifest("2026-08-29T08:00:02Z"), candidateDshVersion: "0.2.0-candidate" },
+    { ...request, candidateDshVersion: "0.2.0-candidate" },
+  );
+  assert.equal(candidateMatch.ok, true);
 });
 
 test("incomplete manifests are rejected with field names only", async () => {

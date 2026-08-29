@@ -33,7 +33,7 @@ snapshotId, createdAt, orbitRevision, dshVersion, dataRoot, method, restoreRefer
 
 plus the optional `candidateDshVersion` field. `status` must be `complete`, and `dshVersion` records the version that produced the snapshotted data. Unknown fields are rejected fail-closed so storage credentials cannot ride along in the manifest. The manifest identifies the recovery point and must never embed storage credentials; validation errors report field names, never values.
 
-The runner removes any pre-existing manifest before invoking the hook and, after a zero exit, binds the manifest to the current request: `snapshotId`, `dataRoot`, `orbitRevision`, and `dshVersion` must match the request, and `createdAt` must be a valid timestamp not older than the request (within a small clock tolerance). A manifest left behind by an earlier run therefore cannot be mistaken for a fresh snapshot.
+The runner removes any pre-existing manifest before invoking the hook and, after a zero exit, binds the manifest to the current request: `snapshotId`, `dataRoot`, `orbitRevision`, and `dshVersion` must match the request, and `createdAt` must be a valid timestamp not older than the request (within a small clock tolerance). When the request carries `candidateDshVersion`, the manifest must record exactly that value. A manifest left behind by an earlier run therefore cannot be mistaken for a fresh snapshot.
 
 The runner enforces `DSH_SNAPSHOT_TIMEOUT_SECONDS`, kills the hook on timeout, and treats the timeout as a failed snapshot. Secrets may be passed to the hook through the environment; they must not be printed, logged, or written into the manifest.
 

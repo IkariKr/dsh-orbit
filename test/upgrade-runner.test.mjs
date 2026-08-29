@@ -17,6 +17,10 @@ import {
   createCompatibilityReport,
 } from "../src/compatibility-report.mjs";
 
+// Per-run gateway identity fixture (self-signed, test-only; CN=dsh.example.com).
+const GATEWAY_CERT_PEM = "-----BEGIN CERTIFICATE-----\r\nMIIDMTCCAhmgAwIBAgIUTpDv9KIJtE+G35NL8g6oz2eyO1cwDQYJKoZIhvcNAQEL\r\nBQAwGjEYMBYGA1UEAwwPZHNoLmV4YW1wbGUuY29tMB4XDTI2MDgyOTE2MTc0MFoX\r\nDTM2MDgyNjE2MTc0MFowGjEYMBYGA1UEAwwPZHNoLmV4YW1wbGUuY29tMIIBIjAN\r\nBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArpcKILYea80dLSCJUpOve1p1K4t3\r\nU4BUPpk+AcWYp11YHuh1KFcF8xcmqbT2Eaxlq37rq34sbbkt/y1qf8mSI7EkDiyx\r\nBPgqvKADLYQx0oPDqyq8Q1TNPw2LoKj/CfQR4Z1H4o5foHPfzzutJ2ITGF6dR1cP\r\niS+EIHqD4aj17dlta1S3cfhE/aOcRg30JKOGKjVkaf4OXMbgIJYugHqV4yCG2Mwx\r\n8RJz/+nq6VMGL/46u9ftuGuM1GwwR0mxVdPf4YUJviczqvG+pdw9L1n91xPiF+hR\r\nAl4GAoBvhSDrojtrGQ9kti0/3mRI26Jd3WbAEPCmorV6v6G6uBLI79Gb/wIDAQAB\r\no28wbTAdBgNVHQ4EFgQUEKYimjSXhPm3+RaSOxR1pLRm1G0wHwYDVR0jBBgwFoAU\r\nEKYimjSXhPm3+RaSOxR1pLRm1G0wDwYDVR0TAQH/BAUwAwEB/zAaBgNVHREEEzAR\r\ngg9kc2guZXhhbXBsZS5jb20wDQYJKoZIhvcNAQELBQADggEBAJwq/iv1NSDA+wEO\r\ndOEOoJILe9suxS70RF/cGjn0QJZmhNxxKyoHnhLYLkpWaZHnwQkfIU4O0aPF7fM2\r\n1XgtHrAcNy5LSVtFIyWmAGasfL50igQHU2V/rCEsPDsRUDtAas8ruBzBMKH48Bav\r\nNqYrjGBO5QCudWXY1fim3nu4ixGiuwESCiokJRclrji+r3yd3atEaTl0vHYGSRrz\r\nECKmgh44o0rh33XOpniW+oy2grPgHLuXxp66IUXn8tRvrd2tfYil93Zzif6idloT\r\nwQXDE0QyATOcVxe3mt/2PiSng3mULTUkEZtkv59Ps5059kiGjNaflEjKwocVjuWa\r\ne+PuidE=\r\n-----END CERTIFICATE-----\r\n";
+const GATEWAY_KEY_PEM = "-----BEGIN PRIVATE KEY-----\r\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCulwogth5rzR0t\r\nIIlSk697WnUri3dTgFQ+mT4BxZinXVge6HUoVwXzFyaptPYRrGWrfuurfixtuS3/\r\nLWp/yZIjsSQOLLEE+Cq8oAMthDHSg8OrKrxDVM0/DYugqP8J9BHhnUfijl+gc9/P\r\nO60nYhMYXp1HVw+JL4QgeoPhqPXt2W1rVLdx+ET9o5xGDfQko4YqNWRp/g5cxuAg\r\nli6AepXjIIbYzDHxEnP/6erpUwYv/jq71+24a4zUbDBHSbFV09/hhQm+JzOq8b6l\r\n3D0vWf3XE+IX6FECXgYCgG+FIOuiO2sZD2S2LT/eZEjbol3dZsAQ8KaitXq/obq4\r\nEsjv0Zv/AgMBAAECggEAGh6anfOLxZD1hnom++WrC9yn9DsfP6zOmGGQt0R6kWoT\r\nnubOxZmPWE45szX8LP9fuTJ5y471fUzbpsuCnVo+CiecP0qhs8lKNiyyN62z+SH2\r\ntLWQs3oNDXEsrH0xT/87FZ0pff7S1kxqSrSg3mgmdy+LKXsgOzk9SSagcwg2Er6E\r\nsDJH6Gy+M+pcnJIalrxw5NPwv4G5lShD9UeGrmtJ1TSDYoMaJRzknky9vlCTMHg9\r\nR/+YPH21mVpBNG/joHLszmzNZiRLkwD0zGzji98qOw7OmFg5cG0nRKUCTMwr+unS\r\nAXzdnCdE/pw7LLXPbkeV2T7IYzB7lU9umhB1epvUUQKBgQDT6pUF/NfryF6U8RQT\r\nzpCuSrxLa0jJFucjk2P7TbLnlmh63/ub8ZwBSy+ziCAFyxX1qo2OEwP1M9IJMkCD\r\nODy/k0s2ubSzJFbrr0zh3PClmBAfW6ImTJx7DJhnYz8XIMTAVNlu+7uasCS0dxTE\r\ncYTY4BE9ipTs3Uk+GiJ8n8kD1QKBgQDS6K0Zoq4XkVYSy8Z/EC0jEkvRCGQpbx1G\r\nWszBQXRiIfESsu6CHSYWpU3tooSm3JxL0KvlqGrcxhUiOZ0Qyz4KdbJwk0thFxnl\r\n4gc8vGZLvgn3biGrsaHwtTdG8NFcSMZz4kRKrluuz0fEM6ZCyTmufjqYpmduc/7h\r\nJ1Yw+UMOgwKBgA32YMc6N4fDdefeUnJTo9i399wIP41wQt5nMak3H1h+4ndmFo/Z\r\nxWuYZpYvm9yF2vaKvDTmL9aSCX6tnu6GYApHTCdY6Pz8ofV5YVloUzq14CoQwYhA\r\nd/brh4cYVOnTMONzM7hKQbwZavGw/t9Kk3QunzQs008f7Vl4I1mOtZHZAoGAWs9o\r\nSNNs1iTzxKAM1YTnimREVLqiNdzr4/EQnF1MeTxYCk8Utt1KGxIN3bXOG/J9MX+l\r\no/rCGFEJpHTeFe8MxYAr1qD1IdbKhdqudw4/lXk73VeEE+Ml8Ph11ou1+WA0Yo0Y\r\nDnfIbho9slLy0WrG9UTQgg2UF1DGe7duOyP4JXUCgYBoVN0q+0dHOfeL+wweLwbz\r\niECUPVKpeu4LL0K443Bceqdxx7GDctQWewOZ7iuyjnUOxe/CgLbaxdKHXMTk5IJ0\r\n4WWbCiyklOQLOi/y0UW0P3Kxxh4vTDiurhqiPpJgQHDOG8G6sz4ViVDdhOQXAfMC\r\nwEZbrn3sVQ1HwqvK9TTNIg==\r\n-----END PRIVATE KEY-----\r\n";
+
 const PLUGIN_ASSET = "/plugins/@deepseek-ai/dsh-client-modules/client.js?rev=abc123";
 const PATCH_CHECK_STDOUT = [
   "DSH upstream: 0.1.1-rc.2",
@@ -55,6 +59,9 @@ function fixtureConfig(workdir, overrides = {}) {
     sessionId: "session-historical",
     snapshotHook: "/opt/dsh-orbit/hooks/snapshot.sh",
     snapshotTimeoutSeconds: 900,
+    gatewayService: "caddy",
+    gatewayCertTarget: "/etc/caddy/certs/fullchain.pem",
+    gatewayKeyTarget: "/etc/caddy/certs/privkey.pem",
     project: "dsh-orbit-candidate",
     composeFile: "/opt/dsh-orbit/docker/compose.example.yaml",
     workdir,
@@ -80,13 +87,37 @@ function resolvedCompose(config, overrides = {}) {
   };
 }
 
-function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessionCode = 0, settingsMutateOk = true, resolved = null, tokenMismatch = false } = {}) {
+function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessionCode = 0, settingsMutateOk = true, resolved = null, tokenMismatch = false, identityFingerprintMismatch = false } = {}) {
   const events = [];
+  const identityFingerprint = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99";
   const runCommand = async (file, args, options = {}) => {
+    if (file === "openssl") {
+      events.push("command:openssl");
+      const { writeFile: writeFixture } = await import("node:fs/promises");
+      await writeFixture(args[args.indexOf("-keyout") + 1], GATEWAY_KEY_PEM, "utf8");
+      await writeFixture(args[args.indexOf("-out") + 1], GATEWAY_CERT_PEM, "utf8");
+      return { code: 0, stdout: "", stderr: "" };
+    }
     if (file === "docker") {
       if (args.includes("config")) {
-        events.push("command:config");
-        return { code: 0, stdout: JSON.stringify(resolved ?? resolvedCompose(config)), stderr: "" };
+        const merged = args.includes(`${config.workdir}/compose.override.yaml`);
+        events.push(merged ? "command:config" : "command:config-base");
+        const resolvedConfig =
+          resolved ??
+          resolvedCompose(config, {
+            services: {
+              dsh: resolvedCompose(config).services.dsh,
+              [config.gatewayService]: merged
+                ? {
+                    volumes: [
+                      { source: `${config.workdir}/gateway-identity-cert.pem`, target: config.gatewayCertTarget },
+                      { source: `${config.workdir}/gateway-identity-key.pem`, target: config.gatewayKeyTarget },
+                    ],
+                  }
+                : {},
+            },
+          });
+        return { code: 0, stdout: JSON.stringify(resolvedConfig), stderr: "" };
       }
       if (args.includes("build")) {
         events.push("command:build");
@@ -167,7 +198,16 @@ function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessio
       manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
     };
   };
-  return { events, snapshotEvents, runCommand, fetchPage, snapshotHook };
+  const tlsProbe = async (probe) => {
+    events.push(`probe:gateway-identity:${probe.host}:${probe.port}`);
+    const { X509Certificate } = await import("node:crypto");
+    const { readFile: readCert } = await import("node:fs/promises");
+    const generated = new X509Certificate(
+      await readCert(`${config.workdir}/gateway-identity-cert.pem`, "utf8"),
+    ).fingerprint256;
+    return identityFingerprintMismatch ? "FF:EE:DD:CC:BB:AA" : generated;
+  };
+  return { events, snapshotEvents, runCommand, fetchPage, snapshotHook, tlsProbe };
 }
 
 function workdir(dir) {
@@ -222,8 +262,8 @@ test("preflight rejects invalid or unsafe upgrade configuration", async () => {
 test("candidate workflow binds the verified compose configuration before starting", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage, snapshotHook } = fakeExecutors(config);
-    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
+    const { events, runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config);
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe });
 
     assert.equal(result.eligible, true);
     assert.equal(result.exitCode, 0);
@@ -231,16 +271,36 @@ test("candidate workflow binds the verified compose configuration before startin
     assert.equal(result.report.promotionReadiness.outcome, PROMOTION_OUTCOMES.eligible);
     assert.equal(result.report.snapshot.reference, "/srv/backups/pre-candidate.tar.gz");
 
-    const commandKeys = events.filter((event) => event.startsWith("command:")).map((event) => event.slice(8));
-    assert.deepEqual(commandKeys, ["config", "build", "up", "token", "patch", "settings", "auth", "session"]);
+    const commandKeys = events
+      .filter((event) => event.startsWith("command:"))
+      .map((event) => event.slice(8));
+    assert.deepEqual(commandKeys, [
+      "openssl",
+      "config-base",
+      "config",
+      "build",
+      "up",
+      "token",
+      "patch",
+      "settings",
+      "auth",
+      "session",
+    ]);
+    assert.ok(events.includes("probe:gateway-identity:dsh.example.com:9443"));
 
     const snapshotIndex = events.indexOf("snapshot");
+    const opensslIndex = events.indexOf("command:openssl");
     const configIndex = events.indexOf("command:config");
     const buildIndex = events.indexOf("command:build");
     const upIndex = events.indexOf("command:up");
+    const probeIndex = events.indexOf("probe:gateway-identity:dsh.example.com:9443");
     assert.ok(
-      snapshotIndex < configIndex && configIndex < buildIndex && buildIndex < upIndex,
-      "snapshot and binding verification must precede build and start",
+      snapshotIndex < opensslIndex &&
+        opensslIndex < configIndex &&
+        configIndex < buildIndex &&
+        buildIndex < upIndex &&
+        upIndex < probeIndex,
+      "snapshot, identity, binding verification, and start must be ordered; endpoint identity probe must follow start",
     );
 
     const checkStatuses = Object.entries(result.report.checks).map(([name, entry]) => `${name}:${entry.status}`);
@@ -275,8 +335,8 @@ test("the snapshot request carries the data version and the candidate version se
       baselineDshVersion: "0.1.0-rc.1",
       dshVersion: "0.1.1-rc.2",
     });
-    const { snapshotEvents, runCommand, fetchPage, snapshotHook } = fakeExecutors(config);
-    await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
+    const { snapshotEvents, runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config);
+    await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe });
 
     assert.equal(snapshotEvents.length, 1);
     assert.equal(snapshotEvents[0].dshVersion, "0.1.0-rc.1", "the snapshot records the data-producing version");
@@ -287,21 +347,24 @@ test("the snapshot request carries the data version and the candidate version se
 test("every docker command is scoped to the candidate project and both compose files", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage, snapshotHook } = fakeExecutors(config);
+    const { events, runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config);
     const seen = [];
     const wrapped = async (file, args, options) => {
       if (file === "docker") seen.push(args);
       return runCommand(file, args, options);
     };
-    await runCandidateWorkflow({ config, runCommand: wrapped, fetchPage, snapshotHook });
+    await runCandidateWorkflow({ config, runCommand: wrapped, fetchPage, snapshotHook, tlsProbe });
 
-    assert.ok(seen.length >= 4);
+    assert.ok(seen.length >= 5);
     for (const args of seen) {
       assert.equal(args[0], "compose");
       assert.ok(args.includes(config.composeFile));
-      assert.ok(args.includes(`${config.workdir}/compose.override.yaml`));
       const projectIndex = args.indexOf("-p");
       assert.equal(args[projectIndex + 1], config.project);
+      const isBaseConfigOnly = args.includes("config") && !args.includes(`${config.workdir}/compose.override.yaml`);
+      if (!isBaseConfigOnly) {
+        assert.ok(args.includes(`${config.workdir}/compose.override.yaml`));
+      }
     }
   });
 });
@@ -309,8 +372,8 @@ test("every docker command is scoped to the candidate project and both compose f
 test("a required verification failure stops the sequence and marks later checks not_run", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage, snapshotHook } = fakeExecutors(config, { authCode: 1 });
-    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
+    const { events, runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config, { authCode: 1 });
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe });
 
     assert.equal(result.eligible, false);
     assert.equal(result.exitCode, 1);
@@ -328,9 +391,9 @@ test("a required verification failure stops the sequence and marks later checks 
 test("a failed production snapshot is persisted and denies promotion even when checks pass", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { runCommand, fetchPage } = fakeExecutors(config);
+    const { runCommand, fetchPage, tlsProbe } = fakeExecutors(config);
     const snapshotHook = async () => ({ ok: false, error: "snapshot hook exited with code 3" });
-    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe });
 
     assert.equal(result.eligible, false);
     assert.equal(result.exitCode, 1);
@@ -351,8 +414,8 @@ test("a failed production snapshot is persisted and denies promotion even when c
 test("a failed candidate build never starts the stack and reports the patch gate", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { events, runCommand, fetchPage, snapshotHook } = fakeExecutors(config, { buildCode: 1 });
-    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook });
+    const { events, runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config, { buildCode: 1 });
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe });
 
     assert.equal(result.eligible, false);
     assert.equal(result.report.checks.globalPatch.status, "fail");
@@ -374,12 +437,18 @@ test("a resolved compose configuration that ignores the candidate spec fails clo
           ports: [{ target: 9443, published: String(config.candidateHostPort) }],
           environment: { DSH_ORBIT_CANDIDATE_TOKEN: "tokenvalue" },
         },
+        [config.gatewayService]: {
+          volumes: [
+            { source: `${config.workdir}/gateway-identity-cert.pem`, target: config.gatewayCertTarget },
+            { source: `${config.workdir}/gateway-identity-key.pem`, target: config.gatewayKeyTarget },
+          ],
+        },
       },
     });
-    const { runCommand, fetchPage, snapshotHook } = fakeExecutors(config, { resolved: misbound });
+    const { runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config, { resolved: misbound });
 
     await assert.rejects(
-      runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook }),
+      runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe }),
       (error) => error instanceof UpgradeBindingError && /\/data mount/.test(error.message),
     );
     await assert.rejects(
@@ -393,11 +462,11 @@ test("a resolved compose configuration that ignores the candidate spec fails clo
 test("a running stack without this run's candidate token fails closed", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
-    const { runCommand, fetchPage, snapshotHook } = fakeExecutors(config, { tokenMismatch: true });
+    const { runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config, { tokenMismatch: true });
 
     await assert.rejects(
-      runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook }),
-      (error) => error instanceof UpgradeBindingError && /identity mismatch/.test(error.message),
+      runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe }),
+      (error) => error instanceof UpgradeBindingError && /does not carry this run's candidate token/.test(error.message),
     );
   });
 });
@@ -414,6 +483,50 @@ test("probeCandidateToken verifies the running stack carries the run token", asy
     await assert.rejects(
       probeCandidateToken({ config, candidateToken: "wrong", runCommand }),
       UpgradeBindingError,
+    );
+  });
+});
+
+test("a non-loopback published port fails the binding verification", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir));
+    const misbound = resolvedCompose(config, {
+      services: {
+        dsh: {
+          ...resolvedCompose(config).services.dsh,
+          ports: [{ target: 9443, published: String(config.candidateHostPort), host_ip: "0.0.0.0" }],
+        },
+        [config.gatewayService]: {
+          volumes: [
+            { source: `${config.workdir}/gateway-identity-cert.pem`, target: config.gatewayCertTarget },
+            { source: `${config.workdir}/gateway-identity-key.pem`, target: config.gatewayKeyTarget },
+          ],
+        },
+      },
+    });
+    const { runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config, { resolved: misbound });
+
+    await assert.rejects(
+      runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe }),
+      (error) =>
+        error instanceof UpgradeBindingError &&
+        /must bind to loopback \(127\.0\.0\.1 or ::1\), got "0\.0\.0\.0"/.test(error.message),
+    );
+  });
+});
+
+test("an endpoint that does not present the per-run gateway certificate fails closed", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir));
+    const { runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config, {
+      identityFingerprintMismatch: true,
+    });
+
+    await assert.rejects(
+      runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe }),
+      (error) =>
+        error instanceof UpgradeBindingError &&
+        /does not present this run's candidate gateway certificate/.test(error.message),
     );
   });
 });

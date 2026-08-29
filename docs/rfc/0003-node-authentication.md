@@ -26,7 +26,10 @@ Rules:
 
 ## Implementation prerequisites
 
-Two security boundaries must be designed separately before implementation: the registry **machine API** (node-to-Hub registration refreshes, heartbeats, report uploads) and the **browser management API** (operator-facing Hub UI). They serve different clients, and the browser trust requirements documented in the v0.2 model — Origin and Sec-Fetch-Site checks — must not be mechanically applied to machine-to-machine heartbeats; each surface needs its own fail-closed acceptance criteria in the live smoke methodology.
+Two security boundaries must be designed separately before implementation. What carries over from the v0.2 model is the fail-closed live smoke methodology — a positive control plus denial cases as the acceptance bar — not a mechanical reuse of browser header checks on machine traffic.
+
+1. **Registry machine API** (node-to-Hub: registration refresh, heartbeat, capability advertisement, report upload): credential binding to the stable node ID, credential expiry and replay protection, rate limiting, strict node scoping (a credential authorizes exactly its own node), and its own denial-case smoke matrix.
+2. **Browser management API** (operator-facing Hub UI): the v0.2 browser trust requirements apply here — Origin and Sec-Fetch-Site checks, CSRF protection, and identity-header spoofing denial, exactly as the live authorization smoke suite exercises them.
 
 ## Upgrade-guard integration
 
@@ -35,6 +38,6 @@ The v0.2 authorization smoke suite is the acceptance template for the registry s
 ## Unresolved questions
 
 - Credential format and storage on resource-constrained nodes (symmetric secret vs. keypair).
-- Whether the Hub-to-node direction needs its own Hub identity per node or reuses the operator gateway account.
+- Lifecycle of the per-node Hub service identities: issuance, expiry, and rotation windows.
 - Overlap-window defaults for rotation in headless deployments that only come online weekly.
 - Rate limiting and lockout behavior for the registration surface.

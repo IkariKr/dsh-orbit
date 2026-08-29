@@ -156,6 +156,7 @@ export async function runSnapshotHook({
     dataRoot,
     orbitRevision,
     dshVersion,
+    candidateDshVersion,
     startedAt,
   });
   return binding.ok ? result : binding;
@@ -165,6 +166,9 @@ export function bindSnapshotManifest(manifest, request) {
   const mismatched = ["snapshotId", "dataRoot", "orbitRevision", "dshVersion"].filter(
     (field) => manifest[field] !== request[field],
   );
+  if (request.candidateDshVersion !== undefined && manifest.candidateDshVersion !== request.candidateDshVersion) {
+    mismatched.push("candidateDshVersion");
+  }
   if (mismatched.length > 0) {
     return {
       ok: false,

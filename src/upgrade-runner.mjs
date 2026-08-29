@@ -1,7 +1,9 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
-import { randomUUID } from "node:crypto";
+import { randomUUID, X509Certificate } from "node:crypto";
+import { isIP } from "node:net";
+import tls from "node:tls";
 
 import { compatibilityFor } from "./compatibility.mjs";
 import { validateHost } from "./remote-settings-patch.mjs";
@@ -41,8 +43,8 @@ function quoteYaml(value) {
   return JSON.stringify(String(value));
 }
 
-export function generateComposeOverride(config, candidateToken) {
-  return [
+export function generateComposeOverride(config, candidateToken, gatewayIdentity = null) {
+  const lines = [
     "services:",
     "  dsh:",
     `    image: ${quoteYaml(config.candidateImage)}`,
@@ -53,8 +55,17 @@ export function generateComposeOverride(config, candidateToken) {
     `      - ${quoteYaml(`${config.candidateWorkspaceRoot}:/workspace:rw`)}`,
     "    ports:",
     `      - ${quoteYaml(`127.0.0.1:${config.candidateHostPort}:9443`)}`,
-    "",
-  ].join("\n");
+  ];
+  if (gatewayIdentity) {
+    lines.push(
+      `  ${config.gatewayService}:`,
+      "    volumes:",
+      `      - ${quoteYaml(`${gatewayIdentity.certPath}:${config.gatewayCertTarget}:ro`)}`,
+      `      - ${quoteYaml(`${gatewayIdentity.keyPath}:${config.gatewayKeyTarget}:ro`)}`,
+    );
+  }
+  lines.push("");
+  return lines.join("\n");
 }
 
 function resolvedPortOf(entry) {
@@ -70,7 +81,7 @@ function resolvedTargetOf(volume) {
   return volume?.target ?? volume?.Destination ?? "";
 }
 
-export function verifyResolvedComposeConfig(resolved, config) {
+export function verifyResolvedComposeConfig(resolved, config, gatewayIdentity = null) {
   const problems = [];
   if (resolved?.name !== config.project) {
     problems.push(`resolved project name ${JSON.stringify(resolved?.name)} is not ${JSON.stringify(config.project)}`);
@@ -108,6 +119,12 @@ export function verifyResolvedComposeConfig(resolved, config) {
         `resolved published port ${JSON.stringify(publishedPort)} is not the candidate port ${JSON.stringify(String(config.candidateHostPort))}`,
       );
     }
+    const hostIp = port?.host_ip ?? port?.HostIp ?? "";
+    if (!["127.0.0.1", "::1"].includes(String(hostIp))) {
+      problems.push(
+        `resolved published port must bind to loopback (127.0.0.1 or ::1), got ${JSON.stringify(hostIp || "all interfaces")}`,
+      );
+    }
   }
   const environment = dsh.environment ?? {};
   if (environment[CANDIDATE_TOKEN_ENV] !== undefined) {
@@ -120,6 +137,26 @@ export function verifyResolvedComposeConfig(resolved, config) {
     }
   } else {
     problems.push(`resolved configuration does not set ${CANDIDATE_TOKEN_ENV}`);
+  }
+  if (gatewayIdentity) {
+    const gateway = resolved?.services?.[config.gatewayService];
+    if (!gateway) {
+      problems.push(`resolved configuration has no ${config.gatewayService} service`);
+    } else {
+      const gatewayVolumes = gateway.volumes ?? [];
+      for (const [target, source] of [
+        [config.gatewayCertTarget, gatewayIdentity.certPath],
+        [config.gatewayKeyTarget, gatewayIdentity.keyPath],
+      ]) {
+        const mount = gatewayVolumes.find((volume) => resolvedTargetOf(volume) === target);
+        if (!mount || resolvedSourceOf(mount) !== source) {
+          problems.push(
+            `resolved gateway mount ${JSON.stringify(mount ? resolvedSourceOf(mount) : null)} for ${target}` +
+              ` is not the per-run identity file ${JSON.stringify(source)}`,
+          );
+        }
+      }
+    }
   }
   if (problems.length > 0) {
     throw new UpgradeBindingError(`candidate compose binding verification failed: ${problems.join("; ")}`);
@@ -169,6 +206,9 @@ export function loadUpgradeConfig(env) {
       sessionId: env.DSH_SMOKE_SESSION_ID,
       snapshotHook: env.DSH_SNAPSHOT_HOOK,
       snapshotTimeoutSeconds: Number(env.DSH_SNAPSHOT_TIMEOUT_SECONDS ?? 900),
+      gatewayService: env.DSH_UPGRADE_GATEWAY_SERVICE ?? "caddy",
+      gatewayCertTarget: env.DSH_UPGRADE_GATEWAY_CERT_TARGET ?? "/etc/caddy/certs/fullchain.pem",
+      gatewayKeyTarget: env.DSH_UPGRADE_GATEWAY_KEY_TARGET ?? "/etc/caddy/certs/privkey.pem",
       project: env.DSH_UPGRADE_PROJECT ?? "dsh-orbit-candidate",
       composeFile: env.DSH_UPGRADE_COMPOSE ?? `${REPO_ROOT}docker/compose.example.yaml`,
       workdir: env.DSH_UPGRADE_WORKDIR ?? `${REPO_ROOT}.upgrade-run`,
@@ -282,7 +322,34 @@ function composeArgs(config, ...subcommand) {
   ];
 }
 
-export async function resolveCandidateBinding({ config, runCommand = defaultRunCommand }) {
+export async function resolveCandidateBinding({ config, runCommand = defaultRunCommand, gatewayIdentity = null }) {
+  const base = await runCommand("docker", [
+    "compose",
+    "-f",
+    config.composeFile,
+    "-p",
+    config.project,
+    "config",
+    "--format",
+    "json",
+  ]);
+  if (base.code !== 0) {
+    throw new UpgradeBindingError(
+      `docker compose config failed for the base file: ${failDetail(base.stderr, `exit ${base.code}`)}`,
+    );
+  }
+  let baseConfig;
+  try {
+    baseConfig = JSON.parse(base.stdout);
+  } catch {
+    throw new UpgradeBindingError("docker compose config did not return valid JSON for the base file");
+  }
+  if (!baseConfig?.services?.[config.gatewayService]) {
+    throw new UpgradeBindingError(
+      `the base compose file defines no ${config.gatewayService} service; the candidate gateway must exist to bind the endpoint identity`,
+    );
+  }
+
   const resolved = await runCommand("docker", composeArgs(config, "config", "--format", "json"));
   if (resolved.code !== 0) {
     throw new UpgradeBindingError(
@@ -295,7 +362,7 @@ export async function resolveCandidateBinding({ config, runCommand = defaultRunC
   } catch {
     throw new UpgradeBindingError("docker compose config did not return valid JSON");
   }
-  verifyResolvedComposeConfig(parsed, config);
+  verifyResolvedComposeConfig(parsed, config, gatewayIdentity);
 }
 
 export async function probeCandidateToken({ config, candidateToken, runCommand = defaultRunCommand }) {
@@ -307,7 +374,77 @@ export async function probeCandidateToken({ config, candidateToken, runCommand =
   }
 }
 
-export async function runVerificationSequence({ config, runCommand = defaultRunCommand, fetchPage = defaultFetchPage }) {
+export async function generateGatewayIdentityCertificate({ config, runCommand = defaultRunCommand }) {
+  const endpoint = new URL(config.candidateEndpoint);
+  const host = endpoint.hostname;
+  const san = isIP(host) ? `IP:${host}` : `DNS:${host}`;
+  const identity = {
+    certPath: `${config.workdir}/gateway-identity-cert.pem`,
+    keyPath: `${config.workdir}/gateway-identity-key.pem`,
+  };
+  const generated = await runCommand("openssl", [
+    "req",
+    "-x509",
+    "-newkey",
+    "rsa:2048",
+    "-sha256",
+    "-days",
+    "2",
+    "-nodes",
+    "-keyout",
+    identity.keyPath,
+    "-out",
+    identity.certPath,
+    "-subj",
+    `/CN=${host}`,
+    "-addext",
+    `subjectAltName=${san}`,
+  ]);
+  if (generated.code !== 0) {
+    throw new UpgradeBindingError(
+      `could not generate the per-run gateway identity certificate (openssl must be available in the runner environment): ` +
+        failDetail(generated.stderr, `exit ${generated.code}`),
+    );
+  }
+  const certificate = new X509Certificate(await readFile(identity.certPath));
+  return { ...identity, fingerprint: certificate.fingerprint256 };
+}
+
+async function defaultTlsProbe({ host, port, servername }) {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect({ host, port, servername, rejectUnauthorized: false }, () => {
+      const certificate = socket.getPeerCertificate();
+      socket.destroy();
+      resolve(certificate?.fingerprint256 ?? null);
+    });
+    socket.once("error", (error) => {
+      socket.destroy();
+      reject(new UpgradeBindingError(`gateway certificate probe failed: ${error.message}`));
+    });
+  });
+}
+
+export async function verifyGatewayIdentity({ config, identity, tlsProbe = defaultTlsProbe }) {
+  const endpoint = new URL(config.candidateEndpoint);
+  const presented = await tlsProbe({
+    host: endpoint.hostname,
+    port: Number(endpoint.port || 443),
+    servername: endpoint.hostname,
+  });
+  if (presented !== identity.fingerprint) {
+    throw new UpgradeBindingError(
+      `candidate endpoint identity mismatch: ${config.candidateEndpoint} does not present this run's candidate gateway certificate` +
+        ` (presented fingerprint: ${JSON.stringify(presented)}, expected: ${JSON.stringify(identity.fingerprint)})`,
+    );
+  }
+}
+
+export async function runVerificationSequence({
+  config,
+  runCommand = defaultRunCommand,
+  fetchPage = defaultFetchPage,
+  identityCaPath = null,
+}) {
   const checks = {};
   let stoppedAfter = null;
   const record = (name, status, detail = "") => {
@@ -321,6 +458,7 @@ export async function runVerificationSequence({ config, runCommand = defaultRunC
     DSH_SMOKE_BASIC_USER: config.basicUser,
     DSH_SMOKE_BASIC_PASSWORD: config.basicPassword,
     ...(config.smokeOrigin ? { DSH_SMOKE_ORIGIN: config.smokeOrigin } : {}),
+    ...(identityCaPath ? { NODE_EXTRA_CA_CERTS: identityCaPath } : {}),
     ...extra,
   });
   const gatewayHeaders = () => ({
@@ -453,6 +591,7 @@ export async function runCandidateWorkflow({
   runCommand = defaultRunCommand,
   fetchPage = defaultFetchPage,
   snapshotHook = runSnapshotHook,
+  tlsProbe = defaultTlsProbe,
 }) {
   const evidence = {
     promotionEvaluated: true,
@@ -497,8 +636,14 @@ export async function runCandidateWorkflow({
     evidence.snapshot.failure = snapshot.error;
   }
 
-  await writeFile(`${config.workdir}/compose.override.yaml`, generateComposeOverride(config, candidateToken), "utf8");
-  await resolveCandidateBinding({ config, runCommand });
+  const gatewayIdentity = await generateGatewayIdentityCertificate({ config, runCommand });
+  evidence.candidate.gatewayIdentityFingerprint = gatewayIdentity.fingerprint;
+  await writeFile(
+    `${config.workdir}/compose.override.yaml`,
+    generateComposeOverride(config, candidateToken, gatewayIdentity),
+    "utf8",
+  );
+  await resolveCandidateBinding({ config, runCommand, gatewayIdentity });
 
   const build = await runCommand("docker", composeArgs(config, "build"), {
     env: { DSH_VERSION: config.dshVersion, DSH_PUBLIC_HOST: config.publicHost },
@@ -517,7 +662,13 @@ export async function runCandidateWorkflow({
       };
     } else {
       await probeCandidateToken({ config, candidateToken, runCommand });
-      const { checks } = await runVerificationSequence({ config, runCommand, fetchPage });
+      await verifyGatewayIdentity({ config, identity: gatewayIdentity, tlsProbe });
+      const { checks } = await runVerificationSequence({
+        config,
+        runCommand,
+        fetchPage,
+        identityCaPath: gatewayIdentity.certPath,
+      });
       evidence.checks = checks;
     }
   }
