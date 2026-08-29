@@ -319,3 +319,92 @@ test("loadUpgradeConfig reports missing environment configuration", () => {
   assert.equal(config.candidateImage, "dsh-orbit:0.1.1-rc.2");
   assert.ok(config.workdir.endsWith(".upgrade-run"));
 });
+
+test("an unsupported DSH version is never marked supported or promotion-ready", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir), { dshVersion: "9.9.9-future" });
+    const gate = await preflight(config);
+    assert.equal(gate.ok, false);
+    assert.ok(gate.failures.some((failure) => failure.check === "compatibility-profile"));
+
+    const { events, runCommand, fetchPage } = fakeExecutors({ buildCode: 1 });
+    const result = await runCandidateWorkflow({
+      config,
+      runCommand,
+      fetchPage,
+      snapshotHook: fakeSnapshotHook(events, {
+        ok: true,
+        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
+      }),
+    });
+    assert.equal(result.report.candidate.profile, null);
+    assert.equal(result.report.checks.globalPatch.status, "fail");
+    assert.equal(result.report.decision.outcome, DECISION_OUTCOMES.notEligible);
+    assert.equal(result.banner, "CANDIDATE FAILED - NOT ELIGIBLE FOR PROMOTION");
+  });
+});
+
+test("a missing profile-local patch verification fails the candidate", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir));
+    const { events, runCommand, fetchPage } = fakeExecutors();
+    const wrapped = async (file, args, options) => {
+      if (args.includes("--check")) {
+        return {
+          code: 0,
+          stdout: `${PATCH_CHECK_STDOUT.split("\n")[0]}\n${PATCH_CHECK_STDOUT.split("\n")[1]}\n`,
+          stderr: "",
+        };
+      }
+      return runCommand(file, args, options);
+    };
+    const result = await runCandidateWorkflow({
+      config,
+      runCommand: wrapped,
+      fetchPage,
+      snapshotHook: fakeSnapshotHook(events, {
+        ok: true,
+        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
+      }),
+    });
+
+    assert.equal(result.report.checks.globalPatch.status, "pass");
+    assert.equal(result.report.checks.profilePatch.status, "fail");
+    assert.equal(result.report.checks.authorizationSmoke.status, "not_run");
+    assert.equal(result.report.decision.outcome, DECISION_OUTCOMES.notEligible);
+    assert.ok(result.report.decision.reasons.includes("profilePatch=fail"));
+    assert.equal(result.banner, "CANDIDATE FAILED - NOT ELIGIBLE FOR PROMOTION");
+  });
+});
+
+test("a session-resume regression fails the candidate while preserving a sanitized report", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir));
+    const { events, runCommand, fetchPage } = fakeExecutors({ sessionCode: 1 });
+    const result = await runCandidateWorkflow({
+      config,
+      runCommand,
+      fetchPage,
+      snapshotHook: fakeSnapshotHook(events, {
+        ok: true,
+        manifest: { restoreReference: "/srv/backups/pre-candidate.tar.gz", snapshotId: "snap-1" },
+      }),
+    });
+
+    assert.equal(result.report.checks.sessionResume.status, "fail");
+    assert.match(
+      result.report.checks.sessionResume.detail,
+      /refusing to compose an unscoped context/,
+    );
+    assert.equal(result.report.decision.outcome, DECISION_OUTCOMES.notEligible);
+    assert.equal(result.report.checks.terminalPtty.status, "not_run");
+    assert.ok(!result.report.decision.reasons.includes("terminalPtty=pass"));
+
+    const text = result.text;
+    assert.match(text, /NOT ELIGIBLE FOR PROMOTION/);
+    assert.match(text, /refusing to compose an unscoped context/);
+    await readFile(join(config.workdir, "report.json"), "utf8");
+    const evidence = JSON.parse(await readFile(join(config.workdir, "evidence.json"), "utf8"));
+    assert.equal(evidence.checks.sessionResume.status, "fail");
+  });
+});

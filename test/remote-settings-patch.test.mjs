@@ -202,3 +202,38 @@ test("rejects a URL where a bare public hostname is required", async () => {
     /bare hostname/,
   );
 });
+
+test("fails closed when an expected fragment appears more than once", async () => {
+  const duplicatedGate = SERVER_SOURCE.replace(
+    "\tif (!isLoopbackHostname(hostUrl.hostname) && !isTrustedAuthority(hostUrl, trustedHosts)) return false;\n",
+    "\tif (!isLoopbackHostname(hostUrl.hostname) && !isTrustedAuthority(hostUrl, trustedHosts)) return false;\n\tif (!isLoopbackHostname(hostUrl.hostname) && !isTrustedAuthority(hostUrl, trustedHosts)) return false;\n",
+  );
+  assert.notEqual(duplicatedGate, SERVER_SOURCE);
+  const serverRoot = await fixture({ serverSource: duplicatedGate });
+  await assert.rejects(
+    patchConnectionRoot({
+      root: serverRoot,
+      dshVersion: "0.1.1-rc.2",
+      publicHost: "dsh.example.com",
+      proxyAuthFile: "/run/secrets/dsh_proxy_auth",
+    }),
+    /trusted authority gate is not unique/,
+  );
+  assert.equal(await readFile(join(serverRoot, "index.js"), "utf8"), duplicatedGate);
+
+  const duplicatedClient = CLIENT_SOURCE.replace(
+    '\tif (hostname === "localhost" || hostname === "[::1]") return true;\n',
+    '\tif (hostname === "localhost" || hostname === "[::1]") return true;\n\tif (hostname === "localhost" || hostname === "[::1]") return true;\n',
+  );
+  assert.notEqual(duplicatedClient, CLIENT_SOURCE);
+  const clientRoot = await fixture({ clientSource: duplicatedClient });
+  await assert.rejects(
+    patchConnectionRoot({
+      root: clientRoot,
+      dshVersion: "0.1.1-rc.2",
+      publicHost: "dsh.example.com",
+      proxyAuthFile: "/run/secrets/dsh_proxy_auth",
+    }),
+    /loopback hostname check is not unique/,
+  );
+});
