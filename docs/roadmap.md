@@ -12,6 +12,8 @@ The roadmap is staged so that deployment safety remains independent from later f
 
 ## 0.2: upgrade guard
 
+Shipped in `v0.2.0`:
+
 - candidate build command;
 - automated authenticated and negative-auth smoke tests;
 - data snapshot hooks;

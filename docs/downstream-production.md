@@ -74,4 +74,6 @@ For each upgrade:
 7. run authenticated read/write smoke tests and negative-auth tests;
 8. keep the previous image and data snapshot until the deployment is accepted.
 
-See [Upgrade guide](upgrade.md) for the compatibility checks that should gate a DSH version change.
+Steps 2 through 5 can be run as one fail-closed command with the candidate upgrade runner (`npm run upgrade -- candidate`), which snapshots production, builds without replacing the last known-good image, starts the candidate against copied data on an isolated endpoint, runs the smoke suites, and produces a compatibility report. See the README for the required environment.
+
+See [Upgrade guide](upgrade.md) for the compatibility checks that should gate a DSH version change, and [Snapshot and rollback](snapshot-rollback.md) for the snapshot contract used before promotion.

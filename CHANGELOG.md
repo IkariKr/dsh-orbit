@@ -4,6 +4,17 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
+## 0.2.0 - 2026-08-29
+
+### Added
+
+- live authorization smoke suite (`npm run smoke:auth`) that proves the positive control and five negative authorization outcomes against a running deployment, with credential redaction and non-zero exit on any required mismatch;
+- sanitized, reproducible compatibility report generation (`npm run report:compatibility`) with explicit `pass`/`fail`/`not_run` check states and a promotion-eligibility decision derived only from the recorded evidence;
+- downstream snapshot contract with a portable reference hook (`examples/snapshot-hook-reference.sh`), strict machine-checkable manifests, timeout handling, and a promotion-readiness gate that denies promotion after any snapshot failure (`docs/snapshot-rollback.md`);
+- candidate upgrade runner (`npm run upgrade -- preflight|candidate|verify|report`) that runs the production snapshot, builds without replacing the last known-good image, starts against copied data on an isolated endpoint, executes the deterministic verification sequence, stops fail-closed at the first required failure, and never promotes production automatically;
+- scheduled upstream DSH watcher (`.github/workflows/upstream-watcher.yml`) that classifies newly published package versions against the compatibility registry without modifying it, with report artifacts and maintainer review guidance;
+- `DSH_SMOKE_ORIGIN` for gateways that rewrite the `Host` header to a public authority differing from the smoke endpoint URL.
+
 ## 0.1.1 - 2026-08-29
 
 ### Added

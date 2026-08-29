@@ -38,7 +38,7 @@ function fixtureConfig(workdir, overrides = {}) {
     sessionId: "session-historical",
     dataRoot: "/srv/dsh-production/data",
     candidateDataRoot: "/srv/dsh-candidate/data",
-    baselineImage: "dsh-orbit:0.1.1-rc.2-ikari.4",
+    baselineImage: "dsh-orbit:0.1.1-rc.2-production.4",
     orbitRevision: "8f3094e6d09c9337569f5cc1f965f8bd3d01e7d9",
     orbitVersion: "0.1.1",
     snapshotHook: "/opt/dsh-orbit/hooks/snapshot.sh",
