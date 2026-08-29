@@ -145,6 +145,28 @@ The recommended flow is:
 
 See [Upgrade guide](docs/upgrade.md), [Compatibility](docs/compatibility.md), and [Downstream production deployment](docs/downstream-production.md).
 
+## Candidate upgrade runner
+
+`npm run upgrade -- <command>` orchestrates the manual upgrade sequence as one explicit, fail-closed command. It never promotes production: the furthest it can go is `CANDIDATE PASSED - ELIGIBLE FOR MANUAL PROMOTION`, and promoting remains an operator action.
+
+```sh
+npm run upgrade -- preflight   # validate the configuration without touching anything
+npm run upgrade -- candidate   # production snapshot, candidate build, isolated start, verification, report
+npm run upgrade -- verify      # verification sequence plus report against a running candidate endpoint
+npm run upgrade -- report      # regenerate the report from the run directory
+```
+
+Configuration comes from the environment: `DSH_VERSION` (candidate), `DSH_PUBLIC_HOST`, `DSH_SMOKE_URL` (the isolated candidate endpoint), `DSH_SMOKE_BASIC_USER`/`DSH_SMOKE_BASIC_PASSWORD`, `DSH_SMOKE_SESSION_ID` (a pre-upgrade session), `DSH_DATA_ROOT` (production data), `DSH_CANDIDATE_DATA_ROOT` (the copied data the candidate uses), `DSH_BASELINE_IMAGE` (last known-good image tag), `DSH_ORBIT_REVISION`, and `DSH_SNAPSHOT_HOOK`. Optional: `DSH_CANDIDATE_IMAGE`, `DSH_UPGRADE_PROJECT`, `DSH_UPGRADE_COMPOSE`, `DSH_UPGRADE_WORKDIR`, `DSH_SNAPSHOT_TIMEOUT_SECONDS`.
+
+The runner:
+
+1. runs the production snapshot hook and denies promotion readiness when it fails;
+2. builds the candidate without replacing the last known-good image tag — the build fails on unsupported versions or source-layout mismatches;
+3. starts the candidate against the copied data on an isolated endpoint; production keeps running;
+4. executes the verification sequence in a deterministic order (runtime readiness, patch verification, settings read, no-op settings write, live authorization smoke, existing-session resume, web/plugin routes, and the release-limited long-lived transport and terminal checks);
+5. stops at the first required failure, marks the remaining checks `not_run`, and still produces a final sanitized report;
+6. exits `0` only for a passed candidate, `1` for a failed candidate, and `2` for configuration or usage errors.
+
 ## Development
 
 Requirements:

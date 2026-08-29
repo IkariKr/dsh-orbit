@@ -13,6 +13,7 @@ const ignoredDirectories = new Set([
   "backups",
   "logs",
   "coverage",
+  ".upgrade-run",
 ]);
 const ignoredExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico"]);
 

@@ -15,7 +15,7 @@ function replaceExactlyOnce(source, needle, replacement, label) {
   return source.slice(0, first) + replacement + source.slice(first + needle.length);
 }
 
-function validateHost(publicHost) {
+export function validateHost(publicHost) {
   if (!publicHost || typeof publicHost !== "string") {
     throw new Error("DSH_PUBLIC_HOST is required");
   }

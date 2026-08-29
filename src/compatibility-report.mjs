@@ -10,9 +10,10 @@ export const REQUIRED_CHECKS = Object.freeze([
   "settingsNoopWrite",
   "authorizationSmoke",
   "sessionResume",
+  "webPluginRoutes",
 ]);
 
-export const OPTIONAL_CHECKS = Object.freeze(["terminalPtty"]);
+export const OPTIONAL_CHECKS = Object.freeze(["longLivedTransport", "terminalPtty"]);
 
 export const KNOWN_CHECKS = new Set([...REQUIRED_CHECKS, ...OPTIONAL_CHECKS]);
 

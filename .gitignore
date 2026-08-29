@@ -35,3 +35,6 @@ coverage/
 dist/
 .tmp/
 tmp/
+
+# Upgrade runner run artifacts
+.upgrade-run/

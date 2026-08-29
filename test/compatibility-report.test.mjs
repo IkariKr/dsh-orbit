@@ -31,6 +31,7 @@ function passingEvidence(overrides = {}) {
       settingsNoopWrite: { status: "pass" },
       authorizationSmoke: { status: "pass" },
       sessionResume: { status: "pass" },
+      webPluginRoutes: { status: "pass" },
     },
     snapshot: { reference: "data-v011-baseline-20260829-125527.tar.gz" },
     ...overrides,
@@ -81,6 +82,7 @@ test("passing patch evidence alone cannot produce an overall pass", () => {
         settingsNoopWrite: { status: "pass" },
         authorizationSmoke: { status: "fail", detail: "unexpected Origin accepted" },
         sessionResume: { status: "fail", detail: "refusing to compose an unscoped context" },
+        webPluginRoutes: { status: "pass" },
       },
     }),
   );
