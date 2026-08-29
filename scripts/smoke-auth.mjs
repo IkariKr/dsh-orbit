@@ -71,7 +71,21 @@ async function probe(headers) {
   };
 }
 
-const origin = new URL(baseUrl).origin;
+const originOverride = process.env.DSH_SMOKE_ORIGIN;
+let origin;
+if (originOverride) {
+  try {
+    origin = new URL(originOverride).origin;
+  } catch {
+    origin = "null";
+  }
+  if (origin === "null") {
+    console.error("DSH_SMOKE_ORIGIN must be an absolute origin, for example https://dsh.example.com");
+    process.exit(2);
+  }
+} else {
+  origin = new URL(baseUrl).origin;
+}
 
 const cases = [
   {

@@ -24,8 +24,8 @@ async function withServer(handler, run) {
   }
 }
 
-async function runSmoke(baseUrl, { withCredentials = true } = {}) {
-  const env = { ...process.env, DSH_SMOKE_URL: baseUrl };
+async function runSmoke(baseUrl, { withCredentials = true, extraEnv = {} } = {}) {
+  const env = { ...process.env, DSH_SMOKE_URL: baseUrl, ...extraEnv };
   if (withCredentials) {
     env.DSH_SMOKE_BASIC_USER = USER;
     env.DSH_SMOKE_BASIC_PASSWORD = TEST_PASSWORD;
@@ -60,11 +60,12 @@ async function readRequest(req) {
   return { headers: req.headers, body: JSON.parse(raw) };
 }
 
-function fenceHandler(captured) {
+function fenceHandler(captured, originMode = "host") {
   return async (req, res) => {
     const request = await readRequest(req);
     captured.push(request);
-    const expectedOrigin = `http://${req.headers.host}`;
+    const expectedOrigin =
+      originMode === "host" ? `http://${req.headers.host}` : originMode;
     if (request.headers.authorization !== VALID_AUTHORIZATION) {
       respond(res, request.body.rpcId, { ok: false, error: { code: "E", message: "unauthorized" } }, 401);
       return;
@@ -178,6 +179,25 @@ test("reports gateway rejections without echoing response bodies", async () => {
   assert.equal(code, 1);
   assert.match(stderr, /expected allowed, got denied \(HTTP 401\)/);
   assert.ok(!stderr.includes(TEST_PASSWORD));
+});
+
+test("honors DSH_SMOKE_ORIGIN when the gateway rewrites the Host", async () => {
+  const captured = [];
+  const { code, stdout } = await withServer(fenceHandler(captured, "https://dsh.example.com"), (baseUrl) =>
+    runSmoke(baseUrl, { extraEnv: { DSH_SMOKE_ORIGIN: "https://dsh.example.com" } }),
+  );
+  assert.equal(code, 0);
+  assert.match(stdout, /authorization smoke: PASS \(6\/6 cases matched\)/);
+  const positive = captured.find((entry) => entry.headers.authorization === VALID_AUTHORIZATION);
+  assert.equal(positive.headers.origin, "https://dsh.example.com");
+});
+
+test("rejects an invalid DSH_SMOKE_ORIGIN", async () => {
+  const { code, stderr } = await withServer(fenceHandler(), (baseUrl) =>
+    runSmoke(baseUrl, { extraEnv: { DSH_SMOKE_ORIGIN: "not-an-origin" } }),
+  );
+  assert.equal(code, 2);
+  assert.match(stderr, /DSH_SMOKE_ORIGIN must be an absolute origin/);
 });
 
 test("requires the target URL", async () => {

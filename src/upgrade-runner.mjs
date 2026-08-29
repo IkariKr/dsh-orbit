@@ -64,6 +64,7 @@ export function loadUpgradeConfig(env) {
       orbitRevision: env.DSH_ORBIT_REVISION,
       orbitVersion: env.DSH_ORBIT_VERSION ?? "0.2.0-snapshot",
       snapshotHook: env.DSH_SNAPSHOT_HOOK,
+      smokeOrigin: env.DSH_SMOKE_ORIGIN,
       snapshotTimeoutSeconds: Number(env.DSH_SNAPSHOT_TIMEOUT_SECONDS ?? 900),
       candidateImage: env.DSH_CANDIDATE_IMAGE ?? `dsh-orbit:${dshVersion}`,
       project: env.DSH_UPGRADE_PROJECT ?? "dsh-orbit-candidate",
@@ -163,11 +164,11 @@ export async function runVerificationSequence({ config, runCommand = defaultRunC
     DSH_SMOKE_URL: config.candidateEndpoint,
     DSH_SMOKE_BASIC_USER: config.basicUser,
     DSH_SMOKE_BASIC_PASSWORD: config.basicPassword,
+    ...(config.smokeOrigin ? { DSH_SMOKE_ORIGIN: config.smokeOrigin } : {}),
     ...extra,
   });
   const gatewayHeaders = () => ({
     authorization: `Basic ${Buffer.from(`${config.basicUser}:${config.basicPassword}`).toString("base64")}`,
-    origin: new URL(config.candidateEndpoint).origin,
     "sec-fetch-site": "same-origin",
   });
 

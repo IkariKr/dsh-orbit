@@ -105,6 +105,8 @@ node scripts/smoke-settings.mjs
 
 Use the authentication variables that match the path being tested. The script does not print credentials or settings secrets.
 
+When the gateway rewrites the `Host` header to a public authority that differs from the smoke endpoint URL (for example a non-default rehearsal port), set `DSH_SMOKE_ORIGIN=https://dsh.example.com` so the same-origin positive control matches what a real browser would send.
+
 ### 6. Smoke-test authorization
 
 Test the live authorization boundary of a running deployment against privileged RPCs:
