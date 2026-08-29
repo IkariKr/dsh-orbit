@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { randomUUID, X509Certificate } from "node:crypto";
 import { isIP } from "node:net";
+import http from "node:http";
+import https from "node:https";
 import tls from "node:tls";
 
 import { compatibilityFor } from "./compatibility.mjs";
@@ -297,11 +299,28 @@ async function defaultRunCommand(file, args, options = {}) {
 }
 
 async function defaultFetchPage(url, options = {}) {
-  const response = await fetch(url, {
-    headers: { connection: "close", ...options.headers },
+  const target = new URL(url);
+  const transport = target.protocol === "http:" ? http : https;
+  const status = await new Promise((resolve, reject) => {
+    const request = transport.request(
+      url,
+      {
+        method: "GET",
+        headers: { connection: "close", ...options.headers },
+        ...(options.ca ? { ca: options.ca } : {}),
+      },
+      (response) => {
+        let body = "";
+        response.on("data", (chunk) => {
+          body += chunk;
+        });
+        response.on("end", () => resolve({ status: response.statusCode, body }));
+      },
+    );
+    request.on("error", reject);
+    request.end();
   });
-  const body = await response.text().catch(() => "");
-  return { status: response.status, body };
+  return status;
 }
 
 function failDetail(output, fallback) {
@@ -473,7 +492,10 @@ export async function runVerificationSequence({
       names: ["runtimeReadiness"],
       required: true,
       run: async () => {
-        const home = await fetchPage(`${config.candidateEndpoint}/`, { headers: gatewayHeaders() });
+        const home = await fetchPage(`${config.candidateEndpoint}/`, {
+          headers: gatewayHeaders(),
+          ...(identityCaPath ? { ca: identityCaPath } : {}),
+        });
         record(
           "runtimeReadiness",
           home.status === 200 ? "pass" : "fail",
@@ -535,7 +557,10 @@ export async function runVerificationSequence({
       names: ["webPluginRoutes"],
       required: true,
       run: async () => {
-        const home = await fetchPage(`${config.candidateEndpoint}/`, { headers: gatewayHeaders() });
+        const home = await fetchPage(`${config.candidateEndpoint}/`, {
+          headers: gatewayHeaders(),
+          ...(identityCaPath ? { ca: identityCaPath } : {}),
+        });
         const pluginMatch = typeof home.body === "string" ? home.body.match(/src="(\/plugins\/[^"]+)"/) : null;
         if (!pluginMatch) {
           record("webPluginRoutes", "fail", "the web UI references no plugin asset");
@@ -543,6 +568,7 @@ export async function runVerificationSequence({
         }
         const asset = await fetchPage(`${config.candidateEndpoint}${pluginMatch[1]}`, {
           headers: gatewayHeaders(),
+          ...(identityCaPath ? { ca: identityCaPath } : {}),
         });
         record(
           "webPluginRoutes",
