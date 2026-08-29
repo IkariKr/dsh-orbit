@@ -4,12 +4,13 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
-## 0.1.1 - 2026-08-28
+## 0.1.1 - 2026-08-29
 
 ### Added
 
 - existing-session resume smoke test for candidate upgrades, including a clear diagnostic for the upstream `agent-presets` unscoped-context failure;
-- upgrade compatibility guidance requiring a pre-upgrade session resume check on copied data.
+- upgrade compatibility guidance requiring a pre-upgrade session resume check on copied data;
+- a manual `node-pty` repair helper for persisted profiles when an operator needs to rerun the automatic terminal runtime repair explicitly.
 
 ### Fixed
 

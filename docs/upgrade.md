@@ -69,6 +69,16 @@ npm run smoke:session
 
 The smoke test reads the session's current model and re-selects that same model. This exercises the cold-resume path without intentionally changing the model choice. Use a session that predates the candidate DSH version; a newly created session does not validate upgrade compatibility.
 
+If `dsh-better-sidebar` is installed but its Linux `node-pty` native binding is missing, repair the copied candidate data before promotion:
+
+```sh
+DSH_ORBIT_IMAGE=dsh-orbit:<candidate-tag> \
+DSH_DATA_DIR=/path/to/copied/data \
+sh scripts/repair-node-pty.sh
+```
+
+This is a manual fallback for the automatic startup repair included in Orbit `0.1.1`. It reuses the repair command and build toolchain already present in the selected Orbit image and writes the compiled native binding into the mounted profile data.
+
 ### 7. Promote and verify again
 
 After the candidate passes, snapshot production data, switch the image tag, and repeat the smoke tests on the production path.
