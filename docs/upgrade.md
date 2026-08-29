@@ -56,7 +56,8 @@ At minimum verify:
 - a request without the internal proxy secret is rejected;
 - a cross-site request is rejected;
 - a local proxy cannot spoof an identity-provider assertion header;
-- WebSocket and long-running agent traffic still work.
+- WebSocket and long-running agent traffic still work;
+- a sidebar terminal can open a PTY and run `dsh --version`, which also verifies the persisted profile's `node-pty` native binding for the candidate container.
 
 For the existing-session check, run against copied candidate data rather than production data:
 

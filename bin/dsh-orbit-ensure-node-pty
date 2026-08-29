@@ -1,0 +1,50 @@
+#!/bin/sh
+set -eu
+
+PROFILE_ROOT="${DSH_PROFILE_ROOT:-/data/dsh-home/profiles/web}"
+NODE_PTY_ROOT="${PROFILE_ROOT}/node_modules/node-pty"
+NODE_GYP="${DSH_NODE_GYP:-/usr/local/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js}"
+
+if [ ! -f "${NODE_PTY_ROOT}/package.json" ]; then
+  exit 0
+fi
+
+check_node_pty() {
+  (
+    cd "$PROFILE_ROOT"
+    node -e "const p = require('node-pty'); if (typeof p.spawn !== 'function') process.exit(1)" >/dev/null 2>&1
+  )
+}
+
+if check_node_pty; then
+  echo "DSH Orbit terminal runtime: node-pty ok"
+  exit 0
+fi
+
+if [ ! -f "$NODE_GYP" ]; then
+  echo "DSH Orbit terminal runtime: node-gyp not found at $NODE_GYP" >&2
+  exit 1
+fi
+
+if [ ! -f /usr/local/include/node/node.h ]; then
+  echo "DSH Orbit terminal runtime: bundled Node.js headers are unavailable" >&2
+  exit 1
+fi
+
+if ! command -v make >/dev/null 2>&1 || ! command -v g++ >/dev/null 2>&1; then
+  echo "DSH Orbit terminal runtime: native build toolchain is unavailable" >&2
+  exit 1
+fi
+
+echo "DSH Orbit terminal runtime: rebuilding node-pty for this container"
+(
+  cd "$NODE_PTY_ROOT"
+  node "$NODE_GYP" rebuild --nodedir=/usr/local
+)
+
+if ! check_node_pty; then
+  echo "DSH Orbit terminal runtime: node-pty rebuild completed but the module still cannot load" >&2
+  exit 1
+fi
+
+echo "DSH Orbit terminal runtime: node-pty repaired"

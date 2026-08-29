@@ -9,6 +9,7 @@ RESTART_REQUEST="${DSH_HOME:-/data/dsh-home}/.dsh-web-restart.request"
 DSH_BIN="/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js"
 PATCHER="/usr/local/lib/dsh-orbit/bin/dsh-orbit-patch.mjs"
 HOOK_RUNNER="/usr/local/lib/dsh-orbit/bin/dsh-orbit-run-hooks.mjs"
+TERMINAL_RUNTIME_REPAIR="/usr/local/bin/dsh-orbit-ensure-node-pty"
 dsh_pid=""
 
 rm -f "$READY_FILE"
@@ -71,6 +72,7 @@ wait_for_web() {
 prepare_runtime() {
   node "$PATCHER" --runtime
   node "$HOOK_RUNNER"
+  "$TERMINAL_RUNTIME_REPAIR"
 }
 
 # A fresh profile may install its own client-connection package on first boot.

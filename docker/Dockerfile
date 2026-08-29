@@ -15,6 +15,8 @@ RUN apk add --no-cache \
       python3 \
       py3-pip \
       py3-virtualenv \
+      build-base \
+      linux-headers \
     && update-ca-certificates \
     && addgroup -S -g 10001 dsh \
     && adduser -S -D -H -s /bin/bash -u 10001 -G dsh dsh \
@@ -32,9 +34,10 @@ COPY src/ /usr/local/lib/dsh-orbit/src/
 COPY bin/ /usr/local/lib/dsh-orbit/bin/
 COPY docker/start.sh /usr/local/bin/dsh-orbit-start
 COPY bin/dsh-orbit-restart-web /usr/local/bin/dsh-restart-web
+COPY bin/dsh-orbit-ensure-node-pty /usr/local/bin/dsh-orbit-ensure-node-pty
 
 RUN node /usr/local/lib/dsh-orbit/bin/dsh-orbit-patch.mjs --build \
-    && chmod 0755 /usr/local/bin/dsh-orbit-start /usr/local/bin/dsh-restart-web
+    && chmod 0755 /usr/local/bin/dsh-orbit-start /usr/local/bin/dsh-restart-web /usr/local/bin/dsh-orbit-ensure-node-pty
 
 WORKDIR /workspace
 USER 10001:10001
