@@ -1,0 +1,41 @@
+name: Upstream DSH watcher
+
+on:
+  schedule:
+    # Daily, off-hour. Checks the published @deepseek-ai/dsh package version
+    # against the compatibility registry without any secret or downstream data.
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Compare the published DSH version with the compatibility registry
+        run: node scripts/watch-upstream.mjs --json-out upstream-dsh-report.json
+
+      - name: Summarize
+        if: always()
+        run: |
+          if [ -f upstream-dsh-report.json ]; then
+            cat upstream-dsh-report.json >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload watcher report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-dsh-report
+          path: upstream-dsh-report.json
+          if-no-files-found: ignore

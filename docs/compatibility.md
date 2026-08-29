@@ -37,6 +37,18 @@ This can appear when a session created under one DSH runtime is resumed after pa
 
 When upstream code changes, add a new compatibility profile rather than broadening an old exact matcher. This keeps older supported versions deterministic and makes the security review of each upstream change explicit.
 
+## Upstream release watcher
+
+A scheduled CI job (`.github/workflows/upstream-watcher.yml`) checks the published `@deepseek-ai/dsh` package daily and classifies it against the compatibility registry as `supported` or `unknown`. An unknown version is recorded as a warning annotation with a JSON report artifact; the registry, the exact matchers, and any deployment are never modified automatically. The check is public: it needs no secrets and carries no downstream information.
+
+## Manual review path for an unknown version
+
+1. Inspect the upstream release and its source changes.
+2. Determine whether upstream now provides an official capability that removes the need for an Orbit patch — prefer retiring the patch.
+3. When the patch still applies, add a new compatibility profile with its own exact matchers and tests rather than broadening an old one.
+4. Run the full candidate workflow (`npm run upgrade -- candidate`) against copied data on an isolated endpoint.
+5. Update this document's compatibility table only after the evidence passes.
+
 ## Upstream support takes precedence
 
 If a future DSH release provides an official authenticated remote configuration plane, DSH Orbit should use that capability instead of patching the same behavior.
