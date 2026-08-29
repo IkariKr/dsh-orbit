@@ -83,6 +83,33 @@ This is a manual fallback for the automatic startup repair included in Orbit `0.
 
 After the candidate passes, snapshot production data, switch the image tag, and repeat the smoke tests on the production path.
 
+## Compatibility report
+
+A candidate validation run is summarized in a sanitized, reproducible compatibility report. The report generator reads a structured evidence document and produces both a machine-readable JSON report (for CI artifacts, archival, and automated comparison) and a concise human-readable summary:
+
+```sh
+npm run report:compatibility -- \
+  --input evidence.json \
+  --json-out report.json
+```
+
+`--format json` switches the console output to JSON. `DSH_REPORT_REDACTIONS` optionally holds a JSON array of secret strings that are replaced with `[redacted]` inside check details.
+
+### Status meanings
+
+Every check has an explicit state; missing evidence is never treated as a pass:
+
+- `pass` — the check ran and succeeded;
+- `fail` — the check ran and failed;
+- `not_run` — the check did not run in this validation round.
+
+`globalPatch`, `profilePatch`, `runtimeReadiness`, `settingsRead`, `settingsNoopWrite`, `authorizationSmoke`, and `sessionResume` are required. `terminalPtty` is recorded when tested. A tested failure of any check blocks promotion eligibility, and an unexecuted required check also blocks eligibility:
+
+- `eligible-for-manual-promotion` — every required check passed and no tested check failed. This is still not a promotion: promoting production remains an explicit operator decision.
+- `not-eligible-for-promotion` — at least one required check failed or was not executed, or a tested check failed. The decision reasons name the blocking checks.
+
+The report records the exact Orbit version and revision and the exact candidate DSH version and compatibility profile whenever the evidence provides them.
+
 ## Rollback
 
 If the new process fails before changing persistent data, switch back to the last known-good image.

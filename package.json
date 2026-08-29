@@ -10,7 +10,8 @@
     "check": "node scripts/check-public-tree.mjs && node --test",
     "smoke:settings": "node scripts/smoke-settings.mjs",
     "smoke:session": "node scripts/smoke-session-resume.mjs",
-    "smoke:auth": "node scripts/smoke-auth.mjs"
+    "smoke:auth": "node scripts/smoke-auth.mjs",
+    "report:compatibility": "node scripts/report-compatibility.mjs"
   },
   "engines": {
     "node": ">=22"
