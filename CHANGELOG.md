@@ -4,6 +4,16 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
+## 0.2.2 - 2026-08-30
+
+### Fixed
+
+- the candidate endpoint is now bound to the candidate stack by identity: the runner generates a per-run gateway identity certificate, mounts it into the candidate gateway through the compose override, and requires `DSH_SMOKE_URL` to present exactly that certificate (TLS fingerprint probe) before any check runs — smoke results against an unrelated deployment can no longer produce a passing candidate;
+- the resolved compose configuration must publish the candidate port on loopback (`127.0.0.1` or `::1`); all-interface bindings fail closed;
+- snapshot manifests bind the optional `candidateDshVersion` to the snapshot request;
+- the runner's own HTTP checks and the smoke suites trust the per-run identity certificate (`NODE_EXTRA_CA_CERTS`), and the runner documents its OpenSSL requirement;
+- the per-run identity files are ownership-adjusted for the gateway user parsed from the resolved compose configuration.
+
 ## 0.2.1 - 2026-08-29
 
 ### Fixed
