@@ -4,6 +4,14 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
+## 0.2.3 - 2026-08-30
+
+### Fixed
+
+- the runner's default gateway identity certificate targets now match the public example compose (`/run/certs/fullchain.pem` and `/run/certs/privkey.pem` on the `caddy` service), are tunable through `DSH_UPGRADE_GATEWAY_SERVICE`, `DSH_UPGRADE_GATEWAY_CERT_TARGET`, and `DSH_UPGRADE_GATEWAY_KEY_TARGET`, and fail closed when the base compose gateway does not already mount a certificate at the configured targets;
+- the `verify` subcommand now passes the per-run identity certificate (path and content) into the verification sequence, so runner HTTPS checks and the smoke suites trust the per-run certificate without manual `NODE_EXTRA_CA_CERTS`;
+- the compatibility report annotates the not-implemented `longLivedTransport` and `terminalPtty` checks with the Stage 7 manual acceptance evidence recorded in the release attestation.
+
 ## 0.2.2 - 2026-08-30
 
 ### Fixed
