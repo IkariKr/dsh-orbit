@@ -137,8 +137,10 @@ async function defaultRunCommand(file, args, options = {}) {
   return { code, stdout, stderr };
 }
 
-async function defaultFetchPage(url) {
-  const response = await fetch(url, { headers: { connection: "close" } });
+async function defaultFetchPage(url, options = {}) {
+  const response = await fetch(url, {
+    headers: { connection: "close", ...options.headers },
+  });
   const body = await response.text().catch(() => "");
   return { status: response.status, body };
 }
@@ -163,17 +165,22 @@ export async function runVerificationSequence({ config, runCommand = defaultRunC
     DSH_SMOKE_BASIC_PASSWORD: config.basicPassword,
     ...extra,
   });
+  const gatewayHeaders = () => ({
+    authorization: `Basic ${Buffer.from(`${config.basicUser}:${config.basicPassword}`).toString("base64")}`,
+    origin: new URL(config.candidateEndpoint).origin,
+    "sec-fetch-site": "same-origin",
+  });
 
   const steps = [
     {
       names: ["runtimeReadiness"],
       required: true,
       run: async () => {
-        const home = await fetchPage(`${config.candidateEndpoint}/`);
+        const home = await fetchPage(`${config.candidateEndpoint}/`, { headers: gatewayHeaders() });
         record(
           "runtimeReadiness",
           home.status === 200 ? "pass" : "fail",
-          `GET / -> HTTP ${home.status}`,
+          `GET / with authenticated gateway headers -> HTTP ${home.status}`,
         );
       },
     },
@@ -243,13 +250,15 @@ export async function runVerificationSequence({ config, runCommand = defaultRunC
       names: ["webPluginRoutes"],
       required: true,
       run: async () => {
-        const home = await fetchPage(`${config.candidateEndpoint}/`);
+        const home = await fetchPage(`${config.candidateEndpoint}/`, { headers: gatewayHeaders() });
         const pluginMatch = typeof home.body === "string" ? home.body.match(/src="(\/plugins\/[^"]+)"/) : null;
         if (!pluginMatch) {
           record("webPluginRoutes", "fail", "the web UI references no plugin asset");
           return;
         }
-        const asset = await fetchPage(`${config.candidateEndpoint}${pluginMatch[1]}`);
+        const asset = await fetchPage(`${config.candidateEndpoint}${pluginMatch[1]}`, {
+          headers: gatewayHeaders(),
+        });
         record(
           "webPluginRoutes",
           asset.status === 200 ? "pass" : "fail",

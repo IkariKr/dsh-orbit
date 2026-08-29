@@ -72,9 +72,14 @@ function fakeExecutors({ buildCode = 0, upCode = 0, authCode = 0, sessionCode = 
     if (key === "session") return { code: sessionCode, stdout: "", stderr: sessionCode === 0 ? "" : "session.models: resume failed for session ... refusing to compose an unscoped context" };
     throw new Error(`unexpected command: ${file} ${args.join(" ")}`);
   };
-  const fetchPage = async (url) => {
+  const fetchPage = async (url, options = {}) => {
     events.push(`fetch:${url}`);
     if (url.endsWith("/")) {
+      assert.equal(
+        options.headers.authorization,
+        `Basic ${Buffer.from("admin:orbit-candidate-value").toString("base64")}`,
+      );
+      assert.equal(options.headers["sec-fetch-site"], "same-origin");
       return { status: 200, body: `<html><body><script src="${PLUGIN_ASSET}"></script></body></html>` };
     }
     if (url.includes("/plugins/")) {
