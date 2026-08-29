@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
 import {
   UpgradeBindingError,
   loadUpgradeConfig,
@@ -17,9 +19,6 @@ import {
   createCompatibilityReport,
 } from "../src/compatibility-report.mjs";
 
-// Per-run gateway identity fixture (self-signed, test-only; CN=dsh.example.com).
-const GATEWAY_CERT_PEM = "-----BEGIN CERTIFICATE-----\r\nMIIDMTCCAhmgAwIBAgIUTpDv9KIJtE+G35NL8g6oz2eyO1cwDQYJKoZIhvcNAQEL\r\nBQAwGjEYMBYGA1UEAwwPZHNoLmV4YW1wbGUuY29tMB4XDTI2MDgyOTE2MTc0MFoX\r\nDTM2MDgyNjE2MTc0MFowGjEYMBYGA1UEAwwPZHNoLmV4YW1wbGUuY29tMIIBIjAN\r\nBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArpcKILYea80dLSCJUpOve1p1K4t3\r\nU4BUPpk+AcWYp11YHuh1KFcF8xcmqbT2Eaxlq37rq34sbbkt/y1qf8mSI7EkDiyx\r\nBPgqvKADLYQx0oPDqyq8Q1TNPw2LoKj/CfQR4Z1H4o5foHPfzzutJ2ITGF6dR1cP\r\niS+EIHqD4aj17dlta1S3cfhE/aOcRg30JKOGKjVkaf4OXMbgIJYugHqV4yCG2Mwx\r\n8RJz/+nq6VMGL/46u9ftuGuM1GwwR0mxVdPf4YUJviczqvG+pdw9L1n91xPiF+hR\r\nAl4GAoBvhSDrojtrGQ9kti0/3mRI26Jd3WbAEPCmorV6v6G6uBLI79Gb/wIDAQAB\r\no28wbTAdBgNVHQ4EFgQUEKYimjSXhPm3+RaSOxR1pLRm1G0wHwYDVR0jBBgwFoAU\r\nEKYimjSXhPm3+RaSOxR1pLRm1G0wDwYDVR0TAQH/BAUwAwEB/zAaBgNVHREEEzAR\r\ngg9kc2guZXhhbXBsZS5jb20wDQYJKoZIhvcNAQELBQADggEBAJwq/iv1NSDA+wEO\r\ndOEOoJILe9suxS70RF/cGjn0QJZmhNxxKyoHnhLYLkpWaZHnwQkfIU4O0aPF7fM2\r\n1XgtHrAcNy5LSVtFIyWmAGasfL50igQHU2V/rCEsPDsRUDtAas8ruBzBMKH48Bav\r\nNqYrjGBO5QCudWXY1fim3nu4ixGiuwESCiokJRclrji+r3yd3atEaTl0vHYGSRrz\r\nECKmgh44o0rh33XOpniW+oy2grPgHLuXxp66IUXn8tRvrd2tfYil93Zzif6idloT\r\nwQXDE0QyATOcVxe3mt/2PiSng3mULTUkEZtkv59Ps5059kiGjNaflEjKwocVjuWa\r\ne+PuidE=\r\n-----END CERTIFICATE-----\r\n";
-const GATEWAY_KEY_PEM = "-----BEGIN PRIVATE KEY-----\r\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCulwogth5rzR0t\r\nIIlSk697WnUri3dTgFQ+mT4BxZinXVge6HUoVwXzFyaptPYRrGWrfuurfixtuS3/\r\nLWp/yZIjsSQOLLEE+Cq8oAMthDHSg8OrKrxDVM0/DYugqP8J9BHhnUfijl+gc9/P\r\nO60nYhMYXp1HVw+JL4QgeoPhqPXt2W1rVLdx+ET9o5xGDfQko4YqNWRp/g5cxuAg\r\nli6AepXjIIbYzDHxEnP/6erpUwYv/jq71+24a4zUbDBHSbFV09/hhQm+JzOq8b6l\r\n3D0vWf3XE+IX6FECXgYCgG+FIOuiO2sZD2S2LT/eZEjbol3dZsAQ8KaitXq/obq4\r\nEsjv0Zv/AgMBAAECggEAGh6anfOLxZD1hnom++WrC9yn9DsfP6zOmGGQt0R6kWoT\r\nnubOxZmPWE45szX8LP9fuTJ5y471fUzbpsuCnVo+CiecP0qhs8lKNiyyN62z+SH2\r\ntLWQs3oNDXEsrH0xT/87FZ0pff7S1kxqSrSg3mgmdy+LKXsgOzk9SSagcwg2Er6E\r\nsDJH6Gy+M+pcnJIalrxw5NPwv4G5lShD9UeGrmtJ1TSDYoMaJRzknky9vlCTMHg9\r\nR/+YPH21mVpBNG/joHLszmzNZiRLkwD0zGzji98qOw7OmFg5cG0nRKUCTMwr+unS\r\nAXzdnCdE/pw7LLXPbkeV2T7IYzB7lU9umhB1epvUUQKBgQDT6pUF/NfryF6U8RQT\r\nzpCuSrxLa0jJFucjk2P7TbLnlmh63/ub8ZwBSy+ziCAFyxX1qo2OEwP1M9IJMkCD\r\nODy/k0s2ubSzJFbrr0zh3PClmBAfW6ImTJx7DJhnYz8XIMTAVNlu+7uasCS0dxTE\r\ncYTY4BE9ipTs3Uk+GiJ8n8kD1QKBgQDS6K0Zoq4XkVYSy8Z/EC0jEkvRCGQpbx1G\r\nWszBQXRiIfESsu6CHSYWpU3tooSm3JxL0KvlqGrcxhUiOZ0Qyz4KdbJwk0thFxnl\r\n4gc8vGZLvgn3biGrsaHwtTdG8NFcSMZz4kRKrluuz0fEM6ZCyTmufjqYpmduc/7h\r\nJ1Yw+UMOgwKBgA32YMc6N4fDdefeUnJTo9i399wIP41wQt5nMak3H1h+4ndmFo/Z\r\nxWuYZpYvm9yF2vaKvDTmL9aSCX6tnu6GYApHTCdY6Pz8ofV5YVloUzq14CoQwYhA\r\nd/brh4cYVOnTMONzM7hKQbwZavGw/t9Kk3QunzQs008f7Vl4I1mOtZHZAoGAWs9o\r\nSNNs1iTzxKAM1YTnimREVLqiNdzr4/EQnF1MeTxYCk8Utt1KGxIN3bXOG/J9MX+l\r\no/rCGFEJpHTeFe8MxYAr1qD1IdbKhdqudw4/lXk73VeEE+Ml8Ph11ou1+WA0Yo0Y\r\nDnfIbho9slLy0WrG9UTQgg2UF1DGe7duOyP4JXUCgYBoVN0q+0dHOfeL+wweLwbz\r\niECUPVKpeu4LL0K443Bceqdxx7GDctQWewOZ7iuyjnUOxe/CgLbaxdKHXMTk5IJ0\r\n4WWbCiyklOQLOi/y0UW0P3Kxxh4vTDiurhqiPpJgQHDOG8G6sz4ViVDdhOQXAfMC\r\nwEZbrn3sVQ1HwqvK9TTNIg==\r\n-----END PRIVATE KEY-----\r\n";
 
 const PLUGIN_ASSET = "/plugins/@deepseek-ai/dsh-client-modules/client.js?rev=abc123";
 const PATCH_CHECK_STDOUT = [
@@ -60,8 +59,8 @@ function fixtureConfig(workdir, overrides = {}) {
     snapshotHook: "/opt/dsh-orbit/hooks/snapshot.sh",
     snapshotTimeoutSeconds: 900,
     gatewayService: "caddy",
-    gatewayCertTarget: "/etc/caddy/certs/fullchain.pem",
-    gatewayKeyTarget: "/etc/caddy/certs/privkey.pem",
+    gatewayCertTarget: "/run/certs/fullchain.pem",
+    gatewayKeyTarget: "/run/certs/privkey.pem",
     project: "dsh-orbit-candidate",
     composeFile: "/opt/dsh-orbit/docker/compose.example.yaml",
     workdir,
@@ -102,19 +101,22 @@ function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessio
       if (args.includes("config")) {
         const merged = args.includes(`${config.workdir}/compose.override.yaml`);
         events.push(merged ? "command:config" : "command:config-base");
+        // the base compose file is fixed in reality: its gateway certificate
+        // mounts stay at the public example paths regardless of operator env
+        const gatewayVolumes = [
+          { source: "/srv/certs/fullchain.pem", target: "/run/certs/fullchain.pem" },
+          { source: "/srv/certs/privkey.pem", target: "/run/certs/privkey.pem" },
+        ];
+        if (merged) {
+          gatewayVolumes[0].source = `${config.workdir}/gateway-identity-cert.pem`;
+          gatewayVolumes[1].source = `${config.workdir}/gateway-identity-key.pem`;
+        }
         const resolvedConfig =
           resolved ??
           resolvedCompose(config, {
             services: {
               dsh: resolvedCompose(config).services.dsh,
-              [config.gatewayService]: merged
-                ? {
-                    volumes: [
-                      { source: `${config.workdir}/gateway-identity-cert.pem`, target: config.gatewayCertTarget },
-                      { source: `${config.workdir}/gateway-identity-key.pem`, target: config.gatewayKeyTarget },
-                    ],
-                  }
-                : {},
+              [config.gatewayService]: { volumes: gatewayVolumes },
             },
           });
         return { code: 0, stdout: JSON.stringify(resolvedConfig), stderr: "" };
@@ -528,6 +530,40 @@ test("an endpoint that does not present the per-run gateway certificate fails cl
         error instanceof UpgradeBindingError &&
         /does not present this run's candidate gateway certificate/.test(error.message),
     );
+  });
+});
+
+test("runner gateway certificate defaults match the public compose example", async () => {
+  const { readFile: readExample } = await import("node:fs/promises");
+  const examplePath = fileURLToPath(new URL("../docker/compose.example.yaml", import.meta.url));
+  const example = await readExample(examplePath, "utf8");
+  const certLine = example.split("\n").find((line) => line.includes("fullchain.pem:/"));
+  const keyLine = example.split("\n").find((line) => line.includes("privkey.pem:/"));
+  assert.ok(certLine && keyLine, "the public compose example mounts gateway certificates");
+
+  const { config } = loadUpgradeConfig({});
+  const certTarget = certLine.split(":").slice(-2)[0].trim();
+  const keyTarget = keyLine.split(":").slice(-2)[0].trim();
+  assert.equal(config.gatewayCertTarget, certTarget);
+  assert.equal(config.gatewayKeyTarget, keyTarget);
+  assert.equal(config.gatewayService, "caddy");
+});
+
+test("the base gateway service must already mount a certificate at the configured target", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir), {
+      gatewayCertTarget: "/nowhere/fullchain.pem",
+    });
+    const { events, runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config);
+
+    await assert.rejects(
+      runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe }),
+      (error) =>
+        error instanceof UpgradeBindingError &&
+        /mounts no certificate at "\/nowhere\/fullchain\.pem"/.test(error.message),
+    );
+    const commandKeys = events.filter((event) => event.startsWith("command:")).map((event) => event.slice(8));
+    assert.ok(!commandKeys.includes("build"), "a misconfigured gateway target must fail before the build");
   });
 });
 

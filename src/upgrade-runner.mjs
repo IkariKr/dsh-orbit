@@ -209,8 +209,8 @@ export function loadUpgradeConfig(env) {
       snapshotHook: env.DSH_SNAPSHOT_HOOK,
       snapshotTimeoutSeconds: Number(env.DSH_SNAPSHOT_TIMEOUT_SECONDS ?? 900),
       gatewayService: env.DSH_UPGRADE_GATEWAY_SERVICE ?? "caddy",
-      gatewayCertTarget: env.DSH_UPGRADE_GATEWAY_CERT_TARGET ?? "/etc/caddy/certs/fullchain.pem",
-      gatewayKeyTarget: env.DSH_UPGRADE_GATEWAY_KEY_TARGET ?? "/etc/caddy/certs/privkey.pem",
+      gatewayCertTarget: env.DSH_UPGRADE_GATEWAY_CERT_TARGET ?? "/run/certs/fullchain.pem",
+      gatewayKeyTarget: env.DSH_UPGRADE_GATEWAY_KEY_TARGET ?? "/run/certs/privkey.pem",
       project: env.DSH_UPGRADE_PROJECT ?? "dsh-orbit-candidate",
       composeFile: env.DSH_UPGRADE_COMPOSE ?? `${REPO_ROOT}docker/compose.example.yaml`,
       workdir: env.DSH_UPGRADE_WORKDIR ?? `${REPO_ROOT}.upgrade-run`,
@@ -368,6 +368,15 @@ export async function resolveCandidateBinding({ config, runCommand = defaultRunC
       `the base compose file defines no ${config.gatewayService} service; the candidate gateway must exist to bind the endpoint identity`,
     );
   }
+  const gatewayVolumes = baseConfig.services[config.gatewayService].volumes ?? [];
+  for (const target of [config.gatewayCertTarget, config.gatewayKeyTarget]) {
+    if (!gatewayVolumes.some((volume) => resolvedTargetOf(volume) === target)) {
+      throw new UpgradeBindingError(
+        `the base ${config.gatewayService} service mounts no certificate at ${JSON.stringify(target)}; ` +
+          `set DSH_UPGRADE_GATEWAY_CERT_TARGET/DSH_UPGRADE_GATEWAY_KEY_TARGET to the certificate paths the gateway actually reads`,
+      );
+    }
+  }
 
   const resolved = await runCommand("docker", composeArgs(config, "config", "--format", "json"));
   if (resolved.code !== 0) {
@@ -433,11 +442,15 @@ export async function generateGatewayIdentityCertificate({ config, runCommand = 
 
 async function defaultTlsProbe({ host, port, servername }) {
   return new Promise((resolve, reject) => {
-    const socket = tls.connect({ host, port, servername, rejectUnauthorized: false }, () => {
+    // Node forbids SNI with an IP literal; certificate IP SANs are matched without it
+    const socket = tls.connect(
+      { host, port, ...(isIP(host) ? {} : { servername }), rejectUnauthorized: false },
+      () => {
       const certificate = socket.getPeerCertificate();
       socket.destroy();
       resolve(certificate?.fingerprint256 ?? null);
-    });
+      },
+    );
     socket.once("error", (error) => {
       socket.destroy();
       reject(new UpgradeBindingError(`gateway certificate probe failed: ${error.message}`));
@@ -582,14 +595,22 @@ export async function runVerificationSequence({
       names: ["longLivedTransport"],
       required: false,
       run: async () => {
-        record("longLivedTransport", "not_run", "no automated long-lived transport check in this release");
+        record(
+          "longLivedTransport",
+          "not_run",
+          "automated check not implemented; long-lived transport manually verified during Stage 7 acceptance",
+        );
       },
     },
     {
       names: ["terminalPtty"],
       required: false,
       run: async () => {
-        record("terminalPtty", "not_run", "no automated terminal check in this release");
+        record(
+          "terminalPtty",
+          "not_run",
+          "automated check not implemented; the dsh-ssh plugin restricts PTY spawn to loopback by design, so terminal evidence is recorded in the release attestation instead",
+        );
       },
     },
   ];
@@ -725,6 +746,68 @@ export async function runCandidateWorkflow({
     banner: eligible ? "CANDIDATE PASSED - ELIGIBLE FOR MANUAL PROMOTION" : "CANDIDATE FAILED - NOT ELIGIBLE FOR PROMOTION",
     report,
     text,
+  };
+}
+
+export async function runVerifyWorkflow({
+  config,
+  runCommand = defaultRunCommand,
+  fetchPage = defaultFetchPage,
+  tlsProbe = defaultTlsProbe,
+}) {
+  const gate = await preflight(config);
+  if (!gate.ok) {
+    throw new UpgradeBindingError(
+      `preflight failed: ${gate.failures.map((failure) => `${failure.check}: ${failure.detail}`).join("; ")}`,
+    );
+  }
+  const overrideText = await readFile(`${config.workdir}/compose.override.yaml`, "utf8").catch(() => null);
+  const candidateToken = overrideText?.match(new RegExp(`${CANDIDATE_TOKEN_ENV}: "?([0-9a-f]+)"?`))?.[1] ?? null;
+  if (!candidateToken) {
+    throw new UpgradeBindingError(
+      `no candidate override found in ${config.workdir}; run the candidate workflow first`,
+    );
+  }
+  await resolveCandidateBinding({ config, runCommand });
+  await probeCandidateToken({ config, candidateToken, runCommand });
+  const identityCertPath = `${config.workdir}/gateway-identity-cert.pem`;
+  const identity = { fingerprint: new X509Certificate(await readFile(identityCertPath)).fingerprint256 };
+  await verifyGatewayIdentity({ config, identity, tlsProbe });
+  const identityCa = await readFile(identityCertPath, "utf8");
+  const { checks } = await runVerificationSequence({
+    config,
+    runCommand,
+    fetchPage,
+    identityCaPath: identityCertPath,
+    identityCa,
+  });
+  const report = createCompatibilityReport({
+    promotionEvaluated: false,
+    orbit: { version: config.orbitVersion, revision: config.orbitRevision },
+    baseline: {
+      image: config.baselineImage,
+      orbitRevision: config.baselineOrbitRevision,
+      dshVersion: config.baselineDshVersion,
+    },
+    candidate: {
+      dshVersion: config.dshVersion,
+      profile: config.dshVersion,
+      image: config.candidateImage,
+      endpoint: config.candidateEndpoint,
+    },
+    checks,
+    snapshot: { reference: null, failure: null },
+  });
+  const compatible = report.compatibility.outcome === COMPATIBILITY_OUTCOMES.pass;
+  return {
+    compatible,
+    exitCode: compatible ? 0 : 1,
+    banner:
+      compatible
+        ? "VERIFICATION PASSED - PROMOTION READINESS NOT EVALUATED"
+        : "VERIFICATION FAILED - PROMOTION READINESS NOT EVALUATED",
+    report,
+    text: renderReportText(report),
   };
 }
 
