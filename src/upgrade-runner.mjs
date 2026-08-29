@@ -465,6 +465,7 @@ export async function runVerificationSequence({
   runCommand = defaultRunCommand,
   fetchPage = defaultFetchPage,
   identityCaPath = null,
+  identityCa = null,
 }) {
   const checks = {};
   let stoppedAfter = null;
@@ -494,7 +495,7 @@ export async function runVerificationSequence({
       run: async () => {
         const home = await fetchPage(`${config.candidateEndpoint}/`, {
           headers: gatewayHeaders(),
-          ...(identityCaPath ? { ca: identityCaPath } : {}),
+          ...(identityCa ? { ca: identityCa } : {}),
         });
         record(
           "runtimeReadiness",
@@ -559,7 +560,7 @@ export async function runVerificationSequence({
       run: async () => {
         const home = await fetchPage(`${config.candidateEndpoint}/`, {
           headers: gatewayHeaders(),
-          ...(identityCaPath ? { ca: identityCaPath } : {}),
+          ...(identityCa ? { ca: identityCa } : {}),
         });
         const pluginMatch = typeof home.body === "string" ? home.body.match(/src="(\/plugins\/[^"]+)"/) : null;
         if (!pluginMatch) {
@@ -568,7 +569,7 @@ export async function runVerificationSequence({
         }
         const asset = await fetchPage(`${config.candidateEndpoint}${pluginMatch[1]}`, {
           headers: gatewayHeaders(),
-          ...(identityCaPath ? { ca: identityCaPath } : {}),
+          ...(identityCa ? { ca: identityCa } : {}),
         });
         record(
           "webPluginRoutes",
@@ -703,11 +704,13 @@ export async function runCandidateWorkflow({
     } else {
       await probeCandidateToken({ config, candidateToken, runCommand });
       await verifyGatewayIdentity({ config, identity: gatewayIdentity, tlsProbe });
+      const identityCa = await readFile(gatewayIdentity.certPath, "utf8");
       const { checks } = await runVerificationSequence({
         config,
         runCommand,
         fetchPage,
         identityCaPath: gatewayIdentity.certPath,
+        identityCa,
       });
       evidence.checks = checks;
     }
