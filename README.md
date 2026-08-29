@@ -105,6 +105,30 @@ node scripts/smoke-settings.mjs
 
 Use the authentication variables that match the path being tested. The script does not print credentials or settings secrets.
 
+### 6. Smoke-test authorization
+
+Test the live authorization boundary of a running deployment against privileged RPCs:
+
+```sh
+DSH_SMOKE_URL=https://dsh.example.com \
+DSH_SMOKE_BASIC_USER=admin \
+DSH_SMOKE_BASIC_PASSWORD='<local-password>' \
+npm run smoke:auth
+```
+
+Both credential variables are required: the supported auth path for this suite is the gateway's local Basic Auth path. The suite proves six outcomes against `settings.describe`:
+
+| Case | Expected result |
+| --- | --- |
+| authenticated, expected origin | allowed |
+| unauthenticated | denied |
+| invalid credentials | denied |
+| unexpected `Origin` | denied |
+| `Sec-Fetch-Site: cross-site` | denied |
+| forged `Cf-Access-Jwt-Assertion` on the local path | denied |
+
+The suite never needs the internal proxy secret — the gateway injects it after authenticating the user, and exposing that secret to a client would itself be a failure. It exits non-zero when any case mismatches, and normal and failure output never include credentials or response bodies.
+
 ## Upgrade workflow
 
 Do not update a production DSH instance by changing the package version in place.
