@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, chmod, chown, mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { randomUUID, X509Certificate } from "node:crypto";
@@ -363,6 +363,8 @@ export async function resolveCandidateBinding({ config, runCommand = defaultRunC
     throw new UpgradeBindingError("docker compose config did not return valid JSON");
   }
   verifyResolvedComposeConfig(parsed, config, gatewayIdentity);
+  const gatewayUser = parsed?.services?.[config.gatewayService]?.user ?? null;
+  return { gatewayUser };
 }
 
 export async function probeCandidateToken({ config, candidateToken, runCommand = defaultRunCommand }) {
@@ -643,7 +645,19 @@ export async function runCandidateWorkflow({
     generateComposeOverride(config, candidateToken, gatewayIdentity),
     "utf8",
   );
-  await resolveCandidateBinding({ config, runCommand, gatewayIdentity });
+  const binding = await resolveCandidateBinding({ config, runCommand, gatewayIdentity });
+  const gatewayUserMatch =
+    typeof binding.gatewayUser === "string" ? binding.gatewayUser.match(/^(\d+):(\d+)$/) : null;
+  if (gatewayUserMatch) {
+    try {
+      await chown(gatewayIdentity.certPath, Number(gatewayUserMatch[1]), Number(gatewayUserMatch[2]));
+      await chown(gatewayIdentity.keyPath, Number(gatewayUserMatch[1]), Number(gatewayUserMatch[2]));
+      await chmod(gatewayIdentity.certPath, 0o640);
+      await chmod(gatewayIdentity.keyPath, 0o640);
+    } catch {
+      // non-POSIX runner environments cannot chown; the gateway user may map differently
+    }
+  }
 
   const build = await runCommand("docker", composeArgs(config, "build"), {
     env: { DSH_VERSION: config.dshVersion, DSH_PUBLIC_HOST: config.publicHost },
