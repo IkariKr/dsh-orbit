@@ -136,7 +136,7 @@ test("rejects an unpatched plugin at verification time", async () => {
     const { pluginRoot } = await writePluginFixture({ dir, source: requireSource(3) });
     await assert.rejects(
       verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile: join(dir, "nonexistent.pem") }),
-      /authenticated proxy helper must appear exactly once, found 0/,
+      /authenticated proxy helper block must appear exactly once, found 0/,
     );
   });
 });
@@ -248,7 +248,7 @@ test("verification rejects partial patches, tampered helpers, and drift", async 
     );
     await assert.rejects(
       verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile }),
-      /helper must appear exactly once, found 2/,
+      /authenticated proxy helper block must appear exactly once, found 0/,
     );
     await writeFile(join(pluginRoot, "lib", "index.js"), origin, "utf8");
 
@@ -263,6 +263,70 @@ test("verification rejects partial patches, tampered helpers, and drift", async 
 
     // clean layout still verifies
     await writeFile(join(pluginRoot, "lib", "index.js"), origin, "utf8");
+    assert.equal(
+      (await verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile })).status,
+      "ok",
+    );
+  });
+});
+
+test("verification fails closed when a helper security predicate is tampered", async () => {
+  await withTempDir(async (dir) => {
+    const proxyAuthFile = join(dir, "proxy-secret.txt");
+    await writeFile(proxyAuthFile, "orbit-proxy-" + "value", "utf8");
+    const { pluginRoot } = await writePluginFixture({
+      dir,
+      source: requireSource(3),
+      secretValue: "orbit-proxy-" + "value",
+    });
+    await patchDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile });
+
+    const indexPath = join(pluginRoot, "lib", "index.js");
+    const clean = await readFile(indexPath, "utf8");
+
+    // each mutation removes or weakens one security predicate while keeping
+    // the helper signature, the host/auth constants, and the three gates
+    const tamperCases = [
+      [
+        "HTTPS predicate",
+        'if (request.headers["x-forwarded-proto"] !== "https") return false;',
+        'if (request.headers["x-forwarded-proto"] === "https") return false;',
+      ],
+      [
+        "proxy-secret predicate",
+        'if (request.headers["x-dsh-orbit-authenticated-proxy"] !== dshOrbitSshProxySecret) return false;',
+        'if (request.headers["x-dsh-orbit-authenticated-proxy"] === dshOrbitSshProxySecret) return false;',
+      ],
+      [
+        "cross-site predicate",
+        'if (request.headers["sec-fetch-site"] === "cross-site") return false;',
+        '// cross-site admission weakened',
+      ],
+      [
+        "Origin predicate",
+        "try { return new URL(origin).host === hostUrl.host; } catch { return false; }",
+        "try { return true; } catch { return false; }",
+      ],
+      [
+        "host predicate",
+        "if (hostUrl.hostname !== DSH_ORBIT_SSH_PUBLIC_HOST) return false;",
+        "if (hostUrl.hostname === DSH_ORBIT_SSH_PUBLIC_HOST) return false;",
+      ],
+    ];
+
+    for (const [label, needle, replacement] of tamperCases) {
+      assert.ok(clean.includes(needle), `${label}: the clean bundle must contain the predicate`);
+      const tampered = clean.replace(needle, replacement);
+      assert.notEqual(tampered, clean);
+      await writeFile(indexPath, tampered, "utf8");
+      await assert.rejects(
+        verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile }),
+        new RegExp(`helper block must appear exactly once`),
+        `${label} tamper must fail closed`,
+      );
+      await writeFile(indexPath, clean, "utf8");
+    }
+
     assert.equal(
       (await verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile })).status,
       "ok",

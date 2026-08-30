@@ -103,7 +103,12 @@ Every check has an explicit state; missing evidence is never treated as a pass:
 - `fail` — the check ran and failed;
 - `not_run` — the check did not run in this validation round.
 
-`globalPatch`, `profilePatch`, `runtimeReadiness`, `settingsRead`, `settingsNoopWrite`, `authorizationSmoke`, `sessionResume`, and `webPluginRoutes` are required. `longLivedTransport` is recorded when automated support exists; `terminalPtty` is automated since `0.2.4` — the verification sequence runs the live terminal authorization smoke (positive control plus unauthenticated, invalid-credential, unexpected-Origin, cross-site, and forged-assertion denials against the terminal upgrade endpoint) whenever the dsh-ssh fence is enabled (`DSH_ORBIT_PATCH_DSH_SSH=1`).
+`globalPatch`, `profilePatch`, `runtimeReadiness`, `settingsRead`, `settingsNoopWrite`, `authorizationSmoke`, `sessionResume`, and `webPluginRoutes` are required. `longLivedTransport` is recorded when automated support exists.
+
+Terminal evidence is split into two optional checks:
+
+- `terminalFence` — automated since `0.2.5`: the live terminal authorization smoke (positive control plus unauthenticated, invalid-credential, unexpected-Origin, cross-site, and forged-assertion denials against the terminal upgrade endpoint) runs whenever the dsh-ssh fence is enabled (`DSH_ORBIT_PATCH_DSH_SSH=1`), and a failure blocks promotion eligibility. Disabled deployments record `not_run` and run nothing.
+- `terminalPtty` — actual PTY runtime evidence. Currently recorded as `not_run`; the evidence comes from the Stage 7 manual acceptance in the release attestations. A `terminalFence` pass is authorization evidence only and must not be treated as `terminal.pty` runtime evidence by future fleet capability advertisement.
 
 The report separates two outcomes:
 

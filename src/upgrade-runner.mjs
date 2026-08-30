@@ -37,6 +37,7 @@ export const UPGRADE_CHECK_ORDER = Object.freeze([
   "sessionResume",
   "webPluginRoutes",
   "longLivedTransport",
+  "terminalFence",
   "terminalPtty",
 ]);
 

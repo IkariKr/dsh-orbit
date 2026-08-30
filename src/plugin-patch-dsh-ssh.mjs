@@ -80,9 +80,21 @@ export function buildDshSshHelper({ publicHost, proxyAuthFile }) {
  */
 export function verifyPatchedLayout(source, { publicHost, proxyAuthFile }) {
   const problems = [];
+  // The whole helper — constants plus every security predicate — must appear
+  // exactly once, byte for byte. Any change to a predicate (HTTPS, secret,
+  // cross-site, origin, host) or to any other line fails closed, not just
+  // structural counts.
+  const expectedHelper = buildDshSshHelper({ publicHost, proxyAuthFile });
+  const helperBlockCount = countOccurrences(source, expectedHelper);
+  if (helperBlockCount !== 1) {
+    problems.push(
+      `authenticated proxy helper block must appear exactly once, found ${helperBlockCount}` +
+        " (any change to the helper body is a tamper)",
+    );
+  }
   const helperCount = countOccurrences(source, SSH_PLUGIN_HELPER_SIGNATURE);
   if (helperCount !== 1) {
-    problems.push(`authenticated proxy helper must appear exactly once, found ${helperCount}`);
+    problems.push(`authenticated proxy helper signature must appear exactly once, found ${helperCount}`);
   }
   const patchedGates = countOccurrences(source, SSH_PLUGIN_PATCHED_GATE_NEEDLE);
   if (patchedGates !== SSH_PLUGIN_GATE_COUNT) {
