@@ -35,9 +35,14 @@ Two security boundaries must be designed separately before implementation. What 
 
 The v0.2 authorization smoke suite is the acceptance template for the registry surface too: any node-registry endpoint designed by this RFC must be exercisable by the same live smoke methodology (positive control, unauthenticated denial, invalid-credential denial, cross-origin denial, cross-site denial, forged-assertion denial) before fleet code ships. Compatibility reports are uploaded by the node over its authenticated registry session; the report itself remains the sanitized v0.2 artifact and carries no credentials.
 
-## Unresolved questions
+## Resolved questions (P2 sweep, 2026-08-30)
 
-- Credential format and storage on resource-constrained nodes (symmetric secret vs. keypair).
-- Lifecycle of the per-node Hub service identities: issuance, expiry, and rotation windows — closed by `docs/rfc/0008-node-hub-identity-lifecycle.md`.
-- Overlap-window defaults for rotation in headless deployments that only come online weekly.
-- Rate limiting and lockout behavior for the registration surface.
+- **Credential format and storage on resource-constrained nodes** — CLOSED: Ed25519 keypair; the node private key never leaves the node; the Hub stores only public keys (RFC-0005 D3, RFC-0006). The one-way-symmetric "hashed secret at Hub, verifier at node" form is abandoned.
+- **Lifecycle of the per-node Hub service identities** — CLOSED: Ed25519 key direction fixed (Hub private key never leaves the Hub; node holds only the Hub public key); states provisioned → active → rotating → revoked; issuance/activation deferred to v0.4 (RFC-0008).
+- **Overlap-window defaults for rotation in headless deployments** — CLOSED: node credential rotation overlap default 24h (1–168h configurable; RFC-0006); Hub identity rotation overlap default 14 days (1–30 configurable; RFC-0008) to tolerate weekly-online headless deployments.
+- **Rate limiting and lockout behavior for the registration surface** — CLOSED: fixed defaults — heartbeat 1/s (burst 3), report upload 10/min, enrollment attempts per token 10, token minting 20/h, per-IP 120/min; body size limits per route; replay nonce cache ~90s (RFC-0006).
+- **Capability advertisement mechanism** — CLOSED: no `update-capabilities` endpoint; capabilities are derived at the Hub from the latest uploaded compatibility report, single source of truth (RFC-0009).
+
+## Remaining open questions
+
+None for v0.3. Hub-to-node execution/session flows and their identity activation belong to the v0.4 milestone (RFC-0008 activation), and reverse-connected device pairing to v0.5; both are out of scope here.

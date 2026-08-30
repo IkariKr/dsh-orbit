@@ -6,11 +6,19 @@ Status: Accepted (2026-08-30). Independent of the registry machine API (RFC-0006
 
 Operator-facing Hub UI endpoints: node list/detail, enrollment-token minting, node delete/re-register, health and compatibility views, credential rotation initiation. This surface carries browser sessions, so the v0.2 browser trust requirements apply: Origin, Sec-Fetch-Site, CSRF protection, and identity-header spoofing denial.
 
-## Session model
+## Session/CSRF lifecycle (fixed chain)
 
-- Operator authentication is out of v0.3 scope design-wise (reuses the deployment's existing authenticated gateway pattern); the unambiguous assumption: management endpoints are reachable only through an operator-authenticated session.
-- CSRF: cookie-based sessions are protected by same-origin checks (Origin header, if present, must match the request host), `Sec-Fetch-Site` (cross-site denied), and a per-session CSRF token for state-changing requests.
-- Identity-header spoofing: management requests through the local/LAN path must not be admitted based on a client-supplied identity-provider assertion header; the LAN path must strip such headers, and acceptance tests assert forged assertions are denied.
+The browser trust chain is fixed in this order; each hop must complete before the next exists:
+
+1. **Gateway authentication** — the deployment's authenticated gateway (Cloudflare Access / LAN basic-auth / SSH tunnel) admits the operator request. The Hub itself never accepts an unauthcated management request.
+2. **Hub session bootstrap** — the Hub issues a session cookie bound to the gateway-verified identity plus the client's IP/forwarded identity: `HttpOnly; Secure; SameSite=Strict`, default TTL 12h, idle timeout 30min, hard absolute expiry. A fresh session always re-issues a fresh session ID.
+3. **Per-session CSRF token** — minted at session bootstrap, bound to the session ID, required on every state-changing request (POST/PATCH/DELETE), rotated on re-authentication. A new session gets a new token; reuse of an old token with a new session is denied.
+4. **Same-origin + `Sec-Fetch-Site`** — Origin (when present) must match the request host and scheme; `Sec-Fetch-Site: cross-site` denied; `Sec-Fetch-Site: same-site` only with a matching Origin or no Origin.
+5. **Identity-header spoofing** — management requests through the LAN path must not be admitted based on a client-supplied identity-provider assertion header; the LAN path strips such headers, and acceptance tests assert forged assertions are denied.
+
+Logout terminates the session server-side (cookie + CSRF token invalidated immediately). Session events (bootstrap, expiry, logout, token rotation) are audit records.
+
+Other operator-behavior notes: operator authentication mechanics (identity provider choice) are intentionally out of v0.3 scope; the chain above is what v0.3 guarantees given any gateway that satisfies hop 1.
 
 ## Management API surface (v0.3 MVP)
 
@@ -30,6 +38,8 @@ Operator-facing Hub UI endpoints: node list/detail, enrollment-token minting, no
 | operator session, same-origin, valid CSRF token, expected host | allowed |
 | no session (anonymous) | denied (redirect/401) |
 | invalid session | denied |
+| expired session / idle timeout exceeded | denied (re-bootstrap required) |
+| CSRF token from a different session | denied |
 | cross-site `Sec-Fetch-Site` | denied |
 | mismatched `Origin` | denied |
 | state-changing request without CSRF token | denied |

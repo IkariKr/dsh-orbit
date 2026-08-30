@@ -33,9 +33,15 @@ The v0.2 compatibility report is keyed to an exact Orbit revision and candidate 
 
 The enrollment/bootstrap flow (Hub-minted stable node ID, local persistence, one-time enrollment, first credential issuance) is closed by `docs/rfc/0005-node-enrollment-and-registry.md`. "Pairing" in this project now refers exclusively to the v0.5 reverse-connected device flow, not to v0.3 enrollment.
 
-## Unresolved questions
+## Resolved questions (P2 sweep, 2026-08-30)
 
-- Where the stable node ID is first minted (node self-registration vs. Hub-issued pairing) — see the implementation prerequisite above.
-- Whether installation IDs should be exposed in the 0.3 registry at all or deferred to multi-Hub work.
-- Retention policy for address metadata history.
-- How node deletion interacts with archived compatibility reports (keep or cascade).
+- **Where the stable node ID is first minted** — CLOSED: the Hub mints the node ID at enrollment (RFC-0005 D1); ordinary enrollment always mints a new ID; re-registration of a historical ID requires a tombstone-bound re-enrollment token (RFC-0005 D5).
+- **Whether installation IDs are exposed in the 0.3 registry** — CLOSED: no installation ID in the v0.3 registry; deferred to multi-Hub work. The node ID is the only registry identity (RFC-0005 D1).
+- **Retention policy for address metadata history** — CLOSED: address history may be retained with the general event retention (90 days; RFC-0009); addresses remain observations, never identity.
+- **How node deletion interacts with archived compatibility reports** — CLOSED: operator delete tombstones the node and revokes credentials immediately; compatibility reports, health events, and audit records are kept to their defined retention with no cascade delete (RFC-0009 "Deletion and history retention").
+- **Node authentication mechanism** — CLOSED: Ed25519, node private key never leaves the node, Hub stores only public keys, ORBIT-MACHINE-V1 signing string (RFC-0005 D3, RFC-0006).
+- **Credential rotation** — CLOSED: new public key introduced by a request signed with the old private key, bounded overlap window (RFC-0006).
+
+## Remaining open questions
+
+None for v0.3. (Multi-Hub identity, installation IDs as credentials, and reverse-connected device pairing are deferred to their own milestones and are out of scope here.)

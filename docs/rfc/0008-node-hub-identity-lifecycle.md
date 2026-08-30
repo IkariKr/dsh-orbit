@@ -1,35 +1,38 @@
-# RFC 0008: Per-node Hub service identity lifecycle (decided)
+# RFC 0008: Per-node Hub service identity lifecycle (decided, rev. 2)
 
-Status: Accepted (2026-08-30). Closes the Hub-to-node authentication direction from RFC-0003.
+Status: Accepted (2026-08-30), rev. 2 after architecture review P0/P1 closure. Closes the Hub-to-node authentication direction from RFC-0003. **Design only: activation is deferred to v0.4** (the v0.3 MVP performs no Hub→node execution or routing).
 
-## Decision
+## Key direction (fixed)
 
-The Hub talks to each node through a **per-node Hub service identity** — never a reused operator account, and never a fleet-wide credential. Each node receives its own Hub identity at enrollment (RFC-0005 D3) and the Hub uses it whenever it connects to that node (for example to inspect node state, request reports, or act on operator intent).
+- The Hub generates a per-node Ed25519 keypair at enrollment.
+- The **Hub private key never leaves the Hub**; the node stores only the Hub **public key** for the node.
+- There is no symmetric "verifier at the node" problem: verification uses the public key the node holds.
 
 ## Identity object
 
-- One Hub service identity per node: `hub_sk_<base64url(32 bytes)>` (same random format and storage rules as node credentials: verifier-hashed at rest on the node, plaintext held by the Hub's node-record).
-- Bound to the node ID: the identity is unusable against any other node (remote commands/reads must include the node ID and be MAC-bound to it, mirroring RFC-0006).
+- One Hub identity per node: an Ed25519 keypair, `hub_ik_<keyId>` label, bound to the node ID.
+- All hub→node requests are signed with the node's Hub private key over the ORBIT-MACHINE-V1 signing string (RFC-0006), with the hub keyId carried in the header; the node verifies with its stored Hub public key.
+- The identity is unusable against any other node (node ID is part of the signing string).
 
 ## Lifecycle states
 
-`issued → active → rotating → revoked` (terminal).
+`provisioned → active → rotating → revoked` (terminal). v0.3 provisions and persists the identity material; it becomes `active` only in v0.4 when Hub→node flows exist.
 
-- **issued**: created at enrollment with the node credential; becomes active once the node confirms its first authenticated heartbeat/registration refresh.
-- **active**: valid for its base validity (default 90 days). Refresh/rotation policies below keep it active.
-- **rotating**: when nearing expiry (default: rotation starts at 80% of validity), a new Hub identity is issued with an overlap window (default 14 days, operator-configurable 1–30 days); both remain valid during the overlap; the old one is revoked at the end of the overlap.
-- **revoked**: terminal on node deletion (immediately) or after a failed rotation (operator action); revoked identities never return to active.
+- **provisioned**: created at enrollment; stored Hub-side (private) and node-side (public); no traffic.
+- **active (v0.4)**: the Hub first uses it, and the node's first successful verification confirms activation.
+- **rotating**: new Hub keypair issued with an overlap window (default 14 days, operator-configurable 1–30 days); both keys valid during the overlap; the old revoked at its end. The new public key is delivered to the node in an authenticated message from the Hub (signed by the Hub with the OLD key, or fetched by the node with a Hub-signed handover).
+- **revoked**: terminal on node deletion (immediately) or failed rotation (operator action).
 
 ## Rules
 
-- No two nodes share a Hub identity; no Hub-wide master identity exists.
-- Rotation is independent per node; no global re-key.
-- All transitions are audited events with operator attribution where the operator initiated them.
-- Node-side storage mirrors the node credential rules (runtime-private file, never logged, never in reports).
+- No two nodes share a Hub identity; no Hub-wide master identity.
+- Rotation is per node; no global re-key.
+- All transitions are audited events with operator attribution where initiated by the operator.
+- Node side stores only public material for the Hub identity; nothing secret is stored on the node for this direction.
 
 ## Acceptance
 
-- A node must reject Hub requests authenticated with another node's identity.
+- A node rejects Hub requests signed with another node's identity.
 - After node deletion, the Hub identity fails immediately (negative test).
-- Rotation with overlap: both identities valid during the window; after the window, the old one fails.
-- These behaviors are part of the machine API live smoke matrix (RFC-0006 methodology).
+- Rotation with overlap: both keys valid in-window; the old key fails after the window.
+- These are part of the machine API live smoke matrix methodology (RFC-0006); in v0.3 the checks are simulation-level because no Hub→node flow exists yet.
