@@ -4,6 +4,13 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
+## 0.2.6 - 2026-08-30
+
+### Fixed
+
+- the dsh-ssh bundle verifier now requires the complete expected helper block — every security predicate included — to appear exactly once, byte for byte; removing or weakening the HTTPS, proxy-secret, cross-site, origin, or host checks fails closed, on top of the existing structural checks (partial patches, missing or duplicated gates, constant and version mismatches, idempotent re-patch);
+- documentation alignment: `docs/upgrade.md` states the `terminalFence` vs `terminalPtty` semantics for v0.2.5+, the CLI usage lists the `DSH_ORBIT_PATCH_DSH_SSH` enable flag, and `UPGRADE_CHECK_ORDER` matches the real verification sequence.
+
 ## 0.2.5 - 2026-08-30
 
 ### Fixed
