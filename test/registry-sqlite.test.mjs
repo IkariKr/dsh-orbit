@@ -1,0 +1,76 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { SCHEMA_VERSION, openRegistryDatabase, withTransaction } from "../src/registry/sqlite.mjs";
+
+test("in-memory registry has the fixed v0.3 table set", () => {
+  const db = openRegistryDatabase(":memory:");
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all()
+    .map((row) => row.name);
+  assert.deepEqual(tables, [
+    "audit",
+    "browser_sessions",
+    "enrollment_results",
+    "enrollment_tokens",
+    "events",
+    "node_keys",
+    "nodes",
+    "reports",
+    "seen_nonces",
+  ]);
+  const { user_version: version } = db.prepare("PRAGMA user_version").get();
+  assert.equal(version, SCHEMA_VERSION);
+  db.close();
+});
+
+test("a file-backed registry is WAL with durable schema version", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-registry-"));
+  try {
+    const path = join(dir, "registry.db");
+    const db = openRegistryDatabase(path);
+    const { journal_mode: journal } = db.prepare("PRAGMA journal_mode").get();
+    assert.equal(journal, "wal");
+    db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    db.close();
+    // Reopening is idempotent (migration no-ops on the current version).
+    const again = openRegistryDatabase(path);
+    assert.equal(again.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
+    again.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    again.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("node_keys foreign key rejects orphan rows", () => {
+  const db = openRegistryDatabase(":memory:");
+  assert.throws(() => db.prepare("INSERT INTO node_keys (node_id, key_id, public_key, state, created_at) VALUES (?, ?, ?, 'active', ?)").run("node_missing", "k1", "a".repeat(64), "now"));
+  db.close();
+});
+
+test("withTransaction rolls back on failure and keeps the committed work", () => {
+  const db = openRegistryDatabase(":memory:");
+  withTransaction(db, () => {
+    db.prepare("INSERT INTO nodes (node_id, state, minted_at, authenticated) VALUES ('node_a', 'active', 't', 'ok')").run();
+  });
+  assert.throws(() =>
+    withTransaction(db, () => {
+      db.prepare("INSERT INTO nodes (node_id, state, minted_at, authenticated) VALUES ('node_b', 'active', 't', 'ok')").run();
+      throw new Error("boom");
+    }),
+  );
+  const rows = db.prepare("SELECT node_id FROM nodes ORDER BY node_id").all();
+  assert.deepEqual(rows.map((row) => row.node_id), ["node_a"]);
+  db.close();
+});
+
+test("uniqueness constraints are transactional", () => {
+  const db = openRegistryDatabase(":memory:");
+  db.prepare("INSERT INTO seen_nonces (node_id, nonce, created_at) VALUES ('node_a', 'n1', 't')").run();
+  assert.throws(() => db.prepare("INSERT INTO seen_nonces (node_id, nonce, created_at) VALUES ('node_a', 'n1', 't')").run());
+  db.close();
+});

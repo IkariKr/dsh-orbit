@@ -1,0 +1,320 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { randomHex } from "../src/registry/crypto.mjs";
+import { createTestRegistry, createTestServer, defaultRuntimeIdentity, enrollNode, signedMachineRequest, validReport } from "./helpers/registry-fixture.mjs";
+
+const ASSERTION = "gateway-held-assertion-secret";
+const GATEWAY_HEADER = "x-dsh-authenticated-proxy";
+const PRINCIPAL_HEADER = "x-dsh-operator-id";
+const SESSION_COOKIE = "dsh-orbit-hub-session";
+const CSRF_HEADER = "x-csrf-token";
+
+async function withServer(t, options = {}) {
+  const registry = createTestRegistry();
+  const server = await createTestServer(registry, {
+    gatewayAssertionSecret: ASSERTION,
+    operatorPrincipal: { mode: "inject" },
+    ...options,
+  });
+  t.after(async () => {
+    await server.close();
+    registry.close();
+  });
+  return { registry, server };
+}
+
+function gatewayHeaders(extra = {}) {
+  return { [GATEWAY_HEADER]: ASSERTION, [PRINCIPAL_HEADER]: "operator", ...extra };
+}
+
+async function bootstrap(baseUrl, { headers, extra } = {}) {
+  return fetch(baseUrl + "/hub/session", {
+    method: "POST",
+    headers: { ...(headers ?? gatewayHeaders()), ...(extra ?? {}) },
+  });
+}
+
+async function sessionCookie(response) {
+  const setCookie = response.headers.get("set-cookie");
+  const match = setCookie?.match(/(?:^|;\s*)dsh-orbit-hub-session=([^;]+)/);
+  return match ? match[1] : null;
+}
+
+async function establishSession(baseUrl, headers) {
+  const response = await bootstrap(baseUrl, { headers });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  return { cookie: await sessionCookie(response), csrfToken: body.csrfToken };
+}
+
+test("bootstrap without gateway proof is denied; a wrong assertion is denied", async (t) => {
+  const { server } = await withServer(t);
+  const anonymous = await bootstrap(server.baseUrl, { headers: {} });
+  assert.equal(anonymous.status, 401);
+  assert.equal((await anonymous.json()).error.code, "gateway-denied");
+
+  const wrong = await bootstrap(server.baseUrl, { headers: { [GATEWAY_HEADER]: "wrong" } });
+  assert.equal(wrong.status, 401);
+
+  // A client-supplied principal header without a valid assertion is never trusted.
+  const spoofed = await bootstrap(server.baseUrl, { headers: { [PRINCIPAL_HEADER]: "admin" } });
+  assert.equal(spoofed.status, 401);
+});
+
+test("bootstrap admits the gateway-injected opaque principal and issues a session", async (t) => {
+  const { server } = await withServer(t);
+  const response = await bootstrap(server.baseUrl);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.principal, "operator");
+  assert.match(body.csrfToken, /^[0-9a-f]{48}$/);
+  const cookie = await sessionCookie(response);
+  assert.match(cookie, /^sess_[0-9a-f]{48}$/);
+  const setCookie = response.headers.get("set-cookie");
+  assert.match(setCookie, /HttpOnly/i);
+  assert.match(setCookie, /Secure/i);
+  assert.match(setCookie, /SameSite=Strict/i);
+  assert.match(setCookie, /Path=\/hub/);
+});
+
+test("single-principal gateway mode attributes every admitted request to the declared principal", async (t) => {
+  const registry = createTestRegistry();
+  const server = await createTestServer(registry, {
+    gatewayAssertionSecret: ASSERTION,
+    operatorPrincipal: { mode: "single", principal: "sole-operator" },
+  });
+  t.after(async () => {
+    await server.close();
+    registry.close();
+  });
+  const response = await bootstrap(server.baseUrl, { headers: { [GATEWAY_HEADER]: ASSERTION } });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).principal, "sole-operator");
+});
+
+test("GET /hub/session without a valid session is denied", async (t) => {
+  const { server } = await withServer(t);
+  const session = await fetch(server.baseUrl + "/hub/session", { headers: gatewayHeaders() });
+  assert.equal(session.status, 401);
+  const expiredCookie = await fetch(server.baseUrl + "/hub/session", {
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=sess_nonexistent` },
+  });
+  assert.equal(expiredCookie.status, 401);
+});
+
+test("state-changing requests without the session CSRF token are denied", async (t) => {
+  const { server } = await withServer(t);
+  const { cookie } = await establishSession(server.baseUrl);
+  const response = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}` },
+    body: JSON.stringify({ purpose: "enroll" }),
+  });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error.code, "csrf-denied");
+});
+
+test("a CSRF token from another session is denied", async (t) => {
+  const { server } = await withServer(t);
+  const first = await establishSession(server.baseUrl);
+  const second = await establishSession(server.baseUrl);
+  const response = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders(),
+      cookie: `${SESSION_COOKIE}=${first.cookie}`,
+      [CSRF_HEADER]: second.csrfToken,
+    },
+    body: JSON.stringify({ purpose: "enroll" }),
+  });
+  assert.equal(response.status, 403);
+});
+
+test("cross-site Sec-Fetch-Site and mismatched Origin are denied", async (t) => {
+  const { server } = await withServer(t);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const crossSite = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders(),
+      cookie: `${SESSION_COOKIE}=${cookie}`,
+      [CSRF_HEADER]: csrfToken,
+      "sec-fetch-site": "cross-site",
+    },
+    body: JSON.stringify({ purpose: "enroll" }),
+  });
+  assert.equal(crossSite.status, 403);
+
+  const host = new URL(server.baseUrl).host;
+  const wrongOrigin = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders(),
+      cookie: `${SESSION_COOKIE}=${cookie}`,
+      [CSRF_HEADER]: csrfToken,
+      origin: "https://evil.example",
+      "sec-fetch-site": "same-origin",
+    },
+    body: JSON.stringify({ purpose: "enroll" }),
+  });
+  assert.equal(wrongOrigin.status, 403);
+});
+
+test("hub.tokens.create returns the plaintext exactly once; list never exposes it", async (t) => {
+  const { server } = await withServer(t);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const create = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
+    body: JSON.stringify({ purpose: "enroll" }),
+  });
+  assert.equal(create.status, 200);
+  const minted = await create.json();
+  assert.match(minted.token, /^[0-9a-f]{32}$/);
+  assert.match(minted.tokenId, /^etok_/);
+
+  const list = await fetch(server.baseUrl + "/hub/tokens", { headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}` } });
+  const listed = await list.json();
+  const row = listed.tokens.find((entry) => entry.tokenId === minted.tokenId);
+  assert.equal(row.tokenId, minted.tokenId);
+  assert.equal(row.purpose, "enroll");
+  assert.equal(Object.hasOwn(row, "token"), false);
+  assert.equal(Object.hasOwn(row, "tokenDigest"), false);
+  assert.equal(Object.hasOwn(row, "token_digest"), false);
+});
+
+test("enrollment token minted through the API works end-to-end", async (t) => {
+  const { server } = await withServer(t);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const create = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
+    body: JSON.stringify({ purpose: "enroll" }),
+  });
+  const minted = await create.json();
+  const keys = await import("../src/registry/crypto.mjs").then((mod) => mod.generateNodeKeyPair());
+  const enroll = await fetch(server.baseUrl + "/api/v1/enroll", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: minted.token, enrollmentRequestId: randomHex(16), publicKey: keys.publicKeyHex }),
+  });
+  assert.equal(enroll.status, 200);
+});
+
+test("node delete through the browser surface tombstones; machine auth for that node is then denied", async (t) => {
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const response = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/delete`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
+    body: JSON.stringify({ reason: "retired" }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).state, "tombstoned");
+  const list = await fetch(server.baseUrl + "/hub/nodes", { headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}` } });
+  const listed = await list.json();
+  assert.equal(listed.nodes.find((entry) => entry.nodeId === node.nodeId).state, "tombstoned");
+  const denied = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/heartbeat",
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: defaultRuntimeIdentity(),
+  });
+  assert.equal(denied.status, 401);
+});
+
+test("hub.nodes.reenroll mints a tombstone-bound token usable by the machine completion", async (t) => {
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/delete`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
+    body: JSON.stringify({ reason: "retired" }),
+  });
+  const reenrollMint = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/reenroll`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
+  });
+  assert.equal(reenrollMint.status, 200);
+  const minted = await reenrollMint.json();
+  assert.equal(minted.purpose, "reenroll");
+  assert.equal(minted.boundNodeId, node.nodeId);
+  assert.match(minted.token, /^[0-9a-f]{32}$/);
+
+  const newKeys = await import("../src/registry/crypto.mjs").then((mod) => mod.generateNodeKeyPair());
+  const { signedReenrollRequest } = await import("./helpers/registry-fixture.mjs");
+  const completed = await signedReenrollRequest(server.baseUrl, {
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: { reenrollmentToken: minted.token, reenrollmentRequestId: randomHex(16), newPublicKey: newKeys.publicKeyHex },
+  });
+  assert.equal(completed.status, 200);
+  assert.equal(completed.body.nodeId, node.nodeId);
+});
+
+test("minting a reenroll token for a non-tombstoned node is denied", async (t) => {
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const response = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/reenroll`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).error.code, "not-tombstoned");
+});
+
+test("lan-boundary-only mode admits loopback without an assertion", async (t) => {
+  const registry = createTestRegistry();
+  const server = await createTestServer(registry, {
+    lanBoundaryOnly: true,
+    operatorPrincipal: { mode: "single", principal: "operator" },
+  });
+  t.after(async () => {
+    await server.close();
+    registry.close();
+  });
+  const response = await bootstrap(server.baseUrl, { headers: {} });
+  assert.equal(response.status, 200);
+});
+
+test("node list and detail include health dimensions and capability state", async (t) => {
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/report-upload",
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: validReport(),
+  });
+  const { cookie } = await establishSession(server.baseUrl);
+  const detail = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}`, {
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}` },
+  });
+  assert.equal(detail.status, 200);
+  const body = await detail.json();
+  assert.equal(body.health.orbitCompatible, "pass");
+  assert.equal(body.health.dshHealthy, "ok");
+  assert.equal(body.health.reachable, "unknown");
+  assert.equal(body.health.capabilities.length, 3);
+  assert.equal(body.latestReport.candidate.dshVersion, "0.1.1-rc.2");
+});
+
+test("logout revokes the session server-side", async (t) => {
+  const { server } = await withServer(t);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const logout = await fetch(server.baseUrl + "/hub/session/logout", {
+    method: "POST",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
+  });
+  assert.equal(logout.status, 200);
+  const after = await fetch(server.baseUrl + "/hub/session", {
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}` },
+  });
+  assert.equal(after.status, 401);
+});

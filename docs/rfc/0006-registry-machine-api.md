@@ -69,7 +69,7 @@ The keyId selects which stored public key verifies the signature (enables rotati
 
 ## Decided: nonce consumption is transactional
 
-Order is fixed per authenticated machine request (all routes except `enroll`, which uses token + `enrollmentRequestId` idempotency and has no nonce):
+Order is fixed per authenticated machine request. **Exception set**: `enroll` (which uses token + `enrollmentRequestId` idempotency and has no nonce) and the dedicated `reenroll` flow (which reserves its nonce inside its own success transaction, below). For every other route (heartbeat, report-upload, credential-rotate):
 
 1. Key resolution: `X-Orbit-Key` keyId known, not revoked, not pre-overlap.
 2. Signature verification over the signing string; timestamp within ±30s.
