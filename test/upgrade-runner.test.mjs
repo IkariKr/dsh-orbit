@@ -86,7 +86,7 @@ function resolvedCompose(config, overrides = {}) {
   };
 }
 
-function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessionCode = 0, settingsMutateOk = true, resolved = null, tokenMismatch = false, identityFingerprintMismatch = false } = {}) {
+function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessionCode = 0, terminalCode = 0, settingsMutateOk = true, resolved = null, tokenMismatch = false, identityFingerprintMismatch = false } = {}) {
   const events = [];
   const identityFingerprint = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99";
   const runCommand = async (file, args, options = {}) => {
@@ -172,6 +172,14 @@ function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessio
           sessionCode === 0
             ? ""
             : "session.models: resume failed for session ... refusing to compose an unscoped context",
+      };
+    }
+    if (script.includes("smoke-terminal")) {
+      events.push("command:terminal");
+      return {
+        code: terminalCode,
+        stdout: "",
+        stderr: terminalCode === 0 ? "" : "FAIL unauthenticated terminal upgrade: expected denied, got allowed",
       };
     }
     throw new Error(`unexpected command: ${file} ${args.join(" ")}`);
@@ -287,6 +295,7 @@ test("candidate workflow binds the verified compose configuration before startin
       "settings",
       "auth",
       "session",
+      "terminal",
     ]);
     assert.ok(events.includes("probe:gateway-identity:dsh.example.com:9443"));
 
@@ -316,7 +325,7 @@ test("candidate workflow binds the verified compose configuration before startin
       "sessionResume:pass",
       "webPluginRoutes:pass",
       "longLivedTransport:not_run",
-      "terminalPtty:not_run",
+      "terminalPtty:pass",
     ]);
 
     const evidence = JSON.parse(await readFile(join(config.workdir, "evidence.json"), "utf8"));

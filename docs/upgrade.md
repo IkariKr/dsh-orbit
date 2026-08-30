@@ -103,7 +103,7 @@ Every check has an explicit state; missing evidence is never treated as a pass:
 - `fail` — the check ran and failed;
 - `not_run` — the check did not run in this validation round.
 
-`globalPatch`, `profilePatch`, `runtimeReadiness`, `settingsRead`, `settingsNoopWrite`, `authorizationSmoke`, `sessionResume`, and `webPluginRoutes` are required. `longLivedTransport` and `terminalPtty` are recorded when automated support exists.
+`globalPatch`, `profilePatch`, `runtimeReadiness`, `settingsRead`, `settingsNoopWrite`, `authorizationSmoke`, `sessionResume`, and `webPluginRoutes` are required. `longLivedTransport` is recorded when automated support exists; `terminalPtty` is automated since `0.2.4` — the verification sequence runs the live terminal authorization smoke (positive control plus unauthenticated, invalid-credential, unexpected-Origin, cross-site, and forged-assertion denials against the terminal upgrade endpoint) whenever the dsh-ssh fence is enabled (`DSH_ORBIT_PATCH_DSH_SSH=1`).
 
 The report separates two outcomes:
 

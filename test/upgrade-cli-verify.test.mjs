@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
+import { createPatchedFenceModule, FENCE_PUBLIC_HOST } from "./helpers/ssh-fence-fixture.mjs";
 import {
   COMPATIBILITY_OUTCOMES,
   PROMOTION_OUTCOMES,
@@ -100,7 +101,7 @@ async function readBody(req) {
 
 // Local HTTPS gateway stand-in presenting the per-run self-signed certificate.
 // Without the per-run CA propagation under test, every TLS client here fails.
-function startGateway(config) {
+async function startGateway(config, fence, fenceSecret) {
   const server = https.createServer(
     { cert: GATEWAY_CERT_PEM, key: GATEWAY_KEY_PEM },
     async (req, res) => {
@@ -109,13 +110,44 @@ function startGateway(config) {
         res.end(`<html><body><script src="${PLUGIN_ASSET}"></script></body></html>`);
         return;
       }
+      if (req.method !== "POST" && req.method !== "GET") {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "not found" }));
+        return;
+      }
+      const expectedAuthorization = `Basic ${Buffer.from(`${config.basicUser}:${config.basicPassword}`).toString("base64")}`;
+      if (req.url?.startsWith("/api/dsh-ssh/terminal")) {
+        if (req.headers.authorization !== expectedAuthorization) {
+          res.writeHead(401, { "content-type": "application/json" });
+          res.end(JSON.stringify({ error: "unauthorized" }));
+          return;
+        }
+        // gateway simulation: rewrite the authority, inject the internal
+        // proxy secret, then let the patched terminal fence decide
+        const fenceRequest = {
+          headers: {
+            host: FENCE_PUBLIC_HOST,
+            "x-forwarded-proto": "https",
+            "x-dsh-orbit-authenticated-proxy": fenceSecret,
+            "sec-fetch-site": req.headers["sec-fetch-site"],
+            origin: req.headers.origin,
+          },
+        };
+        if (fence.isDshOrbitAuthenticatedProxyRequest(fenceRequest)) {
+          res.writeHead(101, { connection: "upgrade", upgrade: "websocket" });
+          res.end();
+          return;
+        }
+        res.writeHead(403, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "forbidden: loopback-only or untrusted proxy" }));
+        return;
+      }
       if (req.method !== "POST" || !req.url?.startsWith("/api/")) {
         res.writeHead(404, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "not found" }));
         return;
       }
       const body = await readBody(req);
-      const expectedAuthorization = `Basic ${Buffer.from(`${config.basicUser}:${config.basicPassword}`).toString("base64")}`;
       if (req.headers.authorization !== expectedAuthorization) {
         respond(res, body.rpcId, { ok: false, error: { code: "E", message: "unauthorized" } }, 401);
         return;
@@ -124,7 +156,7 @@ function startGateway(config) {
         respond(res, body.rpcId, { ok: false, error: { code: "E", message: "cross-site" } }, 403);
         return;
       }
-      const expectedOrigin = `https://${req.headers.host}`;
+      const expectedOrigin = `https://${FENCE_PUBLIC_HOST}`;
       if (req.headers.origin !== undefined && req.headers.origin !== expectedOrigin) {
         respond(res, body.rpcId, { ok: false, error: { code: "E", message: "origin" } }, 403);
         return;
@@ -207,9 +239,13 @@ test("verify propagates the per-run CA to the runner checks and the smoke suites
     for (const dir of ["candidate-data", "candidate-workspace", "production-data"]) {
       await mkdir(join(workdir, dir), { recursive: true });
     }
-    const { server, port } = await startGateway(fixtureConfig(workdir, 0));
+    const { fence, fenceSecret } = await (async () => {
+      const created = await createPatchedFenceModule(workdir);
+      return { fence: await import(created.moduleUrl), fenceSecret: created.secret };
+    })();
+    const { server, port } = await startGateway(fixtureConfig(workdir, 0), fence, fenceSecret);
     try {
-      const config = fixtureConfig(workdir, port);
+      const config = fixtureConfig(workdir, port, { smokeOrigin: `https://${FENCE_PUBLIC_HOST}` });
       await writeFile(
         `${workdir}/compose.override.yaml`,
         `services:\n  dsh:\n    environment:\n      DSH_ORBIT_CANDIDATE_TOKEN: "abc123def4567890"\n`,

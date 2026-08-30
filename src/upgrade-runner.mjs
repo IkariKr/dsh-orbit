@@ -23,6 +23,7 @@ const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SMOKE_SETTINGS = fileURLToPath(new URL("../scripts/smoke-settings.mjs", import.meta.url));
 const SMOKE_AUTH = fileURLToPath(new URL("../scripts/smoke-auth.mjs", import.meta.url));
 const SMOKE_SESSION = fileURLToPath(new URL("../scripts/smoke-session-resume.mjs", import.meta.url));
+const SMOKE_TERMINAL = fileURLToPath(new URL("../scripts/smoke-terminal.mjs", import.meta.url));
 const PATCHER = "/usr/local/lib/dsh-orbit/bin/dsh-orbit-patch.mjs";
 const CANDIDATE_TOKEN_ENV = "DSH_ORBIT_CANDIDATE_TOKEN";
 
@@ -606,10 +607,13 @@ export async function runVerificationSequence({
       names: ["terminalPtty"],
       required: false,
       run: async () => {
+        const terminal = await runCommand(process.execPath, [SMOKE_TERMINAL], { env: smokeEnv() });
         record(
           "terminalPtty",
-          "not_run",
-          "automated check not implemented; the dsh-ssh plugin restricts PTY spawn to loopback by design, so terminal evidence is recorded in the release attestation instead",
+          terminal.code === 0 ? "pass" : "fail",
+          terminal.code === 0
+            ? "terminal fence probe: 6/6 authorization cases matched"
+            : failDetail(terminal.stderr, `exit ${terminal.code}`),
         );
       },
     },
