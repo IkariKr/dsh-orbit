@@ -7,6 +7,7 @@ import test from "node:test";
 
 import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
 import {
+  generateComposeOverride,
   UpgradeBindingError,
   loadUpgradeConfig,
   preflight,
@@ -56,6 +57,9 @@ function fixtureConfig(workdir, overrides = {}) {
     basicPassword: "orbit-candidate-value",
     smokeOrigin: null,
     sessionId: "session-historical",
+    sshPatchEnabled: true,
+    sshPluginRoot: "/opt/dsh-orbit/plugins",
+    sshPluginVersion: "0.3.2",
     snapshotHook: "/opt/dsh-orbit/hooks/snapshot.sh",
     snapshotTimeoutSeconds: 900,
     gatewayService: "caddy",
@@ -325,7 +329,8 @@ test("candidate workflow binds the verified compose configuration before startin
       "sessionResume:pass",
       "webPluginRoutes:pass",
       "longLivedTransport:not_run",
-      "terminalPtty:pass",
+      "terminalFence:pass",
+      "terminalPtty:not_run",
     ]);
 
     const evidence = JSON.parse(await readFile(join(config.workdir, "evidence.json"), "utf8"));
@@ -573,6 +578,63 @@ test("the base gateway service must already mount a certificate at the configure
     );
     const commandKeys = events.filter((event) => event.startsWith("command:")).map((event) => event.slice(8));
     assert.ok(!commandKeys.includes("build"), "a misconfigured gateway target must fail before the build");
+  });
+});
+
+test("the terminal fence smoke is gated by the patch enable flag", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir), { sshPatchEnabled: false });
+    const { events, runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config);
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe });
+
+    assert.equal(result.report.checks.terminalFence.status, "not_run", "disabled patch must not run the fence smoke");
+    assert.equal(result.report.checks.terminalPtty.status, "not_run");
+    assert.equal(result.report.promotionReadiness.outcome, PROMOTION_OUTCOMES.eligible, "not_run must not block eligibility");
+    const commandKeys = events.filter((event) => event.startsWith("command:")).map((event) => event.slice(8));
+    assert.ok(!commandKeys.includes("terminal"), "no terminal command may run when the patch is disabled");
+  });
+});
+
+test("a failed terminal fence blocks promotion when the patch is enabled", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir), { sshPatchEnabled: true });
+    const { runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config, { terminalCode: 1 });
+    const result = await runCandidateWorkflow({ config, runCommand, fetchPage, snapshotHook, tlsProbe });
+
+    assert.equal(result.report.checks.terminalFence.status, "fail");
+    assert.equal(result.report.checks.terminalPtty.status, "not_run");
+    assert.equal(result.report.promotionReadiness.outcome, PROMOTION_OUTCOMES.notEligible);
+    assert.ok(result.report.promotionReadiness.reasons.includes("terminalFence=fail"));
+  });
+});
+
+test("the candidate override propagates the ssh plugin root and version with the patch flag", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir), {
+      sshPluginRoot: "/opt/plugins/dsh-ssh",
+      sshPluginVersion: "0.3.2",
+    });
+    await mkdir(config.workdir, { recursive: true });
+    const override = generateComposeOverride(config, "abc123def4567890", null);
+    assert.ok(override.includes('DSH_ORBIT_PATCH_DSH_SSH: "1"'));
+    assert.ok(override.includes('DSH_SSH_PLUGIN_ROOT: "/opt/plugins/dsh-ssh"'));
+    assert.ok(override.includes('DSH_SSH_PLUGIN_VERSION: "0.3.2"'));
+
+    const disabled = generateComposeOverride(
+      { ...config, sshPatchEnabled: false },
+      "abc123def4567890",
+      null,
+    );
+    assert.ok(!disabled.includes("DSH_ORBIT_PATCH_DSH_SSH"));
+    assert.ok(!disabled.includes("DSH_SSH_PLUGIN_ROOT"));
+
+    const bare = generateComposeOverride(
+      { ...config, sshPatchEnabled: true, sshPluginRoot: null, sshPluginVersion: null },
+      "abc123def4567890",
+      null,
+    );
+    assert.ok(bare.includes('DSH_ORBIT_PATCH_DSH_SSH: "1"'));
+    assert.ok(!bare.includes("DSH_SSH_PLUGIN_ROOT"));
   });
 });
 

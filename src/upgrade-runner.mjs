@@ -53,7 +53,13 @@ export function generateComposeOverride(config, candidateToken, gatewayIdentity 
     `    image: ${quoteYaml(config.candidateImage)}`,
     "    environment:",
     `      ${CANDIDATE_TOKEN_ENV}: ${quoteYaml(candidateToken)}`,
-    ...(config.sshPatchEnabled ? ["      DSH_ORBIT_PATCH_DSH_SSH: \"1\""] : []),
+    ...(config.sshPatchEnabled
+      ? [
+          "      DSH_ORBIT_PATCH_DSH_SSH: \"1\"",
+          ...(config.sshPluginRoot ? [`      DSH_SSH_PLUGIN_ROOT: ${quoteYaml(config.sshPluginRoot)}`] : []),
+          ...(config.sshPluginVersion ? [`      DSH_SSH_PLUGIN_VERSION: ${quoteYaml(config.sshPluginVersion)}`] : []),
+        ]
+      : []),
     "    volumes:",
     `      - ${quoteYaml(`${config.candidateDataRoot}:/data:rw`)}`,
     `      - ${quoteYaml(`${config.candidateWorkspaceRoot}:/workspace:rw`)}`,
@@ -208,6 +214,8 @@ export function loadUpgradeConfig(env) {
       basicPassword: env.DSH_SMOKE_BASIC_PASSWORD,
       smokeOrigin: env.DSH_SMOKE_ORIGIN,
       sshPatchEnabled: env.DSH_ORBIT_PATCH_DSH_SSH === "1",
+      sshPluginRoot: env.DSH_SSH_PLUGIN_ROOT,
+      sshPluginVersion: env.DSH_SSH_PLUGIN_VERSION,
       sessionId: env.DSH_SMOKE_SESSION_ID,
       snapshotHook: env.DSH_SNAPSHOT_HOOK,
       snapshotTimeoutSeconds: Number(env.DSH_SNAPSHOT_TIMEOUT_SECONDS ?? 900),
@@ -606,16 +614,35 @@ export async function runVerificationSequence({
       },
     },
     {
-      names: ["terminalPtty"],
+      names: ["terminalFence"],
       required: false,
       run: async () => {
+        if (!config.sshPatchEnabled) {
+          record(
+            "terminalFence",
+            "not_run",
+            "dsh-ssh fence patch not enabled (set DSH_ORBIT_PATCH_DSH_SSH=1 to automate)",
+          );
+          return;
+        }
         const terminal = await runCommand(process.execPath, [SMOKE_TERMINAL], { env: smokeEnv() });
         record(
-          "terminalPtty",
+          "terminalFence",
           terminal.code === 0 ? "pass" : "fail",
           terminal.code === 0
             ? "terminal fence probe: 6/6 authorization cases matched"
             : failDetail(terminal.stderr, `exit ${terminal.code}`),
+        );
+      },
+    },
+    {
+      names: ["terminalPtty"],
+      required: false,
+      run: async () => {
+        record(
+          "terminalPtty",
+          "not_run",
+          "actual PTY runtime evidence is recorded by the Stage 7 manual acceptance (see the release attestation); the automated fence result is reported separately as terminalFence",
         );
       },
     },

@@ -10,7 +10,8 @@ import { join } from "node:path";
 // same-origin browser context is admitted even though its Host is not
 // loopback. Loopback requests keep their original path, and every other
 // request stays denied. The patch applies only to an exactly matching
-// source layout of the pinned plugin version and fails closed on drift.
+// source layout of the pinned plugin version and fails closed on drift;
+// the verifier rejects any missing, duplicated, or tampered fragment.
 
 export const SSH_PLUGIN_DEFAULT_VERSION = "0.3.2";
 
@@ -20,12 +21,28 @@ export const SSH_PLUGIN_HELPER_ANCHOR = "function isLoopbackRequest(request) {";
 
 export const SSH_PLUGIN_GATE_NEEDLE = "if (!isLoopbackRequest(req)) {";
 
-export const SSH_PLUGIN_GATE_COUNT = 3;
+export const SSH_PLUGIN_PATCHED_GATE_NEEDLE =
+  "if (!isLoopbackRequest(req) && !isDshOrbitAuthenticatedProxyRequest(req)) {";
 
 export const SSH_PLUGIN_HELPER_MARKER = "isDshOrbitAuthenticatedProxyRequest";
 
+export const SSH_PLUGIN_GATE_COUNT = 3;
+
+export const SSH_PLUGIN_HELPER_SIGNATURE = "function isDshOrbitAuthenticatedProxyRequest(request) {";
+
 function quote(value) {
   return JSON.stringify(value);
+}
+
+function countOccurrences(source, needle) {
+  let count = 0;
+  let cursor = 0;
+  let next;
+  while ((next = source.indexOf(needle, cursor)) >= 0) {
+    count += 1;
+    cursor = next + needle.length;
+  }
+  return count;
 }
 
 export function buildDshSshHelper({ publicHost, proxyAuthFile }) {
@@ -55,20 +72,35 @@ export function buildDshSshHelper({ publicHost, proxyAuthFile }) {
   ].join("\n");
 }
 
-function replaceExactly(source, needle, replacement, label, expectedCount) {
-  let count = 0;
-  let cursor = 0;
-  let next;
-  while ((next = source.indexOf(needle, cursor)) >= 0) {
-    count += 1;
-    cursor = next + needle.length;
+/**
+ * Exact structural verification of an already-patched bundle. Returns a list
+ * of problems; an empty list means the layout matches the configured
+ * patch exactly: one helper, exactly three patched gates, zero unpatched
+ * gates, and the embedded host/auth-file constants match this run.
+ */
+export function verifyPatchedLayout(source, { publicHost, proxyAuthFile }) {
+  const problems = [];
+  const helperCount = countOccurrences(source, SSH_PLUGIN_HELPER_SIGNATURE);
+  if (helperCount !== 1) {
+    problems.push(`authenticated proxy helper must appear exactly once, found ${helperCount}`);
   }
-  if (count !== expectedCount) {
-    throw new Error(
-      `DSH Orbit dsh-ssh patch failed: expected ${label} exactly ${expectedCount} time(s), found ${count}`,
+  const patchedGates = countOccurrences(source, SSH_PLUGIN_PATCHED_GATE_NEEDLE);
+  if (patchedGates !== SSH_PLUGIN_GATE_COUNT) {
+    problems.push(
+      `patched terminal gates must appear exactly ${SSH_PLUGIN_GATE_COUNT} times, found ${patchedGates}`,
     );
   }
-  return source.replaceAll(needle, replacement);
+  const unpatchedGates = countOccurrences(source, SSH_PLUGIN_GATE_NEEDLE);
+  if (unpatchedGates !== 0) {
+    problems.push(`unpatched terminal gates must not remain, found ${unpatchedGates}`);
+  }
+  if (!source.includes(`const DSH_ORBIT_SSH_PUBLIC_HOST = ${quote(publicHost)};`)) {
+    problems.push("public host mismatch");
+  }
+  if (!source.includes(`const DSH_ORBIT_SSH_PROXY_AUTH_FILE = ${quote(proxyAuthFile)};`)) {
+    problems.push("proxy auth file mismatch");
+  }
+  return problems;
 }
 
 export async function readDshSshPluginVersion(pluginRoot) {
@@ -96,26 +128,42 @@ export async function patchDshSshPlugin({
   const indexPath = join(root, "lib", "index.js");
   const source = await readFile(indexPath, "utf8");
 
-  if (source.includes(`function isDshOrbitAuthenticatedProxyRequest(request) {`)) {
+  if (source.includes(SSH_PLUGIN_HELPER_MARKER)) {
+    // Idempotent path: the bundle claims to be patched — verify the whole
+    // layout instead of trusting the marker, then report the verification
+    const problems = verifyPatchedLayout(source, { publicHost, proxyAuthFile });
+    if (problems.length > 0) {
+      throw new Error(`DSH Orbit dsh-ssh verification failed: ${problems.join("; ")}`);
+    }
     return { root, status: "ok", version };
   }
 
   const helper = buildDshSshHelper({ publicHost, proxyAuthFile });
-  const injected = replaceExactly(
-    source,
+  const anchorCount = countOccurrences(source, SSH_PLUGIN_HELPER_ANCHOR);
+  if (anchorCount !== 1) {
+    throw new Error(
+      `DSH Orbit dsh-ssh patch failed: expected ${SSH_PLUGIN_HELPER_ANCHOR} exactly 1 time(s), found ${anchorCount}`,
+    );
+  }
+  const gateCount = countOccurrences(source, SSH_PLUGIN_GATE_NEEDLE);
+  if (gateCount !== SSH_PLUGIN_GATE_COUNT) {
+    throw new Error(
+      `DSH Orbit dsh-ssh patch failed: expected ${SSH_PLUGIN_GATE_NEEDLE} exactly ${SSH_PLUGIN_GATE_COUNT} time(s), found ${gateCount}`,
+    );
+  }
+  const injected = source.replaceAll(
     SSH_PLUGIN_HELPER_ANCHOR,
     `${helper}\n${SSH_PLUGIN_HELPER_ANCHOR}`,
-    SSH_PLUGIN_HELPER_ANCHOR,
-    1,
   );
-  const patched = replaceExactly(
-    injected,
+  const patched = injected.replaceAll(
     SSH_PLUGIN_GATE_NEEDLE,
-    `if (!isLoopbackRequest(req) && !isDshOrbitAuthenticatedProxyRequest(req)) {`,
-    SSH_PLUGIN_GATE_NEEDLE,
-    SSH_PLUGIN_GATE_COUNT,
+    SSH_PLUGIN_PATCHED_GATE_NEEDLE,
   );
 
+  const problems = verifyPatchedLayout(patched, { publicHost, proxyAuthFile });
+  if (problems.length > 0) {
+    throw new Error(`DSH Orbit dsh-ssh patch failed: ${problems.join("; ")}`);
+  }
   await writeFile(indexPath, patched, "utf8");
   return { root, status: "patched", version };
 }
@@ -124,6 +172,7 @@ export async function verifyDshSshPlugin({
   root,
   pluginVersion = SSH_PLUGIN_DEFAULT_VERSION,
   publicHost,
+  proxyAuthFile,
 }) {
   const version = await readDshSshPluginVersion(root);
   if (version !== pluginVersion) {
@@ -133,18 +182,9 @@ export async function verifyDshSshPlugin({
     );
   }
   const source = await readFile(join(root, "lib", "index.js"), "utf8");
-  const problems = [];
-  if (!source.includes(`function isDshOrbitAuthenticatedProxyRequest(request) {`)) {
-    problems.push("authenticated proxy helper missing");
-  }
-  if (!source.includes(`const DSH_ORBIT_SSH_PUBLIC_HOST = ${quote(publicHost)};`)) {
-    problems.push("public host mismatch");
-  }
-  if (!source.includes(`&& !isDshOrbitAuthenticatedProxyRequest(req)) {`)) {
-    problems.push("terminal gate not admitted");
-  }
+  const problems = verifyPatchedLayout(source, { publicHost, proxyAuthFile });
   if (problems.length > 0) {
-    throw new Error(`DSH Orbit dsh-ssh verification failed: ${problems.join(", ")}`);
+    throw new Error(`DSH Orbit dsh-ssh verification failed: ${problems.join("; ")}`);
   }
   return { root, status: "ok", version };
 }

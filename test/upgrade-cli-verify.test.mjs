@@ -48,6 +48,7 @@ function fixtureConfig(workdir, port, overrides = {}) {
     basicPassword: "orbit-verify-value",
     smokeOrigin: null,
     sessionId: "session-historical",
+    sshPatchEnabled: true,
     snapshotHook: "/opt/dsh-orbit/hooks/snapshot.sh",
     snapshotTimeoutSeconds: 900,
     gatewayService: "caddy",
@@ -269,6 +270,8 @@ test("verify propagates the per-run CA to the runner checks and the smoke suites
         /GET \/ with authenticated gateway headers -> HTTP 200/,
       );
       assert.match(result.report.checks.authorizationSmoke.detail, /6\/6 authorization cases matched/);
+      assert.equal(result.report.checks.terminalFence.status, "pass");
+      assert.equal(result.report.checks.terminalPtty.status, "not_run");
       assert.match(result.report.checks.sessionResume.detail, /existing session resumed/);
       assert.equal(events.includes("command:config-base"), true);
       assert.equal(events.includes("command:config"), true);

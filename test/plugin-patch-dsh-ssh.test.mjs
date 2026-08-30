@@ -88,6 +88,7 @@ test("applies the authenticated-proxy admission to all three gates and keeps loo
     await verifyDshSshPlugin({
       root: join(dir, "plugins", "@linxin666", "dsh-ssh"),
       publicHost: FENCE_PUBLIC_HOST,
+      proxyAuthFile: join(dir, "secret.txt"),
     });
 
     const fence = await import(moduleUrl);
@@ -134,8 +135,8 @@ test("rejects an unpatched plugin at verification time", async () => {
   await withTempDir(async (dir) => {
     const { pluginRoot } = await writePluginFixture({ dir, source: requireSource(3) });
     await assert.rejects(
-      verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST }),
-      /authenticated proxy helper missing/,
+      verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile: join(dir, "nonexistent.pem") }),
+      /authenticated proxy helper must appear exactly once, found 0/,
     );
   });
 });
@@ -192,6 +193,118 @@ test("fails closed when an expected fragment is missing or duplicated", async ()
       patchDshSshPlugin({ root: twoRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile: secretFile }),
       /expected if \(!isLoopbackRequest\(req\)\) \{ exactly 3 time\(s\), found 2/,
     );
+  });
+});
+
+test("verification rejects partial patches, tampered helpers, and drift", async () => {
+  await withTempDir(async (dir) => {
+    const secretFile = join(dir, "secret2.txt");
+    const proxyAuthFile = join(dir, "proxy-secret.txt");
+    await writeFile(proxyAuthFile, "orbit-proxy-" + "value", "utf8");
+    const { pluginRoot } = await writePluginFixture({
+      dir,
+      source: requireSource(3),
+      secretValue: "orbit-proxy-" + "value",
+    });
+    await patchDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile });
+
+    // partial patch: revert exactly one gate
+    let source = await readFile(join(pluginRoot, "lib", "index.js"), "utf8");
+    const patchedNeedle =
+      "if (!isLoopbackRequest(req) && !isDshOrbitAuthenticatedProxyRequest(req)) {";
+    const origin = source;
+    const first = source.indexOf(patchedNeedle);
+    const partial = source.slice(0, first) + "if (!isLoopbackRequest(req)) {" + source.slice(first + patchedNeedle.length);
+    await writeFile(join(pluginRoot, "lib", "index.js"), partial, "utf8");
+    await assert.rejects(
+      verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile }),
+      /unpatched terminal gates must not remain, found 1/,
+    );
+    await writeFile(join(pluginRoot, "lib", "index.js"), origin, "utf8");
+
+    // tampered helper: wrong proxy auth file constant
+    await writeFile(
+      join(pluginRoot, "lib", "index.js"),
+      origin.replace(
+        `const DSH_ORBIT_SSH_PROXY_AUTH_FILE = ${JSON.stringify(proxyAuthFile)};`,
+        `const DSH_ORBIT_SSH_PROXY_AUTH_FILE = ${JSON.stringify(secretFile)};`,
+      ),
+      "utf8",
+    );
+    await assert.rejects(
+      verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile }),
+      /proxy auth file mismatch/,
+    );
+    await writeFile(join(pluginRoot, "lib", "index.js"), origin, "utf8");
+
+    // duplicated helper
+    await writeFile(
+      join(pluginRoot, "lib", "index.js"),
+      origin.replace(
+        "function isDshOrbitAuthenticatedProxyRequest(request) {",
+        "function isDshOrbitAuthenticatedProxyRequest(request) {\nfunction isDshOrbitAuthenticatedProxyRequest(request) {",
+      ),
+      "utf8",
+    );
+    await assert.rejects(
+      verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile }),
+      /helper must appear exactly once, found 2/,
+    );
+    await writeFile(join(pluginRoot, "lib", "index.js"), origin, "utf8");
+
+    // missing gate: drop the last patched gate entirely
+    const lastIdx = origin.lastIndexOf(patchedNeedle);
+    const missingGate = origin.slice(0, lastIdx) + origin.slice(lastIdx + patchedNeedle.length);
+    await writeFile(join(pluginRoot, "lib", "index.js"), missingGate, "utf8");
+    await assert.rejects(
+      verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile }),
+      /patched terminal gates must appear exactly 3 times, found 2/,
+    );
+
+    // clean layout still verifies
+    await writeFile(join(pluginRoot, "lib", "index.js"), origin, "utf8");
+    assert.equal(
+      (await verifyDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile })).status,
+      "ok",
+    );
+  });
+});
+
+test("an idempotent re-patch verifies the layout instead of trusting the marker", async () => {
+  await withTempDir(async (dir) => {
+    const proxyAuthFile = join(dir, "proxy-secret.txt");
+    await writeFile(proxyAuthFile, "orbit-proxy-" + "value", "utf8");
+    const { pluginRoot } = await writePluginFixture({
+      dir,
+      source: requireSource(3),
+      secretValue: "orbit-proxy-" + "value",
+    });
+    const first = await patchDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile });
+    assert.equal(first.status, "patched");
+
+    // tamper one gate, then re-patch: idempotent branch must fail closed
+    const indexPath = join(pluginRoot, "lib", "index.js");
+    let source = await readFile(indexPath, "utf8");
+    const patchedNeedle =
+      "if (!isLoopbackRequest(req) && !isDshOrbitAuthenticatedProxyRequest(req)) {";
+    const firstIdx = source.indexOf(patchedNeedle);
+    source =
+      source.slice(0, firstIdx) + "if (!isLoopbackRequest(req)) {" + source.slice(firstIdx + patchedNeedle.length);
+    await writeFile(indexPath, source, "utf8");
+    await assert.rejects(
+      patchDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile }),
+      /unpatched terminal gates must not remain, found 1/,
+    );
+
+    // restore and confirm idempotent ok
+    source = await readFile(indexPath, "utf8");
+    const restored = source.replace(
+      "if (!isLoopbackRequest(req)) {",
+      patchedNeedle,
+    );
+    await writeFile(indexPath, restored, "utf8");
+    const second = await patchDshSshPlugin({ root: pluginRoot, publicHost: FENCE_PUBLIC_HOST, proxyAuthFile });
+    assert.equal(second.status, "ok");
   });
 });
 

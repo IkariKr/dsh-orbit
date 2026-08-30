@@ -13,7 +13,11 @@ export const REQUIRED_CHECKS = Object.freeze([
   "webPluginRoutes",
 ]);
 
-export const OPTIONAL_CHECKS = Object.freeze(["longLivedTransport", "terminalPtty"]);
+export const OPTIONAL_CHECKS = Object.freeze([
+  "longLivedTransport",
+  "terminalFence",
+  "terminalPtty",
+]);
 
 export const KNOWN_CHECKS = new Set([...REQUIRED_CHECKS, ...OPTIONAL_CHECKS]);
 
