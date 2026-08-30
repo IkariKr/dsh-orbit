@@ -4,6 +4,14 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
+## 0.2.4 - 2026-08-30
+
+### Added
+
+- profile-local compatibility patch for the `@linxin666/dsh-ssh` terminal fence (`DSH_ORBIT_PATCH_DSH_SSH=1`): remote PTY terminals are admitted only through the authenticated Orbit proxy path — exact public host, HTTPS forwarding, gateway-injected internal proxy secret, same-origin, non-cross-site — while loopback keeps its original path and every other denial stays intact; the patch is version-pinned (`0.3.2`) and fails closed on any source drift;
+- live terminal authorization smoke (`npm run smoke:terminal`) with a positive control and five denial cases against the terminal upgrade endpoint, wired into the candidate verification sequence (`terminalPtty` is now an automated check);
+- documentation of `DSH_UPGRADE_GATEWAY_SERVICE`, `DSH_UPGRADE_GATEWAY_CERT_TARGET`, `DSH_UPGRADE_GATEWAY_KEY_TARGET`, `DSH_ORBIT_PATCH_DSH_SSH`, `DSH_SSH_PLUGIN_ROOT`, and `DSH_SSH_PLUGIN_VERSION` in the README and CLI usage.
+
 ## 0.2.3 - 2026-08-30
 
 ### Fixed
