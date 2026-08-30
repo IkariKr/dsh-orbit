@@ -70,8 +70,15 @@ export const SESSION_IDLE_MS = 30 * 60 * 1000;
 
 export const EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 export const AUDIT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
+// RFC-0009: reports retention 90 days; every report upload is an event.
+export const REPORT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 // RFC-0009: daily rollups after 7 days.
 export const EVENT_ROLLUP_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Hub maintenance cadence: 30s ticks with an immediate run at startup,
+// so the default 3x60s stale threshold and the 24h lost threshold are
+// actually reachable in production (phase-1 review round 2, P1).
+export const MAINTENANCE_TICK_MS = 30 * 1000;
 
 export function buildSigningString({ label, method, path, timestamp, nonce, bodyHash, nodeId }) {
   return [label, method, path, String(timestamp), nonce, bodyHash, nodeId].join("\n");

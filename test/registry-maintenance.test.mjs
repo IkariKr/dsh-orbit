@@ -138,7 +138,7 @@ test("report evidence ages: fresh at 6d23h, stale past 7 days with capabilities 
   assert.equal(summary.health.dshHealthy, "ok");
 });
 
-test("a failed report stays failed by age; it never launders into stale-fresh", async (t) => {
+test("an aged report ages ANY outcome to stale; the last failure detail stays in latestReport", async (t) => {
   const { registry, server, clock } = await withClockServer(t);
   const node = await enrollNode(server.baseUrl, registry);
   const report = validReport();
@@ -153,8 +153,12 @@ test("a failed report stays failed by age; it never launders into stale-fresh", 
   clock.now = new Date(clock.now.getTime() + 8 * 24 * 60 * 60 * 1000);
   registry.maintenance();
   const summary = registry.getNode(node.nodeId);
-  assert.equal(summary.health.orbitCompatible, "fail");
+  // Frozen RFC semantics (round-2 P2): the aged failure is stale, and
+  // the last failure verdict remains visible on the latest report.
+  assert.equal(summary.health.orbitCompatible, "stale");
+  assert.equal(summary.latestReport.compatibility, "fail");
   assert.equal(summary.health.capabilitiesStale, true);
+  assert.deepEqual(summary.health.capabilities, []);
   assert.equal(summary.health.dshHealthy, "unknown");
 });
 
@@ -284,3 +288,92 @@ async function deleteNode(registry, nodeId) {
 }
 
 void CADENCE_MS;
+test("report retention: kept at 89d, purged at 91d, derived state returns to unknown", async (t) => {
+  const { registry, server, clock } = await withClockServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/report-upload",
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: validReport(),
+  });
+  assert.equal(registry.getNode(node.nodeId).health.orbitCompatible, "pass");
+
+  // 89 days: the report is retained (but 7-day staleness already aged it).
+  clock.now = new Date(clock.now.getTime() + 89 * 24 * 60 * 60 * 1000);
+  registry.maintenance();
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM reports WHERE node_id = ?").get(node.nodeId).n, 1);
+
+  // 91 days: the last report is purged; derived health/capability state
+  // returns to explicit unknown (no evidence, no claims).
+  clock.now = new Date(clock.now.getTime() + 2 * 24 * 60 * 60 * 1000);
+  registry.maintenance();
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM reports WHERE node_id = ?").get(node.nodeId).n, 0);
+  const summary = registry.getNode(node.nodeId);
+  assert.equal(summary.health.orbitCompatible, "unknown");
+  assert.equal(summary.health.dshHealthy, "unknown");
+  assert.equal(summary.health.capabilitiesStale, true);
+  assert.deepEqual(summary.health.capabilities, []);
+  assert.equal(summary.latestReport, null);
+  assert.equal(summary.health.reachable, "unknown");
+});
+
+test("rollup is strictly idempotent across repeated maintenance runs and dimensions", async (t) => {
+  const { registry, server, clock } = await withClockServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  // Fabricate raw events for two dimensions across two old days.
+  const dimensions = ["registry_contact", "dsh_healthy"];
+  for (const day of ["2026-08-01", "2026-08-02"]) {
+    for (const dimension of dimensions) {
+      registry.db
+        .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, ?, ?, 'x', 'y', 'maintenance')")
+        .run(node.nodeId, `${day}T12:00:00.000Z`, dimension);
+    }
+  }
+  clock.now = new Date("2026-08-30T00:00:00.000Z");
+
+  const snapshot = () => {
+    const raw = registry.db.prepare("SELECT COUNT(*) AS n FROM events WHERE node_id = ? AND dimension != 'rollup'").get(node.nodeId).n;
+    const summaries = registry.db.prepare("SELECT COUNT(*) AS n FROM events WHERE node_id = ? AND dimension = 'rollup'").get(node.nodeId).n;
+    return { raw, summaries };
+  };
+
+  registry.maintenance();
+  const first = snapshot();
+  assert.equal(first.raw, 0);
+  assert.equal(first.summaries, 4); // 2 days x 2 dimensions
+
+  // Second and third runs must not nest summaries or add anything.
+  registry.maintenance();
+  assert.deepEqual(snapshot(), first);
+  registry.maintenance();
+  assert.deepEqual(snapshot(), first);
+  // No rollup-of-rollup ever exists.
+  const nested = registry.db.prepare("SELECT COUNT(*) AS n FROM events WHERE node_id = ? AND dimension = 'rollup' AND from_value = 'rollup'").get(node.nodeId).n;
+  assert.equal(nested, 0);
+});
+
+test("session expiry is audited exactly once, in the maintenance transaction", async (t) => {
+  const { registry, server, clock } = await withClockServer(t);
+  const session = registry.bootstrapSession({ principal: "operator" });
+  // The request path never audits expiry.
+  clock.now = new Date(clock.now.getTime() + 13 * 60 * 60 * 1000);
+  assert.equal(registry.validateSession(session.sessionId), null);
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'session.expired'").get().n, 0);
+
+  registry.maintenance();
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'session.expired'").get().n, 1);
+  assert.notEqual(registry.db.prepare("SELECT expiry_audited_at FROM browser_sessions WHERE session_id = ?").get(session.sessionId).expiry_audited_at, null);
+
+  // Repeated maintenance does not re-audit.
+  registry.maintenance();
+  registry.maintenance();
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'session.expired'").get().n, 1);
+
+  // Idle expiry is audited once as well.
+  registry.bootstrapSession({ principal: "operator" });
+  clock.now = new Date(clock.now.getTime() + 31 * 60 * 1000);
+  registry.maintenance();
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'session.expired'").get().n, 2);
+});

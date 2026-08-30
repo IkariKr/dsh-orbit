@@ -140,3 +140,49 @@ test("a heartbeat after the first report takes over the runtime identity authori
   assert.equal(after.health.orbitCompatible, "stale");
   assert.deepEqual(after.health.capabilities, []);
 });
+
+test("registryContact is heartbeat-only: a report upload on a lost node keeps it lost", async (t) => {
+  // Report uploads update the generic lastSeen, but they are NOT
+  // registry contact: registryContact and the contact-lost alert flag
+  // move only on heartbeat traffic (round-2 P1).
+  const clock = { now: new Date() };
+  const registry = createTestRegistry({ now: () => clock.now });
+  const server = await createTestServer(registry, {});
+  t.after(async () => {
+    await server.close();
+    registry.close();
+  });
+  const node = await enrollNode(server.baseUrl, registry);
+  const beat = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/heartbeat",
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: defaultRuntimeIdentity(), // identity abc123, matching the report below
+  });
+  assert.equal(beat.status, 200);
+
+  // The node goes quiet for 25h: maintenance marks it lost.
+  clock.now = new Date(clock.now.getTime() + 25 * 60 * 60 * 1000);
+  registry.maintenance();
+  let summary = registry.getNode(node.nodeId);
+  assert.equal(summary.health.registryContact, "lost");
+  assert.deepEqual(summary.health.alertFlags, ["contact-lost"]);
+
+  // A report upload arrives while lost: lastSeen moves, registryContact
+  // does not, and the alert flag is not cleared.
+  const upload = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/report-upload",
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: validReport(),
+    timestamp: Math.trunc(clock.now.getTime() / 1000),
+  });
+  assert.equal(upload.status, 200);
+  summary = registry.getNode(node.nodeId);
+  assert.equal(summary.health.registryContact, "lost");
+  assert.deepEqual(summary.health.alertFlags, ["contact-lost"]);
+  assert.equal(summary.health.lastSeenSource, "report-upload");
+  assert.equal(summary.health.orbitCompatible, "pass");
+});

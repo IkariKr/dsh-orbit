@@ -6,14 +6,19 @@
 
 import { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 // v1 -> v2: nodes gains the operator alert-flag column (RFC-0009
-// "lost + operator alert flag", P1-02 of the phase-1 implementation
-// review). Fresh databases create the full v2 shape; existing v1
-// databases are upgraded in place.
+// "lost + operator alert flag").
+// v2 -> v3: nodes gains last_heartbeat_at (registryContact is strictly
+// heartbeat-driven; report uploads only touch generic lastSeen);
+// browser_sessions gains expiry_audited_at (one-time expiry audit).
 const upgradeSteps = {
   1: ["ALTER TABLE nodes ADD COLUMN alert_flags TEXT NOT NULL DEFAULT '[]'"],
+  2: [
+    "ALTER TABLE nodes ADD COLUMN last_heartbeat_at TEXT",
+    "ALTER TABLE browser_sessions ADD COLUMN expiry_audited_at TEXT",
+  ],
 };
 
 const schemaStatements = [
@@ -30,6 +35,7 @@ const schemaStatements = [
     orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
     reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable = 'unknown'),
     alert_flags TEXT NOT NULL DEFAULT '[]',
+    last_heartbeat_at TEXT,
     capabilities TEXT NOT NULL DEFAULT '[]',
     capabilities_stale INTEGER NOT NULL DEFAULT 1,
     last_seen TEXT,
@@ -119,7 +125,8 @@ const schemaStatements = [
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     idle_until TEXT NOT NULL,
-    revoked_at TEXT
+    revoked_at TEXT,
+    expiry_audited_at TEXT
   )`,
   `
   CREATE INDEX idx_seen_nonces_created_at ON seen_nonces (created_at)`,

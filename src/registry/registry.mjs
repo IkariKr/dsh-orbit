@@ -20,6 +20,7 @@ import {
   PUBLIC_KEY_PATTERN,
   REENROLL_V1_LABEL,
   REQUEST_ID_PATTERN,
+  REPORT_RETENTION_MS,
   REPORT_STALENESS_MS,
   ROTATION_OVERLAP_HOURS_DEFAULT,
   ROTATION_OVERLAP_HOURS_MAX,
@@ -220,7 +221,11 @@ export class Registry {
   }
 
   getLatestReport(nodeId) {
-    return this.db.prepare("SELECT * FROM reports WHERE node_id = ? ORDER BY uploaded_at DESC LIMIT 1").get(nodeId);
+    // Deterministic latest-report ordering (round-2 P1): same-millisecond
+    // uploads resolve by insertion id, never by clock ambiguity.
+    return this.db
+      .prepare("SELECT * FROM reports WHERE node_id = ? ORDER BY uploaded_at DESC, id DESC LIMIT 1")
+      .get(nodeId);
   }
 
   recordEvent(nodeId, dimension, fromValue, toValue, source) {
@@ -457,7 +462,9 @@ export class Registry {
   }
 
   // The heartbeat is the authoritative writer of the current runtime
-  // identity; a report never overwrites it (P1-05 authority model).
+  // identity AND of registryContact: it updates lastHeartbeatAt and
+  // lastSeen. A report upload never moves registryContact and never
+  // clears the contact-lost alert flag (round-2 P1).
   heartbeatAuthenticated({ node, rawBody }) {
     const runtime = requireIdentityJson(parseJsonBody(rawBody));
     const nodeId = node.node_id;
@@ -467,8 +474,10 @@ export class Registry {
       this.clearAlertFlag(nodeId, "contact-lost");
       const at = nowIso(this.now());
       this.db
-        .prepare("UPDATE nodes SET last_seen = ?, last_seen_source = 'heartbeat', orbit_version = ?, orbit_revision = ?, dsh_version = ?, compatibility_profile = ? WHERE node_id = ?")
-        .run(at, runtime.orbitVersion, runtime.orbitRevision, runtime.dshVersion, runtime.compatibilityProfile, nodeId);
+        .prepare(
+          "UPDATE nodes SET last_seen = ?, last_seen_source = 'heartbeat', last_heartbeat_at = ?, orbit_version = ?, orbit_revision = ?, dsh_version = ?, compatibility_profile = ? WHERE node_id = ?",
+        )
+        .run(at, at, runtime.orbitVersion, runtime.orbitRevision, runtime.dshVersion, runtime.compatibilityProfile, nodeId);
       const latest = this.getLatestReport(nodeId);
       if (latest) {
         const identity = JSON.parse(latest.identity_json);
@@ -497,13 +506,13 @@ export class Registry {
 
   transitionRegistryContact(node, toValue, source) {
     const nowMs = this.now().getTime();
-    const lastSeenMs = node.last_seen ? Date.parse(node.last_seen) : null;
+    const lastBeatMs = node.last_heartbeat_at ? Date.parse(node.last_heartbeat_at) : null;
     let fromValue = node.registry_contact;
-    if (lastSeenMs !== null && nowMs - lastSeenMs > HEARTBEAT_LOST_MS && fromValue !== "lost") {
+    if (lastBeatMs !== null && nowMs - lastBeatMs > HEARTBEAT_LOST_MS && fromValue !== "lost") {
       fromValue = "lost";
     } else if (
-      lastSeenMs !== null &&
-      nowMs - lastSeenMs > HEARTBEAT_MISSED_BEATS_STALE * this.heartbeatCadenceSeconds * 1000 &&
+      lastBeatMs !== null &&
+      nowMs - lastBeatMs > HEARTBEAT_MISSED_BEATS_STALE * this.heartbeatCadenceSeconds * 1000 &&
       fromValue === "fresh"
     ) {
       fromValue = "stale";
@@ -580,11 +589,11 @@ export class Registry {
 
     withTransaction(this.db, () => {
       const at = nowIso(this.now());
-      this.db
+      const inserted = this.db
         .prepare(
-          "INSERT INTO reports (node_id, uploaded_at, orbit_version, orbit_revision, dsh_version, compatibility_profile, compatibility, identity_json, checks_json, report_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO reports (node_id, uploaded_at, orbit_version, orbit_revision, dsh_version, compatibility_profile, compatibility, identity_json, checks_json, report_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
-        .run(
+        .get(
           nodeId,
           at,
           report.orbit.version,
@@ -596,18 +605,23 @@ export class Registry {
           JSON.stringify(report.checks),
           JSON.stringify(report),
         );
+      // RFC-0009: EVERY report upload is an event, including identical
+      // re-uploads (round-2 P2).
+      this.db
+        .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, ?, 'report', 'uploaded', ?, 'report-upload')")
+        .run(nodeId, at, String(inserted.id));
       const capabilities = deriveCapabilities(report);
       const dshHealthy = fresh ? deriveDshHealthy(report) : "unknown";
       const orbitCompatible = fresh ? deriveOrbitCompatible(report) : "stale";
       this.transitionDimension(nodeId, "dsh_healthy", dshHealthy, "report-upload");
       this.transitionDimension(nodeId, "orbit_compatible", orbitCompatible, "report-upload");
-      this.transitionDimension(nodeId, "registry_contact", "fresh", "report-upload");
-      this.clearAlertFlag(nodeId, "contact-lost");
+      // A report upload is NOT a registry contact: it only updates the
+      // generic lastSeen and never moves registryContact (round-2 P1).
       const status = fresh ? 0 : 1;
       if (runtimeUnset) {
         this.db
           .prepare(
-            "UPDATE nodes SET last_seen = ?, last_seen_source = 'report-upload', dsh_healthy = ?, orbit_compatible = ?, capabilities = ?, capabilities_stale = ?, registry_contact = 'fresh', orbit_version = ?, orbit_revision = ?, dsh_version = ?, compatibility_profile = ? WHERE node_id = ?",
+            "UPDATE nodes SET last_seen = ?, last_seen_source = 'report-upload', dsh_healthy = ?, orbit_compatible = ?, capabilities = ?, capabilities_stale = ?, orbit_version = ?, orbit_revision = ?, dsh_version = ?, compatibility_profile = ? WHERE node_id = ?",
           )
           .run(
             at,
@@ -624,7 +638,7 @@ export class Registry {
       } else {
         this.db
           .prepare(
-            "UPDATE nodes SET last_seen = ?, last_seen_source = 'report-upload', dsh_healthy = ?, orbit_compatible = ?, capabilities = ?, capabilities_stale = ?, registry_contact = 'fresh' WHERE node_id = ?",
+            "UPDATE nodes SET last_seen = ?, last_seen_source = 'report-upload', dsh_healthy = ?, orbit_compatible = ?, capabilities = ?, capabilities_stale = ? WHERE node_id = ?",
           )
           .run(at, dshHealthy, orbitCompatible, JSON.stringify(capabilities), status, nodeId);
       }
@@ -857,36 +871,76 @@ export class Registry {
       this.db.prepare("DELETE FROM seen_nonces WHERE created_at <= ?").run(cutoff(NONCE_RETENTION_MS));
       this.db.prepare("DELETE FROM enrollment_results WHERE created_at <= ?").run(cutoff(ENROLLMENT_RESULT_RETENTION_MS));
 
+      // Compatibility report retention (RFC-0009: 90 days). When the
+      // LAST report of a node is purged, its derived state returns to
+      // unknown: no evidence, no claimed capabilities (round-2 P1).
+      this.db.prepare("DELETE FROM reports WHERE uploaded_at <= ?").run(cutoff(REPORT_RETENTION_MS));
+      const activeNodes = this.db.prepare("SELECT * FROM nodes WHERE state = 'active'").all();
+      for (const node of activeNodes) {
+        const latest = this.getLatestReport(node.node_id);
+        if (!latest) {
+          if (node.capabilities !== "[]" || node.capabilities_stale === 0 || node.orbit_compatible !== "unknown" || node.dsh_healthy !== "unknown") {
+            this.transitionDimension(node.node_id, "orbit_compatible", "unknown", "maintenance");
+            this.transitionDimension(node.node_id, "dsh_healthy", "unknown", "maintenance");
+            this.db
+              .prepare("UPDATE nodes SET orbit_compatible = 'unknown', dsh_healthy = 'unknown', capabilities = '[]', capabilities_stale = 1 WHERE node_id = ?")
+              .run(node.node_id);
+          }
+          continue;
+        }
+        // A report older than 7 days is no longer fresh evidence: the
+        // frozen RFC semantics age ANY outcome (pass or fail) to stale;
+        // the last failure detail stays visible in latestReport
+        // (round-2 P2).
+        if (at - Date.parse(latest.uploaded_at) > REPORT_STALENESS_MS) {
+          if (node.orbit_compatible === "pass" || node.orbit_compatible === "fail") {
+            this.transitionDimension(node.node_id, "orbit_compatible", "stale", "maintenance");
+          }
+          if (node.dsh_healthy !== "unknown") {
+            this.transitionDimension(node.node_id, "dsh_healthy", "unknown", "maintenance");
+          }
+          this.db
+            .prepare(
+              "UPDATE nodes SET orbit_compatible = CASE WHEN orbit_compatible IN ('pass', 'fail') THEN 'stale' ELSE orbit_compatible END, dsh_healthy = 'unknown', capabilities_stale = 1 WHERE node_id = ?",
+            )
+            .run(node.node_id);
+        }
+      }
+
       // Daily rollups for events older than 7 days (RFC-0009): each
-      // (node, day, dimension) group becomes one summary row.
+      // (node, day, dimension) group becomes one summary row. Summary
+      // rows are excluded from grouping and inserted only when absent,
+      // so repeated maintenance runs are strictly idempotent
+      // (round-2 P1).
       const rollupCutoff = cutoff(EVENT_ROLLUP_AFTER_MS);
       const groups = this.db
         .prepare(
-          "SELECT node_id, substr(at, 1, 10) AS day, dimension, COUNT(*) AS count, MAX(to_value) AS final_value FROM events WHERE at < ? GROUP BY node_id, day, dimension",
+          "SELECT node_id, substr(at, 1, 10) AS day, dimension, COUNT(*) AS count, MAX(to_value) AS final_value FROM events WHERE at < ? AND dimension != 'rollup' GROUP BY node_id, day, dimension",
         )
         .all(rollupCutoff);
       for (const group of groups) {
+        const summaryAt = `${group.day}T23:59:59.999Z`;
+        const exists = this.db
+          .prepare("SELECT id FROM events WHERE node_id = ? AND at = ? AND dimension = 'rollup' AND from_value = ?")
+          .get(group.node_id, summaryAt, group.dimension);
+        if (exists) continue;
         this.db
           .prepare("DELETE FROM events WHERE node_id = ? AND dimension = ? AND at >= ? AND at < ?")
-          .run(group.node_id, group.dimension, `${group.day}T00:00:00.000Z`, `${group.day}T23:59:59.999Z`);
+          .run(group.node_id, group.dimension, `${group.day}T00:00:00.000Z`, summaryAt);
         this.db
           .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, ?, 'rollup', ?, ?, 'retention-rollup')")
-          .run(
-            group.node_id,
-            `${group.day}T23:59:59.999Z`,
-            group.dimension,
-            JSON.stringify({ count: group.count, final: group.final_value }),
-          );
+          .run(group.node_id, summaryAt, group.dimension, JSON.stringify({ count: group.count, final: group.final_value }));
       }
       this.db.prepare("DELETE FROM events WHERE at <= ?").run(cutoff(EVENT_RETENTION_MS));
       this.db.prepare("DELETE FROM audit WHERE at <= ?").run(cutoff(AUDIT_RETENTION_MS));
 
       // registryContact aging (RFC-0009): 3 consecutive missed beats ->
-      // stale; 24h without contact -> lost + operator alert flag. Only
-      // actual transitions write events.
-      const contacted = this.db.prepare("SELECT * FROM nodes WHERE state = 'active' AND last_seen IS NOT NULL").all();
+      // stale; 24h without contact -> lost + operator alert flag.
+      // Driven by lastHeartbeatAt ONLY — report uploads are not contact
+      // (round-2 P1). Only actual transitions write events.
+      const contacted = this.db.prepare("SELECT * FROM nodes WHERE state = 'active' AND last_heartbeat_at IS NOT NULL").all();
       for (const node of contacted) {
-        const gapMs = at - Date.parse(node.last_seen);
+        const gapMs = at - Date.parse(node.last_heartbeat_at);
         let target = "fresh";
         if (gapMs > HEARTBEAT_LOST_MS) target = "lost";
         else if (gapMs > HEARTBEAT_MISSED_BEATS_STALE * cadenceMs) target = "stale";
@@ -899,25 +953,17 @@ export class Registry {
         }
       }
 
-      // Report staleness aging (RFC-0009): a report older than 7 days is
-      // no longer fresh evidence — pass degrades to stale, capabilities
-      // are withheld, dshHealthy goes unknown. A fail verdict stays fail
-      // (a failed report never launders into a fresh state by age).
-      const nodesWithReports = this.db
-        .prepare("SELECT DISTINCT n.* FROM nodes n JOIN reports r ON r.node_id = n.node_id WHERE n.state = 'active'")
-        .all();
-      for (const node of nodesWithReports) {
-        const latest = this.getLatestReport(node.node_id);
-        if (at - Date.parse(latest.uploaded_at) <= REPORT_STALENESS_MS) continue;
-        if (node.orbit_compatible === "pass" || node.orbit_compatible === "unknown") {
-          this.transitionDimension(node.node_id, "orbit_compatible", "stale", "maintenance");
-        }
-        this.transitionDimension(node.node_id, "dsh_healthy", "unknown", "maintenance");
-        this.db
-          .prepare(
-            "UPDATE nodes SET orbit_compatible = CASE WHEN orbit_compatible IN ('pass', 'unknown') THEN 'stale' ELSE orbit_compatible END, dsh_healthy = 'unknown', capabilities_stale = 1 WHERE node_id = ?",
-          )
-          .run(node.node_id);
+      // Session expiry audit (RFC-0007, round-2 P2): every expired or
+      // idle-expired session is audited exactly once, in the same
+      // transaction as its marker; the request path never audits.
+      const expiredSessions = this.db
+        .prepare(
+          "SELECT session_id, operator_principal FROM browser_sessions WHERE revoked_at IS NULL AND expiry_audited_at IS NULL AND (expires_at <= ? OR idle_until <= ?)",
+        )
+        .all(nowIso(this.now()), nowIso(this.now()));
+      for (const session of expiredSessions) {
+        this.db.prepare("UPDATE browser_sessions SET expiry_audited_at = ? WHERE session_id = ?").run(nowIso(this.now()), session.session_id);
+        this.recordAudit(session.operator_principal, "session.expired", { sessionId: session.session_id });
       }
     });
   }

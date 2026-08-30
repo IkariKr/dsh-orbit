@@ -462,3 +462,57 @@ test("no path canonicalization: a signature over a different path fails", async 
   });
   assert.equal(response.status, 401);
 });
+test("latest report ordering is deterministic under a fixed clock (same-millisecond uploads)", async (t) => {
+  // Round-2 P1: getLatestReport orders by (uploaded_at DESC, id DESC),
+  // so same-millisecond uploads resolve by insertion order — never by
+  // clock ambiguity.
+  const frozen = new Date();
+  const registry = createTestRegistry({ now: () => frozen });
+  const server = await createTestServer(registry, {});
+  t.after(async () => {
+    await server.close();
+    registry.close();
+  });
+  const node = await enrollNode(server.baseUrl, registry);
+  const first = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/report-upload",
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: validReport({ orbitRevision: "rev-A" }),
+  });
+  assert.equal(first.status, 200);
+  const second = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/report-upload",
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: validReport({ orbitRevision: "rev-B" }),
+  });
+  assert.equal(second.status, 200);
+  const uploaded = registry.db.prepare("SELECT uploaded_at FROM reports WHERE node_id = ? ORDER BY id").all(node.nodeId);
+  assert.equal(uploaded[0].uploaded_at, uploaded[1].uploaded_at);
+  const detail = registry.getNode(node.nodeId);
+  assert.equal(detail.latestReport.orbit.revision, "rev-B");
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM reports WHERE node_id = ?").get(node.nodeId).n, 2);
+});
+
+test("every report upload is an event, including identical re-uploads", async (t) => {
+  // RFC-0009 "every report upload is an event" (round-2 P2): two
+  // identical uploads produce two independent report events.
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const payload = validReport();
+  for (let index = 0; index < 2; index += 1) {
+    const response = await signedMachineRequest(server.baseUrl, {
+      path: "/api/v1/report-upload",
+      nodeId: node.nodeId,
+      keyId: node.keyId,
+      keyHex: node.privateKeyHex,
+      body: payload,
+    });
+    assert.equal(response.status, 200);
+  }
+  const reportEvents = registry.db.prepare("SELECT COUNT(*) AS n FROM events WHERE node_id = ? AND dimension = 'report'").get(node.nodeId).n;
+  assert.equal(reportEvents, 2);
+});

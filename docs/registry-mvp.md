@@ -39,20 +39,35 @@ Other environment:
 - `DSH_ORBIT_HUB_TRUSTED_SCHEME` (`http` default, `https`) — the trusted
   external scheme used by the browser Origin check (scheme AND host must
   match). `X-Forwarded-Proto` is never trusted.
-- `DSH_ORBIT_HUB_PUBLIC_LISTENER=1` — required override for a non-loopback
-  listen; plain-HTTP public binds refuse startup without it (TLS termination
-  belongs to the deployment gateway, P2-05).
+- Non-loopback listens are **refused unconditionally**: the machine surface
+  (enrollment tokens, Ed25519 signatures) must never ride a public plain-HTTP
+  bind; TLS terminates at the deployment gateway and the hub stays on the
+  private backend (round-2 P2).
 
 ## Registry semantics
 
-- **Time state machine (`maintenance()`, run every 15 min by the hub)**:
-  `registryContact` ages without heartbeat traffic (`fresh` → `stale` after 3
-  consecutive missed beats → `lost` after 24h, with a `contact-lost` alert
-  flag on `nodes.alert_flags` until the next heartbeat); a compatibility
-  report older than 7 days becomes `stale` with capabilities withheld and
-  `dshHealthy` `unknown`; events older than 7 days roll up into per-day
-  summaries (90-day retention); nonce/enrollment-result/audit retentions and
-  rotation-overlap expiry are enforced here too.
+- **Contact authority**: `registryContact` is strictly heartbeat-driven. The
+  heartbeat updates a dedicated `lastHeartbeatAt`; a report upload updates
+  only the generic `lastSeen` — it never moves `registryContact` and never
+  clears the `contact-lost` alert flag. Aging: `fresh` → `stale` after 3
+  consecutive missed beats → `lost` after 24h (with the alert flag until the
+  next heartbeat).
+- **Maintenance cadence**: the hub runs `maintenance()` every 30 seconds and
+  once immediately at startup (the default 3×60s stale threshold and the 24h
+  lost threshold are only reachable at that cadence).
+- **Deterministic ordering**: the latest report resolves by
+  `(uploaded_at DESC, id DESC)` so same-millisecond uploads never depend on
+  clock ambiguity.
+- **Report retention**: reports live 90 days. When the last report of a node
+  is purged, its derived state returns to explicit unknown (compatibility,
+  `dshHealthy`) with capabilities cleared. An aged report (7 days) moves ANY
+  outcome — pass or fail — to `stale`; the last verdict stays visible in
+  `latestReport.compatibility`. Every upload, including identical re-uploads,
+  writes a `report` event.
+- **Event rollups** are strictly idempotent: summary rows are excluded from
+  further rollups and inserted only when absent.
+- **Session expiry** is audited exactly once per session (absolute TTL or
+  idle expiry), in the same maintenance transaction.
 - **Runtime identity authority**: heartbeats own `nodes` current runtime
   identity; a report never overwrites it. A report whose identity tuple
   differs from the current heartbeat identity is stored as history and the

@@ -15,6 +15,7 @@
 //   DSH_ORBIT_HUB_ROTATION_OVERLAP_H rotation overlap in hours (1-168, default 24)
 
 import process from "node:process";
+import { createMaintenanceScheduler } from "../src/registry/scheduler.mjs";
 import { validateHubConfig } from "../src/registry/config.mjs";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
@@ -27,10 +28,9 @@ const gatewaySecret = process.env.DSH_ORBIT_HUB_GATEWAY_SECRET ?? null;
 const singlePrincipal = process.env.DSH_ORBIT_HUB_OPERATOR_PRINCIPAL ?? null;
 const lanBoundaryOnly = process.env.DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY === "1";
 const trustedExternalScheme = process.env.DSH_ORBIT_HUB_TRUSTED_SCHEME ?? "http";
-const publicListener = process.env.DSH_ORBIT_HUB_PUBLIC_LISTENER === "1";
 const rotationOverlapHours = Number.parseInt(process.env.DSH_ORBIT_HUB_ROTATION_OVERLAP_H ?? "24", 10);
 
-const configErrors = validateHubConfig({ listen, trustedExternalScheme, publicListener });
+const configErrors = validateHubConfig({ listen, trustedExternalScheme });
 if (configErrors.length > 0) {
   for (const error of configErrors) {
     console.error(`dsh-orbit-hub: ${error}`);
@@ -62,22 +62,18 @@ server.listen(port, listen, () => {
   console.log(`dsh-orbit-hub: registry listening on http://${listen}:${port} (db ${dbPath})`);
 });
 
-const maintenanceTimer = setInterval(() => {
-  try {
-    registry.maintenance();
-  } catch (error) {
-    console.error(`dsh-orbit-hub: maintenance failed: ${error.stack ?? error}`);
-  }
-}, 15 * 60 * 1000);
-maintenanceTimer.unref();
+// 30s maintenance tick with an immediate pass at startup (round-2 P1):
+// the default 3x60s stale threshold and 24h lost threshold are only
+// reachable when maintenance actually runs at that cadence.
+const maintenanceScheduler = createMaintenanceScheduler(registry, { tickMs: 30 * 1000 });
 
 let shuttingDown = false;
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`dsh-orbit-hub: ${signal}, shutting down`);
+  maintenanceScheduler.stop();
   server.close(() => {
-    clearInterval(maintenanceTimer);
     registry.close();
     process.exit(0);
   });

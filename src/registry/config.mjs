@@ -1,8 +1,9 @@
-// Hub deployment configuration validation (P2-05): the hub is a plain
-// http listener by design; TLS termination belongs to the deployment
-// gateway. A non-loopback bind without an explicit trusted mode is
-// refused at startup — a configurable plain-HTTP public bind must never
-// become the de-facto production deployment.
+// Hub deployment configuration validation (P2-05, round-2 P2): the hub
+// is a plain http listener by design; TLS termination belongs to the
+// deployment gateway. The machine surface (enrollment tokens, Ed25519
+// signatures) must never ride a public plain-HTTP bind, so a non-loopback
+// listen is refused unconditionally in v0.3 — there is no production
+// escape hatch.
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
 
@@ -12,13 +13,13 @@ export function isLoopbackListen(host) {
 
 // Returns a list of human-readable configuration errors (empty when the
 // configuration is acceptable for startup).
-export function validateHubConfig({ listen, trustedExternalScheme, publicListener }) {
+export function validateHubConfig({ listen, trustedExternalScheme }) {
   const errors = [];
   if (typeof listen !== "string" || listen === "") {
     errors.push("DSH_ORBIT_HUB_LISTEN must be a hostname or address");
-  } else if (!isLoopbackListen(listen) && publicListener !== true) {
+  } else if (!isLoopbackListen(listen)) {
     errors.push(
-      `listener ${listen} is not loopback; non-loopback plain-HTTP listening requires DSH_ORBIT_HUB_PUBLIC_LISTENER=1 (TLS must terminate at a trusted deployment gateway)`,
+      `listener ${listen} is not loopback and is refused: the registry machine surface requires a private TLS-terminated backend boundary in v0.3`,
     );
   }
   if (trustedExternalScheme !== "http" && trustedExternalScheme !== "https") {
