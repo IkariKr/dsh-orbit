@@ -1,6 +1,10 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+// LEGACY THIRD-PARTY COMPATIBILITY DEBT (ADR-0001): freeze-only, no new features.
+// This module patches a third-party plugin and will be removed once DSH provides a
+// generic trusted-client / authenticated-proxy capability. Do not extend it.
+//
 // The @linxin666/dsh-ssh plugin deliberately fences its route family — host
 // CRUD, exec, SFTP, tunnels, and the WebSocket PTY terminal upgrade — as
 // loopback-only ("forbidden: loopback-only"). This patch extends that fence

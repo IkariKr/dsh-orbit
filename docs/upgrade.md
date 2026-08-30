@@ -105,6 +105,10 @@ Every check has an explicit state; missing evidence is never treated as a pass:
 
 `globalPatch`, `profilePatch`, `runtimeReadiness`, `settingsRead`, `settingsNoopWrite`, `authorizationSmoke`, `sessionResume`, and `webPluginRoutes` are required. `longLivedTransport` is recorded when automated support exists.
 
+> Note: the terminal fence checks below are legacy third-party compatibility debt for the
+> `@linxin666/dsh-ssh` plugin (ADR-0001); they are freeze-only and will be removed when DSH
+> provides a generic trusted-client / authenticated-proxy capability. See `docs/third-party-debt.md`.
+
 Terminal evidence is split into two optional checks:
 
 - `terminalFence` — automated since `0.2.5`: the live terminal authorization smoke (positive control plus unauthenticated, invalid-credential, unexpected-Origin, cross-site, and forged-assertion denials against the terminal upgrade endpoint) runs whenever the dsh-ssh fence is enabled (`DSH_ORBIT_PATCH_DSH_SSH=1`), and a failure blocks promotion eligibility. Disabled deployments record `not_run` and run nothing.

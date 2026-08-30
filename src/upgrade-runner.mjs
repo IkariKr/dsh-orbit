@@ -214,6 +214,7 @@ export function loadUpgradeConfig(env) {
       basicUser: env.DSH_SMOKE_BASIC_USER,
       basicPassword: env.DSH_SMOKE_BASIC_PASSWORD,
       smokeOrigin: env.DSH_SMOKE_ORIGIN,
+      // LEGACY THIRD-PARTY COMPATIBILITY DEBT (ADR-0001): freeze-only; removed with the dsh-ssh plugin patch
       sshPatchEnabled: env.DSH_ORBIT_PATCH_DSH_SSH === "1",
       sshPluginRoot: env.DSH_SSH_PLUGIN_ROOT,
       sshPluginVersion: env.DSH_SSH_PLUGIN_VERSION,

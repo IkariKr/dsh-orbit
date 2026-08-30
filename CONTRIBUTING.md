@@ -2,6 +2,10 @@
 
 DSH Orbit is intended to remain a small compatibility and deployment layer around DeepSeek Harness. Changes should preserve that boundary.
 
+## Third-party plugin boundary
+
+DSH Orbit supports and integrates with DeepSeek Harness itself. Orbit core must not contain fixes, patches, forks, version pins, source matchers, or smoke suites for third-party DSH plugins, and must not reference third-party package names, versions, or paths. Issues in DSH core may be reported and contributed upstream; issues in third-party plugins are outside Orbit's responsibility. See `docs/architecture.md` and `docs/adr/0001-third-party-plugin-boundary.md`.
+
 ## Before opening a pull request
 
 1. Check whether upstream DSH already provides the capability. Prefer upstream behavior over a local patch.

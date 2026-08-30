@@ -1,3 +1,6 @@
+// LEGACY THIRD-PARTY COMPATIBILITY DEBT (ADR-0001): freeze-only. This smoke tests
+// the @linxin666/dsh-ssh plugin fence and will be removed with the plugin patch.
+
 import { randomUUID } from "node:crypto";
 import http from "node:http";
 import https from "node:https";
