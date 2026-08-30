@@ -4,6 +4,15 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
+## 0.2.5 - 2026-08-30
+
+### Fixed
+
+- the live terminal fence smoke now runs only when the dsh-ssh fence patch is enabled (`DSH_ORBIT_PATCH_DSH_SSH=1`); disabled deployments report `terminalFence: not_run` without running the smoke, and an enabled-but-failing fence blocks promotion eligibility;
+- the dsh-ssh patched-bundle verifier now requires exactly one helper declaration, exactly three patched gates, zero remaining unpatched gates, the exact configured public host and proxy auth file constants, and an exact plugin version — the idempotent re-patch path runs the full verifier, so any partial, tampered, missing, or duplicated fragment fails closed;
+- the compatibility report now separates `terminalFence` (automated live authorization result) from `terminalPtty` (actual PTY runtime evidence, recorded from the Stage 7 manual acceptance); a fence pass alone is not PTY runtime evidence;
+- `DSH_SSH_PLUGIN_ROOT` and `DSH_SSH_PLUGIN_VERSION` are first-class upgrade configuration, propagated into the candidate container through the compose override when the patch is enabled, and documented in the CLI usage and README.
+
 ## 0.2.4 - 2026-08-30
 
 ### Added
