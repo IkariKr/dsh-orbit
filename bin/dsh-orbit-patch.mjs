@@ -61,10 +61,7 @@ async function main() {
       proxyAuthFile: PROXY_AUTH_FILE,
       ...(SSH_PLUGIN_VERSION ? { pluginVersion: SSH_PLUGIN_VERSION } : {}),
     };
-    const result = apply
-      ? await patchDshSshPlugin(options)
-      : await verifyDshSshPlugin(options);
-    console.log(`${result.root}: dsh-ssh v${result.version} ${result.status}`);
+    return apply ? patchDshSshPlugin(options) : verifyDshSshPlugin(options);
   };
 
   let results = [];
@@ -81,13 +78,20 @@ async function main() {
       await patchConnectionRoot({ root: PROFILE_CONNECTION_ROOT, ...common }),
       await verifyConnectionRoot({ root: PROFILE_CONNECTION_ROOT, publicHost: PUBLIC_HOST }),
     ];
-    await sshPatch(true);
+    if (SSH_PATCH_ENABLED) {
+      const sshResult = await sshPatch(true);
+      results.push(sshResult);
+    }
   } else if (mode === "--check") {
     results.push(await verifyConnectionRoot({ root: GLOBAL_CONNECTION_ROOT, publicHost: PUBLIC_HOST }));
     if (await exists(`${PROFILE_CONNECTION_ROOT}/index.js`)) {
       results.push(await verifyConnectionRoot({ root: PROFILE_CONNECTION_ROOT, publicHost: PUBLIC_HOST }));
     }
-    await sshPatch(false);
+    if (!SSH_PATCH_ENABLED) {
+      console.log("DSH Orbit dsh-ssh patch: disabled (set DSH_ORBIT_PATCH_DSH_SSH=1 to enable)");
+    } else {
+      results.push(await sshPatch(false));
+    }
   } else {
     throw new Error(`Unknown mode ${mode}. Use --build, --runtime, or --check.`);
   }
