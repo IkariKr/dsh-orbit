@@ -20,13 +20,20 @@ Shipped in `v0.2.0`:
 - compatibility report generation;
 - CI checks for newly released DSH versions without automatic production promotion.
 
-## 0.3: node identity and registry
+## 0.3: node identity, enrollment and registry
 
-- stable node identity;
+Enrollment/bootstrap covers nodes that the Hub can reach directly (server-reachable nodes). It must NOT include reverse connection or NAT traversal — that belongs to 0.5 only.
+
+- stable node identity (Hub-minted, see `docs/rfc/0005-node-enrollment-and-registry.md`);
+- one-time enrollment with short-lived single-use tokens and first credential issuance;
 - node metadata and health;
 - DSH and Orbit version reporting;
-- capability advertisement;
-- revocable per-node credentials.
+- evidence-backed capability advertisement (contract v1, `docs/rfc/0009-capability-contract-and-health.md`);
+- revocable, rotatable per-node credentials (machine API `docs/rfc/0006-registry-machine-api.md`);
+- registry machine API and browser management API with independent acceptance matrices;
+- heartbeat and event history.
+
+Explicitly excluded from 0.3: inbound connection acceptance for NAT-restricted devices (reverse connection), device pairing for such devices, endpoint routing to registered nodes, multi-node sessions, and fleet execution — all remain in later milestones.
 
 ## 0.4: endpoint selector
 
@@ -37,8 +44,8 @@ Shipped in `v0.2.0`:
 
 ## 0.5: reverse-connected nodes
 
-- outbound node-to-hub connection for devices behind NAT or restrictive networks;
-- pairing and device authorization;
+- outbound node-to-hub connection for devices behind NAT or restrictive networks (the only place reverse connection is designed);
+- pairing and device authorization (distinct from 0.3 enrollment: 0.3 enrolls server-reachable nodes, 0.5 pairs NAT-restricted devices);
 - reconnect and presence handling without requiring a public endpoint per device.
 
 ## 0.6: multi-node sessions

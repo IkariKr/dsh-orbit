@@ -31,7 +31,7 @@ The v0.2 compatibility report is keyed to an exact Orbit revision and candidate 
 
 ## Implementation prerequisites
 
-Before any v0.3 node-registry code is written, the pairing/bootstrap flow must be designed and closed: who mints the stable node ID, where it is persisted on the node, and how the first node-to-Hub credential is issued. The pairing flow is assumed but not yet designed.
+The enrollment/bootstrap flow (Hub-minted stable node ID, local persistence, one-time enrollment, first credential issuance) is closed by `docs/rfc/0005-node-enrollment-and-registry.md`. "Pairing" in this project now refers exclusively to the v0.5 reverse-connected device flow, not to v0.3 enrollment.
 
 ## Unresolved questions
 

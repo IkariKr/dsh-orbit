@@ -38,6 +38,6 @@ The v0.2 authorization smoke suite is the acceptance template for the registry s
 ## Unresolved questions
 
 - Credential format and storage on resource-constrained nodes (symmetric secret vs. keypair).
-- Lifecycle of the per-node Hub service identities: issuance, expiry, and rotation windows.
+- Lifecycle of the per-node Hub service identities: issuance, expiry, and rotation windows — closed by `docs/rfc/0008-node-hub-identity-lifecycle.md`.
 - Overlap-window defaults for rotation in headless deployments that only come online weekly.
 - Rate limiting and lockout behavior for the registration surface.
