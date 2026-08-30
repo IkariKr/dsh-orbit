@@ -6,7 +6,10 @@ import { createCompatibilityReport } from "../compatibility-report.mjs";
 import { deriveCapabilities, deriveDshHealthy, deriveOrbitCompatible, identityMatches, reportIdentity } from "./capabilities.mjs";
 import { deriveKeyId, randomHex, sha256Hex, signSigningString, verifySigningString } from "./crypto.mjs";
 import {
+  AUDIT_RETENTION_MS,
   ENROLLMENT_RESULT_RETENTION_MS,
+  EVENT_RETENTION_MS,
+  EVENT_ROLLUP_AFTER_MS,
   HEARTBEAT_CADENCE_SECONDS_DEFAULT,
   HEARTBEAT_LOST_MS,
   HEARTBEAT_MISSED_BEATS_STALE,
@@ -17,6 +20,7 @@ import {
   PUBLIC_KEY_PATTERN,
   REENROLL_V1_LABEL,
   REQUEST_ID_PATTERN,
+  REPORT_STALENESS_MS,
   ROTATION_OVERLAP_HOURS_DEFAULT,
   ROTATION_OVERLAP_HOURS_MAX,
   ROTATION_OVERLAP_HOURS_MIN,
@@ -26,6 +30,8 @@ import {
   SIGNATURE_SKEW_SECONDS,
   TOKEN_PATTERN,
   TOKEN_TTL_SECONDS_DEFAULT,
+  TOKEN_TTL_SECONDS_MAX,
+  TOKEN_TTL_SECONDS_MIN,
   buildSigningString,
   requireHex,
 } from "./protocol.mjs";
@@ -97,6 +103,15 @@ export class Registry {
     if (purpose !== "enroll" && purpose !== "reenroll") {
       denied(400, "bad-request", `token purpose must be enroll or reenroll (got ${JSON.stringify(purpose)})`);
     }
+    // RFC-0005 D2: TTL is fixed at 1-60 minutes, integer only; anything
+    // else fails closed (an enrollment token must stay short-lived).
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds < TOKEN_TTL_SECONDS_MIN || ttlSeconds > TOKEN_TTL_SECONDS_MAX) {
+      denied(
+        400,
+        "bad-request",
+        `token TTL must be an integer between ${TOKEN_TTL_SECONDS_MIN} and ${TOKEN_TTL_SECONDS_MAX} seconds`,
+      );
+    }
     if (purpose === "reenroll") {
       const node = this.getNodeRow(requireString(boundNodeId, "boundNodeId"));
       if (!node || node.state !== "tombstoned") {
@@ -130,6 +145,9 @@ export class Registry {
       createdAt: row.created_at,
       expiresAt: row.expires_at,
       consumedAt: row.consumed_at,
+      // Token history semantics (P2-03): the list carries explicit
+      // status so consumers never infer it from timestamps.
+      status: row.consumed_at !== null ? "consumed" : row.expires_at <= nowIso(this.now()) ? "expired" : "active",
     }));
   }
 
@@ -428,14 +446,25 @@ export class Registry {
   // ------------------------------------------------------------------
   // Heartbeat (RFC-0006 route, RFC-0009 semantics): moves registryContact
   // and lastSeen only; never touches reachable; carries non-authoritative
-  // runtime identity; never capabilities.
+  // runtime identity; never capabilities. The authenticated variant runs
+  // after the machine authentication (including the nonce reservation),
+  // so protocol-level rate limiting in the transport can act on
+  // authenticated requests without replaying them (RFC-0006).
 
   heartbeat({ nodeId, keyId, method, path, timestamp, nonce, bodyHash, signature, rawBody }) {
-    const { key } = this.authenticateMachine({ nodeId, keyId, method, path, timestamp, nonce, bodyHash, signature });
+    const auth = this.authenticateMachine({ nodeId, keyId, method, path, timestamp, nonce, bodyHash, signature });
+    return this.heartbeatAuthenticated({ node: auth.node, rawBody });
+  }
+
+  // The heartbeat is the authoritative writer of the current runtime
+  // identity; a report never overwrites it (P1-05 authority model).
+  heartbeatAuthenticated({ node, rawBody }) {
     const runtime = requireIdentityJson(parseJsonBody(rawBody));
+    const nodeId = node.node_id;
     withTransaction(this.db, () => {
-      const node = this.getNodeRow(nodeId);
-      this.transitionRegistryContact(node, "fresh", "heartbeat");
+      const current = this.getNodeRow(nodeId);
+      this.transitionRegistryContact(current, "fresh", "heartbeat");
+      this.clearAlertFlag(nodeId, "contact-lost");
       const at = nowIso(this.now());
       this.db
         .prepare("UPDATE nodes SET last_seen = ?, last_seen_source = 'heartbeat', orbit_version = ?, orbit_revision = ?, dsh_version = ?, compatibility_profile = ? WHERE node_id = ?")
@@ -444,16 +473,26 @@ export class Registry {
       if (latest) {
         const identity = JSON.parse(latest.identity_json);
         if (!identityMatches(identity, runtime)) {
-          this.transitionDimension(nodeId, "orbit_compatible", "stale", "heartbeat");
-          this.db.prepare("UPDATE nodes SET orbit_compatible = 'stale' WHERE node_id = ?").run(nodeId);
-          const current = this.getNodeRow(nodeId);
-          if (current.capabilities_stale !== 1) {
-            this.db.prepare("UPDATE nodes SET capabilities_stale = 1 WHERE node_id = ?").run(nodeId);
-          }
+          this.withholdCapabilities(nodeId, "heartbeat");
         }
       }
     });
     return { ok: true, registryContact: "fresh", heartbeatCadenceSeconds: this.heartbeatCadenceSeconds };
+  }
+
+  // Active capability withholding (RFC-0009 "withheld until refreshed"
+  // and P1-04): stale evidence yields an empty active set, an explicit
+  // stale compatibility state, and unknown dshHealthy; the change ends
+  // only with a fresh report upload.
+  withholdCapabilities(nodeId, source) {
+    const current = this.getNodeRow(nodeId);
+    if (current.orbit_compatible === "pass" || current.orbit_compatible === "unknown") {
+      this.transitionDimension(nodeId, "orbit_compatible", "stale", source);
+    }
+    this.transitionDimension(nodeId, "dsh_healthy", "unknown", source);
+    this.db
+      .prepare("UPDATE nodes SET orbit_compatible = CASE WHEN orbit_compatible IN ('pass', 'unknown') THEN 'stale' ELSE orbit_compatible END, dsh_healthy = 'unknown', capabilities_stale = 1 WHERE node_id = ?")
+      .run(nodeId);
   }
 
   transitionRegistryContact(node, toValue, source) {
@@ -480,13 +519,42 @@ export class Registry {
     this.recordEvent(nodeId, column, String(fromValue), toValue, source);
   }
 
+  getAlertFlags(nodeId) {
+    const node = this.getNodeRow(nodeId);
+    if (!node) return [];
+    try {
+      const flags = JSON.parse(node.alert_flags);
+      return Array.isArray(flags) ? flags : [];
+    } catch {
+      return [];
+    }
+  }
+
+  setAlertFlag(nodeId, flag) {
+    const flags = this.getAlertFlags(nodeId);
+    if (flags.includes(flag)) return;
+    flags.push(flag);
+    this.db.prepare("UPDATE nodes SET alert_flags = ? WHERE node_id = ?").run(JSON.stringify(flags), nodeId);
+  }
+
+  clearAlertFlag(nodeId, flag) {
+    const flags = this.getAlertFlags(nodeId);
+    if (!flags.includes(flag)) return;
+    this.db.prepare("UPDATE nodes SET alert_flags = ? WHERE node_id = ?").run(JSON.stringify(flags.filter((entry) => entry !== flag)), nodeId);
+  }
+
   // ------------------------------------------------------------------
   // Compatiblity report upload (RFC-0006 route; RFC-0009 capability and
   // health derivation). The report is re-sanitized with the v0.2
   // schema; capabilities derive from it, and only from it.
 
   uploadReport({ nodeId, keyId, method, path, timestamp, nonce, bodyHash, signature, rawBody }) {
-    const { key } = this.authenticateMachine({ nodeId, keyId, method, path, timestamp, nonce, bodyHash, signature });
+    const auth = this.authenticateMachine({ nodeId, keyId, method, path, timestamp, nonce, bodyHash, signature });
+    return this.uploadReportAuthenticated({ node: auth.node, rawBody });
+  }
+
+  uploadReportAuthenticated({ node, rawBody }) {
+    const nodeId = node.node_id;
     const input = parseJsonBody(rawBody);
     let report;
     try {
@@ -494,6 +562,22 @@ export class Registry {
     } catch (error) {
       denied(400, "invalid-report", error.message);
     }
+    const identity = reportIdentity(report);
+    // Authority model (P1-05): heartbeat owns the current runtime
+    // identity. A report only initializes it when no heartbeat has ever
+    // arrived (enrollment -> first report); once heartbeats exist, a
+    // mismatching report is stored as history but never overwrites the
+    // runtime identity, and the evidence is withheld.
+    const current = this.getNodeRow(nodeId);
+    const runtime = {
+      orbitVersion: current.orbit_version,
+      orbitRevision: current.orbit_revision,
+      dshVersion: current.dsh_version,
+      compatibilityProfile: current.compatibility_profile,
+    };
+    const runtimeUnset = runtime.orbitVersion === "" || runtime.orbitVersion === null;
+    const fresh = runtimeUnset || identityMatches(identity, runtime);
+
     withTransaction(this.db, () => {
       const at = nowIso(this.now());
       this.db
@@ -508,34 +592,50 @@ export class Registry {
           report.candidate.dshVersion,
           report.candidate.profile ?? null,
           report.compatibility.outcome,
-          JSON.stringify(reportIdentity(report)),
+          JSON.stringify(identity),
           JSON.stringify(report.checks),
           JSON.stringify(report),
         );
       const capabilities = deriveCapabilities(report);
-      const dshHealthy = deriveDshHealthy(report);
-      const orbitCompatible = deriveOrbitCompatible(report);
+      const dshHealthy = fresh ? deriveDshHealthy(report) : "unknown";
+      const orbitCompatible = fresh ? deriveOrbitCompatible(report) : "stale";
       this.transitionDimension(nodeId, "dsh_healthy", dshHealthy, "report-upload");
       this.transitionDimension(nodeId, "orbit_compatible", orbitCompatible, "report-upload");
       this.transitionDimension(nodeId, "registry_contact", "fresh", "report-upload");
-      this.db
-        .prepare(
-          "UPDATE nodes SET last_seen = ?, last_seen_source = 'report-upload', dsh_healthy = ?, orbit_compatible = ?, capabilities = ?, capabilities_stale = 0, registry_contact = 'fresh', orbit_version = ?, orbit_revision = ?, dsh_version = ?, compatibility_profile = ? WHERE node_id = ?",
-        )
-        .run(
-          at,
-          dshHealthy,
-          orbitCompatible,
-          JSON.stringify(capabilities),
-          report.orbit.version,
-          report.orbit.revision ?? null,
-          report.candidate.dshVersion,
-          report.candidate.profile ?? null,
-          nodeId,
-        );
-      this.recordAudit(`node:${nodeId}`, "node.report-uploaded", { checkCount: Object.keys(report.checks).length });
+      this.clearAlertFlag(nodeId, "contact-lost");
+      const status = fresh ? 0 : 1;
+      if (runtimeUnset) {
+        this.db
+          .prepare(
+            "UPDATE nodes SET last_seen = ?, last_seen_source = 'report-upload', dsh_healthy = ?, orbit_compatible = ?, capabilities = ?, capabilities_stale = ?, registry_contact = 'fresh', orbit_version = ?, orbit_revision = ?, dsh_version = ?, compatibility_profile = ? WHERE node_id = ?",
+          )
+          .run(
+            at,
+            dshHealthy,
+            orbitCompatible,
+            JSON.stringify(capabilities),
+            status,
+            report.orbit.version,
+            report.orbit.revision ?? null,
+            report.candidate.dshVersion,
+            report.candidate.profile ?? null,
+            nodeId,
+          );
+      } else {
+        this.db
+          .prepare(
+            "UPDATE nodes SET last_seen = ?, last_seen_source = 'report-upload', dsh_healthy = ?, orbit_compatible = ?, capabilities = ?, capabilities_stale = ?, registry_contact = 'fresh' WHERE node_id = ?",
+          )
+          .run(at, dshHealthy, orbitCompatible, JSON.stringify(capabilities), status, nodeId);
+      }
+      this.recordAudit(`node:${nodeId}`, "node.report-uploaded", { checkCount: Object.keys(report.checks).length, fresh });
     });
-    return { ok: true, capabilities: deriveCapabilities(report), dshHealthy: deriveDshHealthy(report), orbitCompatible: deriveOrbitCompatible(report) };
+    return {
+      ok: true,
+      capabilities: fresh ? deriveCapabilities(report) : [],
+      dshHealthy: fresh ? deriveDshHealthy(report) : "unknown",
+      orbitCompatible: fresh ? deriveOrbitCompatible(report) : "stale",
+    };
   }
 
   // ------------------------------------------------------------------
@@ -543,7 +643,12 @@ export class Registry {
   // a request signed with the old private key, with a bounded overlap.
 
   rotateCredential({ nodeId, keyId, method, path, timestamp, nonce, bodyHash, signature, rawBody }) {
-    const { key } = this.authenticateMachine({ nodeId, keyId, method, path, timestamp, nonce, bodyHash, signature });
+    const auth = this.authenticateMachine({ nodeId, keyId, method, path, timestamp, nonce, bodyHash, signature });
+    return this.rotateCredentialAuthenticated({ node: auth.node, key: auth.key, rawBody });
+  }
+
+  rotateCredentialAuthenticated({ node, key, rawBody }) {
+    const nodeId = node.node_id;
     const body = parseJsonBody(rawBody);
     const newPublicKey = requireString(body.newPublicKey, "newPublicKey");
     requireWire(newPublicKey, PUBLIC_KEY_PATTERN, "newPublicKey");
@@ -566,11 +671,38 @@ export class Registry {
 
   // ------------------------------------------------------------------
   // Node lifecycle (RFC-0005 D5/D6, RFC-0009 deletion retention).
+  //
+  // Destructive deletes require confirmation semantics: a client
+  // requestId (RFC-0007 matrix "delete without confirmation semantics
+  // (idempotency key) -> denied"). The completion is recorded in the
+  // audit trail; exact replays return the same result, the same
+  // requestId with different content is denied, and a second delete of
+  // the same node with a fresh requestId stays a 409.
 
-  deleteNode({ actor, nodeId, reason }) {
+  deleteNode({ actor, nodeId, requestId, reason }) {
+    requireString(nodeId, "nodeId");
+    requireString(requestId, "requestId");
+    requireString(reason, "reason");
+    if (REQUEST_ID_PATTERN.test(requestId) === false) {
+      denied(400, "bad-request", "delete requestId must be 32 lowercase hex characters");
+    }
     const node = this.getNodeRow(nodeId);
     if (!node) {
       denied(404, "not-found", "no such node");
+    }
+    const prior = this.db
+      .prepare(
+        "SELECT detail_json FROM audit WHERE action = 'hub.nodes.delete' AND json_extract(detail_json, '$.requestId') = ?",
+      )
+      .all(requestId);
+    // requestId is globally unique among operator deletes: a replay must
+    // match node AND content; any other reuse is denied.
+    for (const row of prior) {
+      const detail = JSON.parse(row.detail_json);
+      if (detail.nodeId === nodeId && detail.reason === reason) {
+        return { nodeId, state: "tombstoned", idempotentReplay: true };
+      }
+      denied(409, "request-id-reused", "requestId was already used for a different delete");
     }
     if (node.state === "tombstoned") {
       denied(409, "already-tombstoned", "node is already tombstoned");
@@ -579,15 +711,15 @@ export class Registry {
       const at = nowIso(this.now());
       this.db
         .prepare("UPDATE nodes SET state = 'tombstoned', tombstoned_at = ?, tombstone_reason = ?, authenticated = 'revoked' WHERE node_id = ?")
-        .run(at, requireString(reason, "reason"), nodeId);
+        .run(at, reason, nodeId);
       // Immediate revocation; reports/events/audit are never deleted.
       this.db
         .prepare("UPDATE node_keys SET state = 'revoked', revoked_at = ?, revocation_reason = 'node-delete' WHERE node_id = ? AND state = 'active'")
         .run(at, nodeId);
-      this.recordAudit(actor, "hub.nodes.delete", { nodeId, reason });
+      this.recordAudit(actor, "hub.nodes.delete", { nodeId, reason, requestId });
       this.recordEvent(nodeId, "state", "active", "tombstoned", "operator-delete");
     });
-    return { nodeId, state: "tombstoned" };
+    return { nodeId, state: "tombstoned", idempotentReplay: false };
   }
 
   listNodes() {
@@ -616,6 +748,14 @@ export class Registry {
   }
 
   toNodeSummary(row) {
+    const storedCapabilities = JSON.parse(row.capabilities);
+    let parsedAlertFlags = [];
+    try {
+      const flags = JSON.parse(row.alert_flags);
+      if (Array.isArray(flags)) parsedAlertFlags = flags;
+    } catch {
+      // malformed alert_flags -> no flags
+    }
     return {
       nodeId: row.node_id,
       state: row.state,
@@ -628,7 +768,12 @@ export class Registry {
         dshHealthy: row.dsh_healthy,
         orbitCompatible: row.orbit_compatible,
         reachable: row.reachable,
-        capabilities: JSON.parse(row.capabilities),
+        // Withheld semantics (RFC-0009 / P1-04): a stale flag empties the
+        // active set; the stored derived set is exposed separately as
+        // evidence only.
+        capabilities: row.capabilities_stale === 1 ? [] : storedCapabilities,
+        capabilityEvidence: storedCapabilities,
+        alertFlags: parsedAlertFlags,
         capabilitiesStale: row.capabilities_stale === 1,
         lastSeen: row.last_seen,
         lastSeenSource: row.last_seen_source,
@@ -644,7 +789,8 @@ export class Registry {
 
   // ------------------------------------------------------------------
   // Browser sessions (RFC-0007): bound to the gateway-verified operator
-  // principal only; client IP is never part of the binding.
+  // principal only; client IP is never part of the binding. Session
+  // mutations and their audit rows share one transaction (RFC-0005 D7).
 
   bootstrapSession({ principal }) {
     const sessionId = `sess_${randomHex(24)}`;
@@ -652,12 +798,14 @@ export class Registry {
     const at = this.now().getTime();
     const expiresAt = new Date(at + SESSION_TTL_MS).toISOString();
     const idleUntil = new Date(at + SESSION_IDLE_MS).toISOString();
-    this.db
-      .prepare(
-        "INSERT INTO browser_sessions (session_id, operator_principal, csrf_token, created_at, expires_at, idle_until) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(sessionId, principal, csrfToken, nowIso(this.now()), expiresAt, idleUntil);
-    this.recordAudit(principal, "session.bootstrap", { sessionId });
+    withTransaction(this.db, () => {
+      this.db
+        .prepare(
+          "INSERT INTO browser_sessions (session_id, operator_principal, csrf_token, created_at, expires_at, idle_until) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(sessionId, principal, csrfToken, nowIso(this.now()), expiresAt, idleUntil);
+      this.recordAudit(principal, "session.bootstrap", { sessionId });
+    });
     return { sessionId, csrfToken, expiresAt, idleUntil };
   }
 
@@ -676,30 +824,102 @@ export class Registry {
   endSession({ sessionId, actor }) {
     const row = this.db.prepare("SELECT * FROM browser_sessions WHERE session_id = ?").get(sessionId);
     if (!row) return { ok: false };
-    this.db.prepare("UPDATE browser_sessions SET revoked_at = ? WHERE session_id = ?").run(nowIso(this.now()), sessionId);
-    this.recordAudit(actor, "session.logout", { sessionId });
+    withTransaction(this.db, () => {
+      this.db.prepare("UPDATE browser_sessions SET revoked_at = ? WHERE session_id = ?").run(nowIso(this.now()), sessionId);
+      this.recordAudit(actor, "session.logout", { sessionId });
+    });
     return { ok: true };
   }
 
   // ------------------------------------------------------------------
-  // Maintenance: bounded retention everywhere (RFC-0006 seen_nonces
-  // purge; RFC-0009 event history; RFC-0005 D2 replay retention; lazy
-  // rotation revocation at the end of the overlap window).
+  // Maintenance: time-based semantics that nothing else advances
+  // (RFC-0009 aging, RFC-0006 nonce retention, RFC-0005 D2 replay
+  // retention, daily event rollups after 7 days, lazy rotation
+  // revocation at the end of the overlap window).
 
   maintenance() {
     const at = this.now().getTime();
-    this.db.prepare("DELETE FROM seen_nonces WHERE created_at <= ?").run(new Date(at - NONCE_RETENTION_MS).toISOString());
-    this.db.prepare("DELETE FROM events WHERE at <= ?").run(new Date(at - EVENT_RETENTION_MS).toISOString());
-    this.db.prepare("DELETE FROM audit WHERE at <= ?").run(new Date(at - AUDIT_RETENTION_MS).toISOString());
-    this.db.prepare("DELETE FROM enrollment_results WHERE created_at <= ?").run(new Date(at - ENROLLMENT_RESULT_RETENTION_MS).toISOString());
-    const rotated = this.db
-      .prepare("SELECT node_id, key_id FROM node_keys WHERE state = 'active' AND revoke_after IS NOT NULL AND revoke_after <= ?")
-      .all(nowIso(this.now()));
-    for (const row of rotated) {
-      this.db
-        .prepare("UPDATE node_keys SET state = 'revoked', revoked_at = ?, revocation_reason = 'rotation-overlap-ended' WHERE node_id = ? AND key_id = ?")
-        .run(nowIso(this.now()), row.node_id, row.key_id);
-    }
+    const cutoff = (ms) => new Date(at - ms).toISOString();
+    const cadenceMs = this.heartbeatCadenceSeconds * 1000;
+
+    withTransaction(this.db, () => {
+      // Rotation overlap expiry: old keys become revoked (RFC-0006).
+      const rotated = this.db
+        .prepare("SELECT node_id, key_id FROM node_keys WHERE state = 'active' AND revoke_after IS NOT NULL AND revoke_after <= ?")
+        .all(nowIso(this.now()));
+      for (const row of rotated) {
+        this.db
+          .prepare("UPDATE node_keys SET state = 'revoked', revoked_at = ?, revocation_reason = 'rotation-overlap-ended' WHERE node_id = ? AND key_id = ?")
+          .run(nowIso(this.now()), row.node_id, row.key_id);
+      }
+
+      // Nonce and replay retention (RFC-0006 / RFC-0005 D2).
+      this.db.prepare("DELETE FROM seen_nonces WHERE created_at <= ?").run(cutoff(NONCE_RETENTION_MS));
+      this.db.prepare("DELETE FROM enrollment_results WHERE created_at <= ?").run(cutoff(ENROLLMENT_RESULT_RETENTION_MS));
+
+      // Daily rollups for events older than 7 days (RFC-0009): each
+      // (node, day, dimension) group becomes one summary row.
+      const rollupCutoff = cutoff(EVENT_ROLLUP_AFTER_MS);
+      const groups = this.db
+        .prepare(
+          "SELECT node_id, substr(at, 1, 10) AS day, dimension, COUNT(*) AS count, MAX(to_value) AS final_value FROM events WHERE at < ? GROUP BY node_id, day, dimension",
+        )
+        .all(rollupCutoff);
+      for (const group of groups) {
+        this.db
+          .prepare("DELETE FROM events WHERE node_id = ? AND dimension = ? AND at >= ? AND at < ?")
+          .run(group.node_id, group.dimension, `${group.day}T00:00:00.000Z`, `${group.day}T23:59:59.999Z`);
+        this.db
+          .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, ?, 'rollup', ?, ?, 'retention-rollup')")
+          .run(
+            group.node_id,
+            `${group.day}T23:59:59.999Z`,
+            group.dimension,
+            JSON.stringify({ count: group.count, final: group.final_value }),
+          );
+      }
+      this.db.prepare("DELETE FROM events WHERE at <= ?").run(cutoff(EVENT_RETENTION_MS));
+      this.db.prepare("DELETE FROM audit WHERE at <= ?").run(cutoff(AUDIT_RETENTION_MS));
+
+      // registryContact aging (RFC-0009): 3 consecutive missed beats ->
+      // stale; 24h without contact -> lost + operator alert flag. Only
+      // actual transitions write events.
+      const contacted = this.db.prepare("SELECT * FROM nodes WHERE state = 'active' AND last_seen IS NOT NULL").all();
+      for (const node of contacted) {
+        const gapMs = at - Date.parse(node.last_seen);
+        let target = "fresh";
+        if (gapMs > HEARTBEAT_LOST_MS) target = "lost";
+        else if (gapMs > HEARTBEAT_MISSED_BEATS_STALE * cadenceMs) target = "stale";
+        if (target !== node.registry_contact) {
+          this.transitionDimension(node.node_id, "registry_contact", target, "maintenance");
+          this.db.prepare("UPDATE nodes SET registry_contact = ? WHERE node_id = ?").run(target, node.node_id);
+          if (target === "lost") {
+            this.setAlertFlag(node.node_id, "contact-lost");
+          }
+        }
+      }
+
+      // Report staleness aging (RFC-0009): a report older than 7 days is
+      // no longer fresh evidence — pass degrades to stale, capabilities
+      // are withheld, dshHealthy goes unknown. A fail verdict stays fail
+      // (a failed report never launders into a fresh state by age).
+      const nodesWithReports = this.db
+        .prepare("SELECT DISTINCT n.* FROM nodes n JOIN reports r ON r.node_id = n.node_id WHERE n.state = 'active'")
+        .all();
+      for (const node of nodesWithReports) {
+        const latest = this.getLatestReport(node.node_id);
+        if (at - Date.parse(latest.uploaded_at) <= REPORT_STALENESS_MS) continue;
+        if (node.orbit_compatible === "pass" || node.orbit_compatible === "unknown") {
+          this.transitionDimension(node.node_id, "orbit_compatible", "stale", "maintenance");
+        }
+        this.transitionDimension(node.node_id, "dsh_healthy", "unknown", "maintenance");
+        this.db
+          .prepare(
+            "UPDATE nodes SET orbit_compatible = CASE WHEN orbit_compatible IN ('pass', 'unknown') THEN 'stale' ELSE orbit_compatible END, dsh_healthy = 'unknown', capabilities_stale = 1 WHERE node_id = ?",
+          )
+          .run(node.node_id);
+      }
+    });
   }
 
   close() {

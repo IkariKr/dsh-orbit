@@ -55,6 +55,8 @@ export const HEARTBEAT_LOST_MS = 24 * 60 * 60 * 1000;
 export const REPORT_STALENESS_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const TOKEN_TTL_SECONDS_DEFAULT = 10 * 60;
+export const TOKEN_TTL_SECONDS_MIN = 60;
+export const TOKEN_TTL_SECONDS_MAX = 60 * 60;
 
 // Replay retention for completed enrollments (RFC-0005 D2), aligned with
 // the RFC-0009 event retention.
@@ -68,6 +70,8 @@ export const SESSION_IDLE_MS = 30 * 60 * 1000;
 
 export const EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 export const AUDIT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
+// RFC-0009: daily rollups after 7 days.
+export const EVENT_ROLLUP_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function buildSigningString({ label, method, path, timestamp, nonce, bodyHash, nodeId }) {
   return [label, method, path, String(timestamp), nonce, bodyHash, nodeId].join("\n");

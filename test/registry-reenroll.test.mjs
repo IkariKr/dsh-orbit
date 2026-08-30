@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { generateNodeKeyPair, randomHex } from "../src/registry/crypto.mjs";
-import { createTestRegistry, createTestServer, defaultRuntimeIdentity, enrollNode, signedMachineRequest, signedReenrollRequest } from "./helpers/registry-fixture.mjs";
+import { createTestRegistry, createTestServer, defaultRuntimeIdentity, deleteNode, enrollNode, signedMachineRequest, signedReenrollRequest } from "./helpers/registry-fixture.mjs";
 
 async function withTombstonedNode(t) {
   const registry = createTestRegistry();
@@ -11,7 +11,7 @@ async function withTombstonedNode(t) {
     registry.close();
   });
   const node = await enrollNode(server.baseUrl, registry);
-  registry.deleteNode({ actor: "operator", nodeId: node.nodeId, reason: "test" });
+  deleteNode(registry, node.nodeId);
   return { registry, server, node };
 }
 
@@ -151,7 +151,7 @@ test("purpose and binding checks: enroll-purpose token and mismatched node are d
 
   // A token bound to a different tombstone is denied even with a valid proof.
   const other = await enrollNode(server.baseUrl, registry);
-  registry.deleteNode({ actor: "operator", nodeId: other.nodeId, reason: "test" });
+  deleteNode(registry, other.nodeId);
   const boundElsewhere = registry.mintEnrollmentToken({ actor: "operator", purpose: "reenroll", boundNodeId: other.nodeId });
   const mismatch = await signedReenrollRequest(server.baseUrl, {
     nodeId: node.nodeId,
@@ -209,7 +209,7 @@ test("expired re-enrollment tokens are denied on first use", async (t) => {
     registry.close();
   });
   const node = await enrollNode(server.baseUrl, registry);
-  registry.deleteNode({ actor: "operator", nodeId: node.nodeId, reason: "test" });
+  deleteNode(registry, node.nodeId);
   const minted = registry.mintEnrollmentToken({ actor: "operator", purpose: "reenroll", boundNodeId: node.nodeId, ttlSeconds: 60 });
   clock.now = new Date(clock.now.getTime() + 61 * 1000);
   const ts = Math.trunc(clock.now.getTime() / 1000);

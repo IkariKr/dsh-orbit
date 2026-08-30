@@ -34,6 +34,44 @@ listener. The operator principal is either the single declared principal or a
 gateway-injected opaque `X-DSH-Operator-Id`; client-supplied principal-shaped
 headers are stripped at admission.
 
+Other environment:
+
+- `DSH_ORBIT_HUB_TRUSTED_SCHEME` (`http` default, `https`) — the trusted
+  external scheme used by the browser Origin check (scheme AND host must
+  match). `X-Forwarded-Proto` is never trusted.
+- `DSH_ORBIT_HUB_PUBLIC_LISTENER=1` — required override for a non-loopback
+  listen; plain-HTTP public binds refuse startup without it (TLS termination
+  belongs to the deployment gateway, P2-05).
+
+## Registry semantics
+
+- **Time state machine (`maintenance()`, run every 15 min by the hub)**:
+  `registryContact` ages without heartbeat traffic (`fresh` → `stale` after 3
+  consecutive missed beats → `lost` after 24h, with a `contact-lost` alert
+  flag on `nodes.alert_flags` until the next heartbeat); a compatibility
+  report older than 7 days becomes `stale` with capabilities withheld and
+  `dshHealthy` `unknown`; events older than 7 days roll up into per-day
+  summaries (90-day retention); nonce/enrollment-result/audit retentions and
+  rotation-overlap expiry are enforced here too.
+- **Runtime identity authority**: heartbeats own `nodes` current runtime
+  identity; a report never overwrites it. A report whose identity tuple
+  differs from the current heartbeat identity is stored as history and the
+  node's compatibility is withheld (`orbitCompatible: stale`, active
+  capabilities `[]`) until a matching report arrives. The first report after
+  enrollment may initialize the runtime identity before any heartbeat.
+- **Capability withholding**: `health.capabilities` is the ACTIVE set and is
+  empty whenever evidence is stale; the stored derived set is exposed
+  separately as `health.capabilityEvidence`.
+- **Destructive delete confirmation**: `hub.nodes.delete` requires
+  `{ requestId, reason }` (requestId = 32 lowercase hex, globally unique).
+  Exact replays return the same result; reusing a requestId for different
+  content/target is denied.
+- **Token TTL bounds**: `ttlSeconds` must be an integer 60–3600 (default
+  600); anything else fails closed.
+- **Token list**: `hub.tokens.list` is token history; every entry carries an
+  explicit `status` (`active` / `expired` / `consumed`) and never exposes a
+  digest or plaintext.
+
 ## Verification
 
 - `npm run check` runs the full suite including the registry acceptance

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generateNodeKeyPair, randomHex, sha256Hex } from "../src/registry/crypto.mjs";
 import { DeniedError } from "../src/registry/registry.mjs";
-import { createTestRegistry } from "./helpers/registry-fixture.mjs";
+import { createTestRegistry, deleteNode } from "./helpers/registry-fixture.mjs";
 
 
 test("mint stores a digest only; the plaintext exists exactly once in the response", () => {
@@ -86,7 +86,7 @@ test("unknown tokens and purpose mismatches are denied", () => {
   // A real reenroll-purpose token bound to a real tombstone.
   const keys = generateNodeKeyPair();
   const nodeId = registry.enroll({ token: enrollToken.token, enrollmentRequestId: randomHex(16), publicKey: keys.publicKeyHex }).nodeId;
-  registry.deleteNode({ actor: "operator", nodeId, reason: "test" });
+  deleteNode(registry, nodeId);
   const reenrollToken = registry.mintEnrollmentToken({ actor: "operator", purpose: "reenroll", boundNodeId: nodeId });
   assert.throws(
     () => registry.enroll({ token: randomHex(16), enrollmentRequestId: randomHex(16), publicKey: generateNodeKeyPair().publicKeyHex }),

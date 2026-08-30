@@ -74,3 +74,29 @@ test("uniqueness constraints are transactional", () => {
   assert.throws(() => db.prepare("INSERT INTO seen_nonces (node_id, nonce, created_at) VALUES ('node_a', 'n1', 't')").run());
   db.close();
 });
+
+test("a v1 database migrates in place to the current schema", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-registry-v1-"));
+  try {
+    const path = join(dir, "registry.db");
+    const db = openRegistryDatabase(path);
+    // Simulate a v1 database: drop the v2 column and rewind the version.
+    db.exec("ALTER TABLE nodes DROP COLUMN alert_flags");
+    db.exec("PRAGMA user_version = 1");
+    db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    db.close();
+
+    const upgraded = openRegistryDatabase(path);
+    assert.equal(upgraded.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
+    const columns = upgraded.prepare("PRAGMA table_info(nodes)").all().map((row) => row.name);
+    assert.equal(columns.includes("alert_flags"), true);
+    upgraded
+      .prepare("INSERT INTO nodes (node_id, state, minted_at, authenticated) VALUES ('node_v1', 'active', 't', 'ok')")
+      .run();
+    assert.deepEqual(JSON.parse(upgraded.prepare("SELECT alert_flags FROM nodes WHERE node_id = 'node_v1'").get().alert_flags), []);
+    upgraded.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    upgraded.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

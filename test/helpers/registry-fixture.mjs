@@ -119,6 +119,10 @@ export async function enrollNode(baseUrl, registry, { purpose = "enroll", boundN
   };
 }
 
+export function deleteNode(registry, nodeId, reason = "test") {
+  return registry.deleteNode({ actor: "operator", nodeId, requestId: randomHex(16), reason });
+}
+
 export function defaultRuntimeIdentity(overrides = {}) {
   return {
     runtime: {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generateNodeKeyPair, randomHex, sha256Hex, signSigningString } from "../src/registry/crypto.mjs";
 import { buildSigningString, MACHINE_V1_LABEL } from "../src/registry/protocol.mjs";
-import { createTestRegistry, createTestServer, defaultRuntimeIdentity, enrollNode, signedMachineRequest, validReport } from "./helpers/registry-fixture.mjs";
+import { createTestRegistry, createTestServer, defaultRuntimeIdentity, deleteNode, enrollNode, signedMachineRequest, validReport } from "./helpers/registry-fixture.mjs";
 
 async function withServer(t, options = {}) {
   const registry = createTestRegistry(options.registryOptions);
@@ -128,7 +128,7 @@ test("unknown and revoked keys are denied", async (t) => {
   assert.equal(unknownKey.status, 401);
   assert.equal(unknownKey.body.error.code, "unknown-key");
 
-  registry.deleteNode({ actor: "operator", nodeId: node.nodeId, reason: "test" });
+  deleteNode(registry, node.nodeId);
   const revokedNode = await signedMachineRequest(server.baseUrl, {
     path: "/api/v1/heartbeat",
     nodeId: node.nodeId,
@@ -185,6 +185,11 @@ test("runtime identity mismatch flags the latest report stale (capabilities with
   const stale = registry.getNode(node.nodeId);
   assert.equal(stale.health.orbitCompatible, "stale");
   assert.equal(stale.health.capabilitiesStale, true);
+  // Withheld semantics (P1-04): the ACTIVE capability set is empty; the
+  // stored derived set is evidence only, never an active claim.
+  assert.deepEqual(stale.health.capabilities, []);
+  assert.equal(stale.health.capabilityEvidence.length, 3);
+  assert.equal(stale.health.dshHealthy, "unknown");
   assert.equal(stale.health.reachable, "unknown");
 
   // A fresh report clears the staleness and recomputes capabilities.
@@ -324,6 +329,58 @@ test("heartbeat burst limit trips (1/s average, burst 3)", async (t) => {
   assert.equal(results[3].status, 429);
 });
 
+test("an authenticated 429 still consumes the nonce; the same signed request then replays as 401", async (t) => {
+  // Protocol-level rate limiting runs AFTER authentication and the
+  // nonce reservation (P1-06): a legitimately signed request that trips
+  // the limit has consumed its nonce, so the identical signed request
+  // can never be replayed.
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  // Three quick beats fill the burst...
+  for (let index = 0; index < 3; index += 1) {
+    const beat = await signedMachineRequest(server.baseUrl, {
+      path: "/api/v1/heartbeat",
+      nodeId: node.nodeId,
+      keyId: node.keyId,
+      keyHex: node.privateKeyHex,
+      body: defaultRuntimeIdentity(),
+    });
+    assert.equal(beat.status, 200);
+  }
+  // ...and the fourth is rate-limited after authentication.
+  const rawBody = Buffer.from(JSON.stringify(defaultRuntimeIdentity()));
+  const ts = String(Math.trunc(Date.now() / 1000));
+  const nonce = randomHex(16);
+  const signing = buildSigningString({
+    label: MACHINE_V1_LABEL,
+    method: "POST",
+    path: "/api/v1/heartbeat",
+    timestamp: ts,
+    nonce,
+    bodyHash: sha256Hex(rawBody),
+    nodeId: node.nodeId,
+  });
+  const signature = signSigningString(node.privateKeyHex, signing);
+  const headers = {
+    "content-type": "application/json",
+    "x-orbit-node": node.nodeId,
+    "x-orbit-timestamp": ts,
+    "x-orbit-nonce": nonce,
+    "x-orbit-key": node.keyId,
+    "x-orbit-signature": signature,
+  };
+  const limited = await fetch(server.baseUrl + "/api/v1/heartbeat", { method: "POST", headers, body: rawBody });
+  assert.equal(limited.status, 429);
+  // The 429'd request has a persisted nonce reservation.
+  const reserved = registry.db.prepare("SELECT COUNT(*) AS n FROM seen_nonces WHERE node_id = ?").get(node.nodeId).n;
+  assert.equal(reserved, 4);
+  // Replaying that exact signed request is a replay denial, not a
+  // fresh acceptance.
+  const replayed = await fetch(server.baseUrl + "/api/v1/heartbeat", { method: "POST", headers, body: rawBody });
+  assert.equal(replayed.status, 401);
+  assert.equal((await replayed.json()).error.code, "replay");
+});
+
 test("oversized bodies are 413 (heartbeat limit is 64 KiB)", async (t) => {
   const { registry, server } = await withServer(t);
   const node = await enrollNode(server.baseUrl, registry);
@@ -363,7 +420,7 @@ test("identical enroll replays return the same result, and the per-token attempt
 test("a reenroll-purpose token is rejected on the enroll route", async (t) => {
   const { registry, server } = await withServer(t);
   const node = await enrollNode(server.baseUrl, registry);
-  registry.deleteNode({ actor: "operator", nodeId: node.nodeId, reason: "test" });
+  deleteNode(registry, node.nodeId);
   const minted = registry.mintEnrollmentToken({ actor: "operator", purpose: "reenroll", boundNodeId: node.nodeId });
   const response = await fetch(server.baseUrl + "/api/v1/enroll", {
     method: "POST",

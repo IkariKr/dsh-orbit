@@ -208,7 +208,7 @@ test("node delete through the browser surface tombstones; machine auth for that 
   const response = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/delete`, {
     method: "POST",
     headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
-    body: JSON.stringify({ reason: "retired" }),
+    body: JSON.stringify({ requestId: randomHex(16), reason: "retired" }),
   });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).state, "tombstoned");
@@ -232,7 +232,7 @@ test("hub.nodes.reenroll mints a tombstone-bound token usable by the machine com
   await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/delete`, {
     method: "POST",
     headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
-    body: JSON.stringify({ reason: "retired" }),
+    body: JSON.stringify({ requestId: randomHex(16), reason: "retired" }),
   });
   const reenrollMint = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/reenroll`, {
     method: "POST",
@@ -317,4 +317,251 @@ test("logout revokes the session server-side", async (t) => {
     headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}` },
   });
   assert.equal(after.status, 401);
+});
+
+// ------------------------------------------------------------------
+// Phase-1 remediation acceptance (P1-07 delete idempotency).
+
+test("delete without a requestId is denied (confirmation semantics)", async (t) => {
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const response = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/delete`, {
+    method: "POST",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken },
+    body: JSON.stringify({ reason: "retired" }),
+  });
+  assert.equal(response.status, 400);
+  assert.equal(registry.getNode(node.nodeId).state, "active");
+});
+
+test("duplicate deletes with the same requestId are idempotent; a reused requestId with different content is denied", async (t) => {
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const requestId = randomHex(16);
+  const deleteBody = { requestId, reason: "retired" };
+  const baseHeaders = { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken };
+
+  const first = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/delete`, {
+    method: "POST",
+    headers: baseHeaders,
+    body: JSON.stringify(deleteBody),
+  });
+  assert.equal(first.status, 200);
+  assert.equal((await first.json()).idempotentReplay, false);
+
+  // Exact replay: same result, no second tombstone attempt.
+  const replay = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/delete`, {
+    method: "POST",
+    headers: baseHeaders,
+    body: JSON.stringify(deleteBody),
+  });
+  assert.equal(replay.status, 200);
+  const replayBody = await replay.json();
+  assert.equal(replayBody.idempotentReplay, true);
+  assert.equal(replayBody.state, "tombstoned");
+
+  // Same requestId with different content (reason) is denied.
+  const mismatched = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/delete`, {
+    method: "POST",
+    headers: baseHeaders,
+    body: JSON.stringify({ requestId, reason: "different" }),
+  });
+  assert.equal(mismatched.status, 409);
+  assert.equal((await mismatched.json()).error.code, "request-id-reused");
+
+  // A second delete of the same node with a fresh requestId is a plain
+  // already-tombstoned denial, not an idempotent replay.
+  const secondDelete = await fetch(server.baseUrl + `/hub/nodes/${node.nodeId}/delete`, {
+    method: "POST",
+    headers: baseHeaders,
+    body: JSON.stringify({ requestId: randomHex(16), reason: "retired" }),
+  });
+  assert.equal(secondDelete.status, 409);
+  assert.equal((await secondDelete.json()).error.code, "already-tombstoned");
+});
+
+test("the same delete requestId against a different node is denied", async (t) => {
+  const { registry, server } = await withServer(t);
+  const first = await enrollNode(server.baseUrl, registry);
+  const second = await enrollNode(server.baseUrl, registry);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const requestId = randomHex(16);
+  const headers = { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken };
+  const deleted = await fetch(server.baseUrl + `/hub/nodes/${first.nodeId}/delete`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ requestId, reason: "retired" }),
+  });
+  assert.equal(deleted.status, 200);
+  const other = await fetch(server.baseUrl + `/hub/nodes/${second.nodeId}/delete`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ requestId, reason: "retired" }),
+  });
+  assert.equal(other.status, 409);
+  assert.equal((await other.json()).error.code, "request-id-reused");
+  assert.equal(registry.getNode(second.nodeId).state, "active");
+});
+
+// ------------------------------------------------------------------
+// Phase-1 remediation acceptance (P1-08 token TTL bounds).
+
+test("enrollment token TTL is bounded to 1-60 minutes, integer only", async (t) => {
+  const { server } = await withServer(t);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const headers = { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken };
+  const mint = (ttlSeconds) =>
+    fetch(server.baseUrl + "/hub/tokens", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ purpose: "enroll", ttlSeconds }),
+    }).then((response) => response.status);
+
+  assert.equal(await mint(59), 400);
+  assert.equal(await mint(0), 400);
+  assert.equal(await mint(-1), 400);
+  assert.equal(await mint(3601), 400);
+  assert.equal(await mint(31536000), 400);
+  assert.equal(await mint(1.5), 400);
+  assert.equal(await mint("600"), 400);
+  assert.equal(await mint(60), 200);
+  assert.equal(await mint(600), 200);
+  assert.equal(await mint(3600), 200);
+  // undefined uses the default (600).
+  const defaulted = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ purpose: "enroll" }),
+  });
+  assert.equal(defaulted.status, 200);
+});
+
+// ------------------------------------------------------------------
+// Phase-1 remediation acceptance (P1-09 origin scheme, P1-10 bootstrap
+// browser trust).
+
+test("same-host wrong-scheme Origin is denied", async (t) => {
+  const { server } = await withServer(t);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const host = new URL(server.baseUrl).host;
+  const response = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders(),
+      cookie: `${SESSION_COOKIE}=${cookie}`,
+      [CSRF_HEADER]: csrfToken,
+      origin: `https://${host}`,
+      "sec-fetch-site": "same-origin",
+    },
+    body: JSON.stringify({ purpose: "enroll" }),
+  });
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).error.code, "origin-denied");
+});
+
+test("matching scheme and host Origin is allowed", async (t) => {
+  const { server } = await withServer(t);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const response = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders(),
+      cookie: `${SESSION_COOKIE}=${cookie}`,
+      [CSRF_HEADER]: csrfToken,
+      origin: server.baseUrl,
+      "sec-fetch-site": "same-origin",
+    },
+    body: JSON.stringify({ purpose: "enroll" }),
+  });
+  assert.equal(response.status, 200);
+});
+
+test("cross-site session bootstrap is denied even with a valid gateway proof", async (t) => {
+  const { server } = await withServer(t);
+  const crossSite = await fetch(server.baseUrl + "/hub/session", {
+    method: "POST",
+    headers: { ...gatewayHeaders(), "sec-fetch-site": "cross-site" },
+  });
+  assert.equal(crossSite.status, 403);
+  assert.equal((await crossSite.json()).error.code, "cross-site-denied");
+});
+
+test("mismatched-origin session bootstrap is denied even with a valid gateway proof", async (t) => {
+  const { server } = await withServer(t);
+  const mismatched = await fetch(server.baseUrl + "/hub/session", {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders(),
+      origin: "https://evil.example",
+      "sec-fetch-site": "same-origin",
+    },
+  });
+  assert.equal(mismatched.status, 403);
+  assert.equal((await mismatched.json()).error.code, "origin-denied");
+});
+
+test("same-origin gateway-admitted bootstrap succeeds", async (t) => {
+  const { server } = await withServer(t);
+  const response = await fetch(server.baseUrl + "/hub/session", {
+    method: "POST",
+    headers: { ...gatewayHeaders(), origin: server.baseUrl, "sec-fetch-site": "same-origin" },
+  });
+  assert.equal(response.status, 200);
+});
+
+test("session mutation and its audit row are atomic", async (t) => {
+  const registry = createTestRegistry();
+  const local = await createTestServer(registry, {
+    gatewayAssertionSecret: ASSERTION,
+    operatorPrincipal: { mode: "inject" },
+  });
+  t.after(async () => {
+    await local.close();
+    registry.close();
+  });
+  const originalAudit = registry.recordAudit;
+  registry.recordAudit = () => {
+    throw new Error("audit backend failed");
+  };
+  try {
+    // bootstrapSession and endSession are synchronous: a failed audit
+    // inside the shared transaction must leave NO session row behind.
+    assert.throws(() => registry.bootstrapSession({ principal: "operator" }), /audit backend failed/);
+  } finally {
+    registry.recordAudit = originalAudit;
+  }
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM browser_sessions").get().n, 0);
+
+  // Logout is atomic too: a failed audit leaves the session live.
+  const boot = registry.bootstrapSession({ principal: "operator" });
+  registry.recordAudit = () => {
+    throw new Error("audit backend failed");
+  };
+  try {
+    assert.throws(() => registry.endSession({ sessionId: boot.sessionId, actor: "operator" }), /audit backend failed/);
+  } finally {
+    registry.recordAudit = originalAudit;
+  }
+  const row = registry.db.prepare("SELECT revoked_at FROM browser_sessions WHERE session_id = ?").get(boot.sessionId);
+  assert.equal(row.revoked_at, null);
+});
+
+test("hub.tokens.list reports explicit status without exposing digest or plaintext", async (t) => {
+  const { server } = await withServer(t);
+  const { cookie, csrfToken } = await establishSession(server.baseUrl);
+  const headers = { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}`, [CSRF_HEADER]: csrfToken };
+  const minted = await fetch(server.baseUrl + "/hub/tokens", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ purpose: "enroll", ttlSeconds: 60 }),
+  });
+  const created = await minted.json();
+  const list = await fetch(server.baseUrl + "/hub/tokens", { headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${cookie}` } });
+  const listed = await list.json();
+  const row = listed.tokens.find((entry) => entry.tokenId === created.tokenId);
+  assert.equal(row.status, "active");
+  assert.equal(Object.hasOwn(row, "tokenDigest"), false);
+  assert.equal(Object.hasOwn(row, "token"), false);
 });

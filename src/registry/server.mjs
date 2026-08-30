@@ -133,7 +133,16 @@ export function createHubServer({ registry, options = {} }) {
     gatewayAssertionSecret = null,
     operatorPrincipal = null,
     lanBoundaryOnly = false,
+    // RFC-0007 origin check compares scheme as well as host. The Hub
+    // sits behind the deployment gateway; it cannot infer the external
+    // scheme from the socket (plain http from the gateway) and must not
+    // trust client-supplied X-Forwarded-Proto. The operator pins the
+    // trusted external scheme explicitly (P1-09).
+    trustedExternalScheme = "http",
   } = options;
+  if (trustedExternalScheme !== "http" && trustedExternalScheme !== "https") {
+    throw new Error(`trustedExternalScheme must be http or https (got ${JSON.stringify(trustedExternalScheme)})`);
+  }
   const limiter = new SlidingWindowLimiter();
 
   const server = createServer((request, response) => {
@@ -215,54 +224,31 @@ export function createHubServer({ registry, options = {} }) {
       return sendJson(response, 200, result);
     }
     if (path === "/api/v1/heartbeat") {
+      // Protocol-level rate limiting runs AFTER machine authentication
+      // (including the transactional nonce reservation): a legitimately
+      // signed request that trips the limit has still consumed its
+      // nonce, and its replay is denied (RFC-0006 / P1-06). Unauthenticated
+      // garbage is bounded earlier by the per-IP guard.
+      const auth = registry.authenticateMachine({ nodeId: headers.node, keyId: headers.key, method: request.method, path, timestamp: headers.timestamp, nonce: headers.nonce, bodyHash, signature: headers.signature });
       if (
-        !limiter.allow(`heartbeat:${headers.node}`, RATE_LIMITS.heartbeat.burst, 1000) ||
-        !limiter.allow(`heartbeat-60:${headers.node}`, 60 / RATE_LIMITS.heartbeat.perSecond, 60_000)
+        !limiter.allow(`heartbeat:${auth.node.node_id}`, RATE_LIMITS.heartbeat.burst, 1000) ||
+        !limiter.allow(`heartbeat-60:${auth.node.node_id}`, 60 / RATE_LIMITS.heartbeat.perSecond, 60_000)
       ) {
-        return sendJson(response, 429, { error: { code: "rate-limited", message: "heartbeat rate limit exceeded" } });
+        return sendJson(response, 429, { error: { code: "rate-limited", message: "heartbeat rate limit exceeded" } }, { "retry-after": "1" });
       }
-      const result = registry.heartbeat({
-        nodeId: headers.node,
-        keyId: headers.key,
-        method: request.method,
-        path,
-        timestamp: headers.timestamp,
-        nonce: headers.nonce,
-        bodyHash,
-        signature: headers.signature,
-        rawBody,
-      });
+      const result = registry.heartbeatAuthenticated({ node: auth.node, rawBody });
       return sendJson(response, 200, result);
     }
     if (path === "/api/v1/report-upload") {
-      if (!limiter.allow(`report:${headers.node}`, RATE_LIMITS.reportUpload.perMinute, 60_000)) {
-        return sendJson(response, 429, { error: { code: "rate-limited", message: "report upload rate limit exceeded" } });
+      const auth = registry.authenticateMachine({ nodeId: headers.node, keyId: headers.key, method: request.method, path, timestamp: headers.timestamp, nonce: headers.nonce, bodyHash, signature: headers.signature });
+      if (!limiter.allow(`report:${auth.node.node_id}`, RATE_LIMITS.reportUpload.perMinute, 60_000)) {
+        return sendJson(response, 429, { error: { code: "rate-limited", message: "report upload rate limit exceeded" } }, { "retry-after": "60" });
       }
-      const result = registry.uploadReport({
-        nodeId: headers.node,
-        keyId: headers.key,
-        method: request.method,
-        path,
-        timestamp: headers.timestamp,
-        nonce: headers.nonce,
-        bodyHash,
-        signature: headers.signature,
-        rawBody,
-      });
+      const result = registry.uploadReportAuthenticated({ node: auth.node, rawBody });
       return sendJson(response, 200, result);
     }
-    const body = parseBody(rawBody);
-    const result = registry.rotateCredential({
-      nodeId: headers.node,
-      keyId: headers.key,
-      method: request.method,
-      path,
-      timestamp: headers.timestamp,
-      nonce: headers.nonce,
-      bodyHash,
-      signature: headers.signature,
-      rawBody,
-    });
+    const auth = registry.authenticateMachine({ nodeId: headers.node, keyId: headers.key, method: request.method, path, timestamp: headers.timestamp, nonce: headers.nonce, bodyHash, signature: headers.signature });
+    const result = registry.rotateCredentialAuthenticated({ node: auth.node, key: auth.key, rawBody });
     return sendJson(response, 200, result);
   }
 
@@ -304,26 +290,34 @@ export function createHubServer({ registry, options = {} }) {
     return injectedPrincipal;
   }
 
-  function browserTrust(request, { sessionRequired }) {
+  // RFC-0007 browser trust, split so the session bootstrap shares the
+  // origin/Sec-Fetch-Site checks even though it has no session yet
+  // (P1-10).
+  function checkOriginAndFetchSite(request) {
     const origin = request.headers.origin;
     if (typeof origin === "string" && origin !== "") {
-      let originHost;
+      let originUrl;
       try {
-        originHost = new URL(origin).host;
+        originUrl = new URL(origin);
       } catch {
         throw new DeniedError(403, "origin-denied", "malformed Origin header");
       }
-      if (originHost !== request.headers.host) {
-        throw new DeniedError(403, "origin-denied", "Origin does not match the request host");
+      // Host AND scheme must match the trusted external scheme
+      // (RFC-0007; P1-09). X-Forwarded-Proto is never trusted.
+      if (originUrl.protocol !== `${trustedExternalScheme}:` || originUrl.host !== request.headers.host) {
+        throw new DeniedError(403, "origin-denied", "Origin does not match the trusted scheme and host");
       }
     }
     const site = request.headers["sec-fetch-site"];
     if (site === "cross-site") {
       throw new DeniedError(403, "cross-site-denied", "cross-site management requests are denied");
     }
+  }
+
+  function validateSessionOnly(request) {
     const sessionId = parseCookies(request).get(SESSION_COOKIE);
     const session = registry.validateSession(sessionId);
-    if (sessionRequired && !session) {
+    if (!session) {
       throw new DeniedError(401, "no-session", "no valid management session");
     }
     return session;
@@ -338,6 +332,9 @@ export function createHubServer({ registry, options = {} }) {
 
   async function handleBrowserRequest(request, response, path) {
     const principal = admitBrowserRequest(request);
+    // Origin/Sec-Fetch-Site apply to every management request,
+    // including the gateway-admitted session bootstrap (P1-10).
+    checkOriginAndFetchSite(request);
 
     if (request.method === "POST" && (path === "/hub/session" || path === "/hub/session/")) {
       if (!limiter.allow(`session:${request.socket.remoteAddress ?? "?"}`, 30, 60_000)) {
@@ -356,7 +353,7 @@ export function createHubServer({ registry, options = {} }) {
       return sendJson(response, 200, { principal, csrfToken: session.csrfToken, expiresAt: session.expiresAt });
     }
 
-    const session = browserTrust(request, { sessionRequired: true });
+    const session = validateSessionOnly(request);
 
     if (path === "/hub/session" || path === "/hub/session/") {
       return sendJson(response, 200, { principal: session.operatorPrincipal, csrfToken: session.csrfToken, expiresAt: session.expiresAt });
@@ -404,7 +401,10 @@ export function createHubServer({ registry, options = {} }) {
       const nodeId = decodeURIComponent(nodeMatch[1]);
       if (nodeMatch[2] === "delete") {
         const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
-        return sendJson(response, 200, registry.deleteNode({ actor: session.operatorPrincipal, nodeId, reason: body.reason }));
+        // Destructive deletes carry a client requestId for confirmation
+        // and idempotent replay semantics (RFC-0007 / P1-07); a missing
+        // requestId is denied.
+        return sendJson(response, 200, registry.deleteNode({ actor: session.operatorPrincipal, nodeId, requestId: body.requestId, reason: body.reason }));
       }
       const minted = registry.mintEnrollmentToken({
         actor: session.operatorPrincipal,

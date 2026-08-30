@@ -6,7 +6,15 @@
 
 import { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+
+// v1 -> v2: nodes gains the operator alert-flag column (RFC-0009
+// "lost + operator alert flag", P1-02 of the phase-1 implementation
+// review). Fresh databases create the full v2 shape; existing v1
+// databases are upgraded in place.
+const upgradeSteps = {
+  1: ["ALTER TABLE nodes ADD COLUMN alert_flags TEXT NOT NULL DEFAULT '[]'"],
+};
 
 const schemaStatements = [
   `
@@ -21,6 +29,7 @@ const schemaStatements = [
     dsh_healthy TEXT NOT NULL DEFAULT 'unknown' CHECK (dsh_healthy IN ('ok', 'degraded', 'unknown')),
     orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
     reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable = 'unknown'),
+    alert_flags TEXT NOT NULL DEFAULT '[]',
     capabilities TEXT NOT NULL DEFAULT '[]',
     capabilities_stale INTEGER NOT NULL DEFAULT 1,
     last_seen TEXT,
@@ -138,12 +147,27 @@ export function migrate(db) {
     throw new Error(`registry database schema ${version} is newer than supported ${SCHEMA_VERSION}`);
   }
   if (version < SCHEMA_VERSION) {
-    withTransaction(db, () => {
-      for (const statement of schemaStatements) {
-        db.exec(statement);
+    if (version === 0) {
+      withTransaction(db, () => {
+        for (const statement of schemaStatements) {
+          db.exec(statement);
+        }
+        db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+      });
+      return;
+    }
+    for (let current = version; current < SCHEMA_VERSION; current += 1) {
+      const steps = upgradeSteps[current];
+      if (!steps) {
+        throw new Error(`registry database schema ${current}: no upgrade path to ${SCHEMA_VERSION}`);
       }
-      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-    });
+      withTransaction(db, () => {
+        for (const statement of steps) {
+          db.exec(statement);
+        }
+        db.exec(`PRAGMA user_version = ${current + 1}`);
+      });
+    }
   }
 }
 

@@ -15,18 +15,10 @@
 //   DSH_ORBIT_HUB_ROTATION_OVERLAP_H rotation overlap in hours (1-168, default 24)
 
 import process from "node:process";
+import { validateHubConfig } from "../src/registry/config.mjs";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
 import { createHubServer } from "../src/registry/server.mjs";
-
-function requireEnv(name) {
-  const value = process.env[name];
-  if (value === undefined || value === "") {
-    console.error(`dsh-orbit-hub: ${name} is required`);
-    process.exit(1);
-  }
-  return value;
-}
 
 const dbPath = process.env.DSH_ORBIT_HUB_DB ?? "./registry.db";
 const port = Number.parseInt(process.env.DSH_ORBIT_HUB_PORT ?? "5445", 10);
@@ -34,7 +26,17 @@ const listen = process.env.DSH_ORBIT_HUB_LISTEN ?? "127.0.0.1";
 const gatewaySecret = process.env.DSH_ORBIT_HUB_GATEWAY_SECRET ?? null;
 const singlePrincipal = process.env.DSH_ORBIT_HUB_OPERATOR_PRINCIPAL ?? null;
 const lanBoundaryOnly = process.env.DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY === "1";
+const trustedExternalScheme = process.env.DSH_ORBIT_HUB_TRUSTED_SCHEME ?? "http";
+const publicListener = process.env.DSH_ORBIT_HUB_PUBLIC_LISTENER === "1";
 const rotationOverlapHours = Number.parseInt(process.env.DSH_ORBIT_HUB_ROTATION_OVERLAP_H ?? "24", 10);
+
+const configErrors = validateHubConfig({ listen, trustedExternalScheme, publicListener });
+if (configErrors.length > 0) {
+  for (const error of configErrors) {
+    console.error(`dsh-orbit-hub: ${error}`);
+  }
+  process.exit(1);
+}
 
 if (gatewaySecret === null && !lanBoundaryOnly) {
   console.error(
@@ -47,7 +49,7 @@ const registry = new Registry({
   db: openRegistryDatabase(dbPath),
   rotationOverlapHours,
 });
-const options = { lanBoundaryOnly };
+const options = { lanBoundaryOnly, trustedExternalScheme };
 if (gatewaySecret !== null) options.gatewayAssertionSecret = gatewaySecret;
 if (singlePrincipal !== null) {
   options.operatorPrincipal = { mode: "single", principal: singlePrincipal };
