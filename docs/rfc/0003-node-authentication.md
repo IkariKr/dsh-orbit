@@ -40,7 +40,7 @@ The v0.2 authorization smoke suite is the acceptance template for the registry s
 - **Credential format and storage on resource-constrained nodes** — CLOSED: Ed25519 keypair; the node private key never leaves the node; the Hub stores only public keys (RFC-0005 D3, RFC-0006). The one-way-symmetric "hashed secret at Hub, verifier at node" form is abandoned.
 - **Lifecycle of the per-node Hub service identities** — CLOSED: Ed25519 key direction fixed (Hub private key never leaves the Hub; node holds only the Hub public key); states provisioned → active → rotating → revoked; issuance/activation deferred to v0.4 (RFC-0008).
 - **Overlap-window defaults for rotation in headless deployments** — CLOSED: node credential rotation overlap default 24h (1–168h configurable; RFC-0006); Hub identity rotation overlap default 14 days (1–30 configurable; RFC-0008) to tolerate weekly-online headless deployments.
-- **Rate limiting and lockout behavior for the registration surface** — CLOSED: fixed defaults — heartbeat 1/s (burst 3), report upload 10/min, enrollment attempts per token 10, token minting 20/h, per-IP 120/min; body size limits per route; replay nonce cache ~90s (RFC-0006).
+- **Rate limiting and lockout behavior for the registration surface** — CLOSED: fixed defaults — heartbeat 1/s (burst 3), report upload 10/min, enrollment/reenroll attempts per token 10, token minting 20/h, per-IP 120/min; body size limits per route; transactional nonce reservation into `seen_nonces` with 24h retention (RFC-0006).
 - **Capability advertisement mechanism** — CLOSED: no `update-capabilities` endpoint; capabilities are derived at the Hub from the latest uploaded compatibility report, single source of truth (RFC-0009).
 
 ## Remaining open questions

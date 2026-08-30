@@ -112,7 +112,7 @@ Every check has an explicit state; missing evidence is never treated as a pass:
 Terminal evidence is split into two optional checks:
 
 - `terminalFence` — automated since `0.2.5`: the live terminal authorization smoke (positive control plus unauthenticated, invalid-credential, unexpected-Origin, cross-site, and forged-assertion denials against the terminal upgrade endpoint) runs whenever the dsh-ssh fence is enabled (`DSH_ORBIT_PATCH_DSH_SSH=1`), and a failure blocks promotion eligibility. Disabled deployments record `not_run` and run nothing.
-- `terminalPtty` — actual PTY runtime evidence. Currently recorded as `not_run`; the evidence comes from the Stage 7 manual acceptance in the release attestations. A `terminalFence` pass is authorization evidence only and must not be treated as `terminal.pty` runtime evidence by future fleet capability advertisement.
+- `terminalPtty` — actual PTY runtime evidence. Currently recorded as `not_run`; the evidence comes from the Stage 7 manual acceptance in the release attestations. A `terminalFence` pass is authorization evidence only and must not be treated as `terminal.pty` runtime evidence by Hub-side capability derivation (RFC-0009).
 
 The report separates two outcomes:
 

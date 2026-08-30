@@ -81,6 +81,6 @@ The fleet work is intentionally separate from the DSH runtime.
 
 The planned Hub is a control plane. It should manage identity, discovery, routing, health, capabilities, and session selection. Agent execution remains on each DSH node.
 
-Nodes should advertise capabilities rather than requiring every device to run the same DSH version. Version information remains useful for compatibility diagnostics, but feature availability should converge on capability negotiation.
+Capabilities are **Hub-derived, evidence-backed feature assertions** rather than requiring every device to run the same DSH version. Version information remains useful for compatibility diagnostics, but feature availability converges on Hub-side capability derivation from each node's latest compatibility report (see `docs/rfc/0009-capability-contract-and-health.md`); nodes never advertise capabilities.
 
 See `docs/roadmap.md` for the staged plan.

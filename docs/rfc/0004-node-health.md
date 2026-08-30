@@ -6,7 +6,7 @@ Depends on: 0001-node-identity, 0002-node-capabilities, 0003-node-authentication
 
 ## Context
 
-`online: true/false` cannot answer the questions a fleet operator actually has. A node can be reachable but unauthorized (expired credential), authenticated but running an unsupported DSH build, or fully healthy but missing a capability the operator wants. v0.2 production experience shows each of these states occurring independently: a healthy DSH container behind a broken gateway, a reachable node with a drifted source layout, a candidate that builds but fails authorization.
+`online: true/false` cannot answer the questions a fleet operator actually has. A node can be reachable but unauthorized (revoked credential), authenticated but running an unsupported DSH build, or fully healthy but missing a capability the operator wants. v0.2 production experience shows each of these states occurring independently: a healthy DSH container behind a broken gateway, a reachable node with a drifted source layout, a candidate that builds but fails authorization.
 
 ## Proposal
 

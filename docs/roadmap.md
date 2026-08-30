@@ -28,7 +28,7 @@ Enrollment/bootstrap covers nodes that the Hub can reach directly (server-reacha
 - one-time enrollment with short-lived single-use tokens and first credential issuance;
 - node metadata and health;
 - DSH and Orbit version reporting;
-- evidence-backed capability advertisement (contract v1, `docs/rfc/0009-capability-contract-and-health.md`);
+- evidence-backed capability derivation (contract v1, `docs/rfc/0009-capability-contract-and-health.md`);
 - revocable, rotatable per-node credentials (machine API `docs/rfc/0006-registry-machine-api.md`);
 - registry machine API and browser management API with independent acceptance matrices;
 - heartbeat and event history.
@@ -66,4 +66,4 @@ Explicitly excluded from 0.3: inbound connection acceptance for NAT-restricted d
 
 The Hub should remain a control plane. DSH remains the execution runtime on each node.
 
-Fleet features should prefer capability negotiation over version-specific UI branches. Operations that can execute commands or mutate settings across multiple nodes must require an explicit target scope.
+Fleet features should prefer Hub-derived capabilities over version-specific UI branches. Operations that can execute commands or mutate settings across multiple nodes must require an explicit target scope.

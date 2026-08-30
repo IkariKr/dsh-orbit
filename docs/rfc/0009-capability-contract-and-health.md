@@ -7,7 +7,7 @@ Status: Accepted (2026-08-30), rev. 3 after architecture review round 2: heartbe
 A capability is `{ name, version: 1 }` derived **deterministically by the Hub from the node's latest uploaded compatibility report** (single source of truth; there is no node-side capability advertisement endpoint and no capability truth carried in heartbeats). Evidence rules:
 
 - Every capability name maps to report checks that must all be `pass` in the latest report.
-- `terminal.pty` and `agents.run` are **not advertisable in v0.3** (no automated PTY/streaming runtime evidence exists; the fence result is authorization evidence only).
+- `terminal.pty` and `agents.run` are **not claimable in v0.3** (no automated PTY/streaming runtime evidence exists; the fence result is authorization evidence only).
 - A report whose identity tuple no longer matches the heartbeat runtime identity makes the capabilities `stale` (withheld until refreshed).
 - No third-party plugin name, version, or path in capability names, evidence mapping, or tests (ADR-0001).
 
@@ -16,8 +16,8 @@ A capability is `{ name, version: 1 }` derived **deterministically by the Hub fr
 | `sessions.resume` | `sessionResume` |
 | `settings.remote` | `settingsRead` + `settingsNoopWrite` + `authorizationSmoke` |
 | `web.routes` | `runtimeReadiness` + `webPluginRoutes` |
-| `terminal.pty` | **not advertisable in v0.3** |
-| `agents.run` | **not advertisable in v0.3** |
+| `terminal.pty` | **not claimable in v0.3** |
+| `agents.run` | **not claimable in v0.3** |
 
 ## Health semantics
 
@@ -35,7 +35,7 @@ Per-node composite record. **`reachable` is never modified by Node→Hub heartbe
 
 **Deterministic `dshHealthy` mapping** (Hub-side, never node-declared): `ok` iff the latest report has `runtimeReadiness = pass` AND `settingsRead = pass`; `degraded` iff either of those two checks `fail`; `unknown` iff there is no fresh report (none, or past the staleness window below). No other inputs, no heuristics.
 
-**Heartbeat runtime identity (non-authoritative)**: the heartbeat carries `orbitRevision`, `orbitCommit`, `dshVersion`, `compatibilityProfile` (RFC-0006). The Hub compares them to the identity tuple recorded with the latest report; on mismatch the report is treated as stale → `orbitCompatible: stale` and capabilities withheld (stale marker) until a fresh report arrives. The heartbeat itself never declares or updates capabilities.
+**Heartbeat runtime identity (non-authoritative, 1:1 with report fields)**: the heartbeat carries `orbitVersion`, `orbitRevision`, `dshVersion`, `compatibilityProfile` (RFC-0006), mapped 1:1 to the v0.2 compatibility report fields: `orbitVersion` ↔ `report.orbit.version`; `orbitRevision` ↔ `report.orbit.revision`; `dshVersion` ↔ `report.candidate.dshVersion`; `compatibilityProfile` ↔ `report.candidate.profile`. (No `orbitCommit` — there is no such report field.) The Hub compares these to the identity tuple recorded with the latest report; on mismatch the report is treated as stale → `orbitCompatible: stale` and capabilities withheld (stale marker) until a fresh report arrives. The heartbeat itself never declares or updates capabilities.
 
 - `unknown` is explicit and default; never "compatible by default".
 - A failed dimension never hides others; partial health recorded.

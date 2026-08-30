@@ -16,9 +16,10 @@ Enrollment for nodes the Hub can reach directly. Does **not** design reverse con
 - Hub persists `{ nodeId, mintedAt, state, nodePublicKey, ... }` in the registry.
 - Node persists `{ nodeId, hub: { baseUrl }, keys }` locally. Node store loss → the node re-enrolls as a new installation (ordinary enrollment always mints a NEW nodeId — see D5/D6); the old record is removed by the operator.
 
-### D2: One-time enrollment with idempotency (token stored as digest)
+### D2: One-time enrollment with idempotency (token stored as digest; purpose-minted)
 
 - The operator mints short-lived, single-use enrollment tokens (128-bit random; TTL default 10 min, 1–60 configurable; burst limits per RFC-0006). **The Hub stores only a SHA-256 digest of the token — never the plaintext.**
+- **Every token carries a fixed `purpose`**: `enroll` or `reenroll`, set at mint time (RFC-0007). `enroll` tokens have `boundNodeId = NULL`; `reenroll` tokens carry `boundNodeId` = the tombstoned nodeId they are bound to. Both machine endpoints reject tokens of the wrong purpose (RFC-0006).
 - The node sends its Ed25519 public key and a client-generated `enrollmentRequestId` (128-bit random, 32 hex) with the token.
 - **Idempotency**: the same `token + enrollmentRequestId + publicKey` replay returns the same enrollment result (the Hub persists the completed enrollment keyed by `enrollmentRequestId` in `enrollment_results`); the same token with any different content is denied (the token is consumed exactly once per distinct enrollment).
 - A failed attempt does not consume the token; a successful one does.
@@ -39,7 +40,7 @@ Enrollment for nodes the Hub can reach directly. Does **not** design reverse con
 ### D5: Delete, tombstone, and re-registration (original private key required)
 
 - Operator delete: credential keys revoked immediately; the record becomes a **tombstone** (nodeId + deletedAt + reason kept).
-- Re-registration restores an original nodeId **only** through a re-enrollment token minted by `hub.nodes.reenroll(nodeId)`, bound to that tombstoned nodeId, **and only when the holder demonstrates possession of the original node private key** (signing the re-enrollment request with it). Ordinary enrollment always mints a fresh nodeId.
+- Re-registration restores an original nodeId **only** through a re-enrollment token minted by `hub.nodes.reenroll(nodeId)` with `purpose = reenroll` and `boundNodeId` = the tombstoned nodeId, **and only when the holder demonstrates possession of the original node private key**. The browser endpoint mints the token only; **completion is the machine endpoint `POST /api/v1/reenroll` with the `ORBIT-REENROLL-V1` possession proof** (RFC-0006 protocol, including the fixed `reenrollmentRequestId` idempotency key and the success transaction). The tombstone retains the node's last public key so the Hub can verify the proof; that historical key **stays `revoked` permanently** and authorizes nothing except verifying this proof. Ordinary enrollment always mints a fresh nodeId.
 - **There is no operator-attestation recovery path**: if the original private key is lost, the old nodeId is permanently unrecoverable; the node re-enrolls as a new installation (new nodeId) and the operator tombstones the stale record. A future force-rebind is a separate, explicitly dangerous operation (independent design, mandatory full audit) — out of v0.3 scope.
 - There is no implicit re-registration: anything auto-registering a node without an operator-minted token is a bug.
 
@@ -59,7 +60,7 @@ Enrollment for nodes the Hub can reach directly. Does **not** design reverse con
   - report upload: insert `reports` row + recompute derived capabilities + health transition event — one transaction.
   - heartbeat: update contact/lastSeen + health transition event when a dimension changes — one transaction.
   - session bootstrap/logout: insert/delete `browser_sessions` + audit row — one transaction (RFC-0007).
-- **Minimal persistence contract** (the v0.3 table set is exactly: `nodes`, `node_keys`, `enrollment_tokens` (digest only), `enrollment_results`, `seen_nonces`, `reports`, `events`, `audit`, `browser_sessions`); no third-party plugin fields anywhere (ADR-0001).
+- **Minimal persistence contract** (the v0.3 table set is exactly: `nodes`, `node_keys`, `enrollment_tokens` (digest, `purpose`, nullable `boundNodeId`), `enrollment_results`, `seen_nonces`, `reports`, `events`, `audit`, `browser_sessions`); no third-party plugin fields anywhere (ADR-0001).
 
 ## MVP scope (fixed)
 
@@ -67,8 +68,8 @@ In scope: stable identity, enrollment (with the idempotency rules above), per-no
 
 ## Acceptance and failure conditions
 
-- Enrollment succeeds only with a valid, unexpired, unconsumed token; all other attempts fail closed.
-- Replays of a completed enrollment (identical content) return the same result within the replay retention, even past token expiry; different content is denied.
+- Enrollment succeeds only with a valid, unexpired, unconsumed **enroll-purpose** token; re-enrollment completion only with a valid, unexpired, unconsumed **reenroll-purpose** token whose `boundNodeId` matches the tombstone; all other attempts fail closed.
+- Replays of a completed enrollment/re-enrollment (identical idempotency content) return the same result within the replay retention, even past token expiry; different content is denied.
 - No anonymous enrollment endpoint exists; ordinary enrollment never restores a historical nodeId.
 - No attestation path: a lost node private key yields a new installation, never the old nodeId.
 - The Hub never stores an enrollment-token plaintext (digest only), and `seen_nonces` is transactional.

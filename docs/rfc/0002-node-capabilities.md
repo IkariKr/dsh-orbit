@@ -1,6 +1,6 @@
-# RFC 0002: Node capability advertisement (decided; synced 2026-08-30)
+# RFC 0002: Node capabilities — Hub-derived contract (decided; synced 2026-08-30)
 
-Status: Accepted (2026-08-29) for the v0.3 architecture. **Synced 2026-08-30 to the final 0005–0009 decisions**: this RFC establishes the capability namespaces and the evidence-first rule; advertisement mechanics are superseded by RFC-0009 (Hub-side derivation, no advertisement transport).
+Status: Accepted (2026-08-29) for the v0.3 architecture. **Synced 2026-08-30 to the final 0005–0009 decisions**: this RFC establishes the capability namespaces and the evidence-first rule; capabilities are a **Hub-derived contract** computed from the latest compatibility report — nodes never advertise or announce them (RFC-0009).
 Target milestone: 0.3 (node identity and registry)
 Depends on: 0001-node-identity; v0.2.0 compatibility evidence
 
@@ -10,7 +10,7 @@ The Hub UI must decide what it can do with each node. Keying UI branches to DSH 
 
 ## Proposal
 
-Nodes advertise **capabilities**: named, versioned feature assertions, not version numbers.
+Capabilities are **Hub-derived knowledge about each node**: named, versioned feature assertions computed from the latest compatibility report — not version numbers, and never node-declared.
 
 Namespaces (initial, non-exhaustive):
 
@@ -24,14 +24,14 @@ agents.run           agent execution with streaming output
 Rules:
 
 - A capability entry is `{ name, version, evidence }`. `version` is the capability contract version, not the DSH version.
-- **Unknown capabilities are ignored, never fatal**: a Hub that does not know a capability renders nothing for it; a Hub that knows it but the node does not advertise disables the corresponding UI.
-- A capability assertion without supporting evidence must not be advertised. Evidence means: the check named by the capability has a recorded `pass` in the node's latest v0.2 compatibility report (for `terminal.pty`, an automated check once one exists; until then the capability cannot be claimed by an automated run).
+- **Unknown capabilities are ignored, never fatal**: a Hub that does not know a capability renders nothing for it; a Hub that knows it but the node lacks it disables the corresponding UI.
+- A capability assertion without supporting evidence must not be claimed by the Hub. Evidence means: the check named by the capability has a recorded `pass` in the node's latest v0.2 compatibility report (for `terminal.pty`, an automated check once one exists; until then the capability cannot be claimed by an automated run).
 - **Advertisement is Hub-side derivation, not node announcement (final)**: capabilities are recomputed at the Hub from the latest uploaded compatibility report; there is no advertisement payload in registration or heartbeat, and no `update-capabilities` endpoint (RFC-0009). A capability that loses its evidence disappears without deleting the node.
 - No implicit broadcast: capability queries are per-node; "run on all nodes with capability X" is an explicit Hub-side selection that must be confirmed (target scope, see 0004 and the roadmap constraint).
 
 ## Implementation prerequisites
 
-Evidence-first is a hard rule for implementation: capabilities such as `terminal.pty` and `agents.run` must never be advertised without a corresponding passing runtime check in the node's compatibility evidence. Until automated checks exist for a capability, that capability cannot be claimed by an automated run.
+Evidence-first is a hard rule for implementation: capabilities such as `terminal.pty` and `agents.run` must never be claimed without a corresponding passing runtime check in the node's compatibility evidence. Until automated checks exist for a capability, that capability cannot be claimed by an automated run.
 
 ## Upgrade-guard integration
 
