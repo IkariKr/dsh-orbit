@@ -1,6 +1,6 @@
-# RFC 0004: Node health model
+# RFC 0004: Node health model (decided; synced 2026-08-30)
 
-Status: Accepted (2026-08-29) for the v0.3 architecture
+Status: Accepted (2026-08-29) for the v0.3 architecture. **Synced 2026-08-30 to the final 0005–0009 decisions**: `reachable` stays `unknown` without a probe, `authenticated` drops `expired`, capabilities derive from reports, `orbitCompatible` staleness is driven by heartbeat runtime identity, and `registryContact` is a separate dimension.
 Target milestone: 0.3 (node identity and registry)
 Depends on: 0001-node-identity, 0002-node-capabilities, 0003-node-authentication; v0.2.0 compatibility evidence
 
@@ -10,16 +10,17 @@ Depends on: 0001-node-identity, 0002-node-capabilities, 0003-node-authentication
 
 ## Proposal
 
-Node health is a composite record, reported per node and timestamped:
+Node health is a composite record, reported per node and timestamped. The authoritative dimension set, value domains, and deterministic mappings are fixed in **RFC-0009**; this RFC keeps the model rationale and the operator-facing rules.
 
-| Dimension | Values | Source |
+| Dimension | Values (v0.3 final) | Source |
 | --- | --- | --- |
-| `reachable` | boolean + latency observation | Hub transport observation |
-| `authenticated` | boolean + reason when false | registry credential validation (0003) |
-| `dshHealthy` | boolean | node-reported DSH web readiness and long-lived traffic state |
-| `orbitCompatible` | `pass` / `fail` / `stale` / `unknown` | latest v0.2 compatibility report for the node; `stale` when the report predates the current node-reported revision |
-| `capabilities` | the advertised set (0002) with per-capability evidence status | node advertisement |
-| `lastSeen` | timestamp + source (heartbeat, registration, Hub probe) | registry |
+| `registryContact` | `fresh` / `stale` / `lost` / `unknown` | Node→Hub heartbeats only (cadence in RFC-0009) |
+| `reachable` | `unknown` in v0.3 | **no Hub→node probe exists**; never modified by heartbeats; later milestone: `ok` / `unreachable` / `unknown` |
+| `authenticated` | `ok` / `revoked` / `unknown` | registry key verification (0003/0006); no `expired` in v0.3 — no key expiry, revocation/rotation only |
+| `dshHealthy` | `ok` / `degraded` / `unknown` | deterministic mapping from latest report `runtimeReadiness` + `settingsRead` (RFC-0009) |
+| `orbitCompatible` | `pass` / `fail` / `stale` / `unknown` | latest v0.2 compatibility report; `stale` when the report's identity tuple mismatches the heartbeat runtime identity or the report is older than the staleness window (RFC-0009) |
+| `capabilities` | the derived set (0002) with per-capability evidence status | **Hub-side derivation from the latest report only** — no node advertisement (RFC-0009) |
+| `lastSeen` | timestamp + source (heartbeat, report upload) | registry |
 
 Rules:
 
@@ -33,9 +34,13 @@ Rules:
 
 `orbitCompatible` is the v0.2 compatibility report, attached to the stable node ID (0001), surfaced through capabilities (0002), and uploaded over the authenticated registry session (0003). The watcher's classification (supported/unknown) feeds the same field: a node reporting a DSH version classified `unknown` by the upstream watcher shows `orbitCompatible: unknown` with the watcher artifact reference, prompting the documented manual review path rather than a silent pass.
 
-## Unresolved questions
+## Resolved questions (synced 2026-08-30)
 
-- Observation cadence and who initiates (Hub probe vs. node heartbeat) for NAT-restricted nodes ahead of the 0.5 reverse-connection work.
-- Retention and aggregation of health event history.
-- Whether `dshHealthy` should subsume automated long-lived-transport checks once they exist (v0.2 marks them `not_run` today).
-- Alerting policy: which dimension transitions justify notifications.
+- **Observation cadence and who initiates** — CLOSED for v0.3: Node→Hub heartbeat, default 60s (30–300s configurable); `registryContact` thresholds 3 missed beats → `stale`, 24h → `lost` + alert flag. Hub→Node probing (and the 0.5 reverse-connection question) is out of v0.3 (RFC-0009).
+- **Retention and aggregation of health event history** — CLOSED: events retained 90 days with daily rollups after 7 days (RFC-0009).
+- **Whether `dshHealthy` subsumes long-lived-transport checks** — CLOSED: no; the deterministic mapping uses `runtimeReadiness` + `settingsRead` only. Long-lived-transport checks stay `not_run` evidence and do not influence `dshHealthy` in v0.3.
+- **Alerting policy** — DEFERRED: out of v0.3 scope; only the `lost` alert flag is defined. Notification policy is a later milestone.
+
+## Remaining open questions
+
+None for v0.3.

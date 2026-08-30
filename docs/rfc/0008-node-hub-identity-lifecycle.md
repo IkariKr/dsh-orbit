@@ -1,26 +1,27 @@
-# RFC 0008: Per-node Hub service identity lifecycle (decided, rev. 2)
+# RFC 0008: Per-node Hub service identity lifecycle (design, rev. 3)
 
-Status: Accepted (2026-08-30), rev. 2 after architecture review P0/P1 closure. Closes the Hub-to-node authentication direction from RFC-0003. **Design only: activation is deferred to v0.4** (the v0.3 MVP performs no Hub→node execution or routing).
+Status: Accepted (2026-08-30), rev. 3 after architecture review round 2. **Design only: v0.3 generates no Hub→Node key material of any kind.** Provision and activation both occur in v0.4, when Hub→Node flows actually exist. This closes the round-1 conflict between "v0.3 provision / v0.4 activation" and "issuance/activation all in v0.4": the answer is the latter.
 
-## Key direction (fixed)
+## Key direction (fixed, design-time)
 
-- The Hub generates a per-node Ed25519 keypair at enrollment.
+- When the Hub needs to talk to a node, it generates a per-node Ed25519 keypair.
 - The **Hub private key never leaves the Hub**; the node stores only the Hub **public key** for the node.
 - There is no symmetric "verifier at the node" problem: verification uses the public key the node holds.
 
-## Identity object
+## Identity object (not created in v0.3)
 
-- One Hub identity per node: an Ed25519 keypair, `hub_ik_<keyId>` label, bound to the node ID.
-- All hub→node requests are signed with the node's Hub private key over the ORBIT-MACHINE-V1 signing string (RFC-0006), with the hub keyId carried in the header; the node verifies with its stored Hub public key.
+- In v0.4: one Hub identity per node — an Ed25519 keypair, `hub_ik_<keyId>` label, bound to the node ID.
+- All hub→node requests are signed with the node's Hub private key over the ORBIT-MACHINE-V1 signing string (RFC-0006), with the hub keyId carried in the header; the node verifies with its stored Hub public key. Encodings follow the RFC-0006 wire contract.
 - The identity is unusable against any other node (node ID is part of the signing string).
+- v0.3 consequence: the Hub holds no Hub→Node private keys, the node stores no Hub public key, and no lifecycle row exists for this direction.
 
-## Lifecycle states
+## Lifecycle states (v0.4 flow; zero instances exist in v0.3)
 
-`provisioned → active → rotating → revoked` (terminal). v0.3 provisions and persists the identity material; it becomes `active` only in v0.4 when Hub→node flows exist.
+`provisioned → active → rotating → revoked` (terminal).
 
-- **provisioned**: created at enrollment; stored Hub-side (private) and node-side (public); no traffic.
-- **active (v0.4)**: the Hub first uses it, and the node's first successful verification confirms activation.
-- **rotating**: new Hub keypair issued with an overlap window (default 14 days, operator-configurable 1–30 days); both keys valid during the overlap; the old revoked at its end. The new public key is delivered to the node in an authenticated message from the Hub (signed by the Hub with the OLD key, or fetched by the node with a Hub-signed handover).
+- **provisioned**: keypair generated Hub-side; the node receives the public key through an authenticated handover (delivered in a Hub-signed message, or fetched by the node via a Hub-signed handover).
+- **active**: first Hub→Node use; the node's first successful verification confirms activation.
+- **rotating**: new Hub keypair issued with an overlap window (default 14 days, operator-configurable 1–30 days); both keys valid during the overlap; the old revoked at its end.
 - **revoked**: terminal on node deletion (immediately) or failed rotation (operator action).
 
 ## Rules
@@ -35,4 +36,9 @@ Status: Accepted (2026-08-30), rev. 2 after architecture review P0/P1 closure. C
 - A node rejects Hub requests signed with another node's identity.
 - After node deletion, the Hub identity fails immediately (negative test).
 - Rotation with overlap: both keys valid in-window; the old key fails after the window.
-- These are part of the machine API live smoke matrix methodology (RFC-0006); in v0.3 the checks are simulation-level because no Hub→node flow exists yet.
+- In v0.3 none of these can be exercised against live material (none exists); verification is at design level only, and the tests belong to the v0.4 activation suite. This is the intended state: **nothing to provision, nothing to activate, no partial lifetime.**
+
+## Change note (rev. 2 → rev. 3)
+
+- Removed "v0.3 provisions and persists the identity material; it becomes active only in v0.4".
+- Fixed: v0.3 generates nothing Hub-side; RFC-0005 D3 now matches this.

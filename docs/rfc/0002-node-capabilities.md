@@ -1,6 +1,6 @@
-# RFC 0002: Node capability advertisement
+# RFC 0002: Node capability advertisement (decided; synced 2026-08-30)
 
-Status: Accepted (2026-08-29) for the v0.3 architecture
+Status: Accepted (2026-08-29) for the v0.3 architecture. **Synced 2026-08-30 to the final 0005–0009 decisions**: this RFC establishes the capability namespaces and the evidence-first rule; advertisement mechanics are superseded by RFC-0009 (Hub-side derivation, no advertisement transport).
 Target milestone: 0.3 (node identity and registry)
 Depends on: 0001-node-identity; v0.2.0 compatibility evidence
 
@@ -26,7 +26,7 @@ Rules:
 - A capability entry is `{ name, version, evidence }`. `version` is the capability contract version, not the DSH version.
 - **Unknown capabilities are ignored, never fatal**: a Hub that does not know a capability renders nothing for it; a Hub that knows it but the node does not advertise disables the corresponding UI.
 - A capability assertion without supporting evidence must not be advertised. Evidence means: the check named by the capability has a recorded `pass` in the node's latest v0.2 compatibility report (for `terminal.pty`, an automated check once one exists; until then the capability cannot be claimed by an automated run).
-- Capabilities are re-announced on every registration and heartbeat; a capability that disappears is removed without deleting the node.
+- **Advertisement is Hub-side derivation, not node announcement (final)**: capabilities are recomputed at the Hub from the latest uploaded compatibility report; there is no advertisement payload in registration or heartbeat, and no `update-capabilities` endpoint (RFC-0009). A capability that loses its evidence disappears without deleting the node.
 - No implicit broadcast: capability queries are per-node; "run on all nodes with capability X" is an explicit Hub-side selection that must be confirmed (target scope, see 0004 and the roadmap constraint).
 
 ## Implementation prerequisites
@@ -37,9 +37,13 @@ Evidence-first is a hard rule for implementation: capabilities such as `terminal
 
 Capabilities consume v0.2 compatibility reports directly: the report's named checks map onto capability namespaces (`settingsRead`/`settingsNoopWrite`/`authorizationSmoke` → `settings.remote`, `sessionResume` → `sessions.resume`, `webPluginRoutes`/`runtimeReadiness` → baseline web capability). A node upgrade produces a fresh report; capabilities are recomputed from it. The Hub therefore has exactly one compatibility model — the report — instead of a parallel version-to-feature table.
 
-## Unresolved questions
+## Resolved questions (synced 2026-08-30)
 
-- The exact capability contract versions and their stability promises.
-- Whether capability advertisement needs a transport (registration payload vs. heartbeat) before the 0.4 endpoint selector exists.
-- How partially-passing evidence (for example `settings.remote` present but a future snapshot check failing) reduces capability granularity.
-- Localization of capability names in the Hub UI.
+- **Exact capability contract versions and stability promises** — CLOSED: capability contract v1 (`{ name, version: 1 }`) with the evidence table fixed in RFC-0009.
+- **Capability advertisement transport** — CLOSED: no advertisement transport exists; capabilities are derived Hub-side from the latest uploaded compatibility report (RFC-0009). The pre-0.4 "registration payload vs. heartbeat" question is moot.
+- **Partially-passing evidence granularity** — CLOSED: evidence mapping is all-required-checks-pass per capability name (RFC-0009); a failing check withholds the capability (no granular partial claims in v0.3).
+- **Localization of capability names in the Hub UI** — CLOSED: out of v0.3 scope; capability names are stable ASCII identifiers, UI labels are a display concern.
+
+## Remaining open questions
+
+None for v0.3. Capability granularity refinement and any additional namespaces belong to later milestones.
