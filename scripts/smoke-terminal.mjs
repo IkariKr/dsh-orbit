@@ -43,7 +43,6 @@ function basicAuth(credentials) {
 
 function upgradeHeaders() {
   return {
-    "content-type": "application/json",
     connection: "upgrade",
     upgrade: "websocket",
     "sec-websocket-version": "13",
@@ -60,7 +59,7 @@ function probe(headers) {
     const transport = target.protocol === "http:" ? http : https;
     const request = transport.request(
       target,
-      { method: "POST", headers: { ...upgradeHeaders(), ...headers } },
+      { method: "GET", headers: { ...upgradeHeaders(), ...headers } },
       (response) => {
         let body = "";
         response.on("data", (chunk) => {
