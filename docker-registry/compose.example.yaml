@@ -1,0 +1,54 @@
+# v0.3 Registry deployment example (SOP Stage 6).
+#
+# Topology: Caddy terminates TLS at the edge; the Hub listens ONLY on
+# the host loopback (the hub refuses non-loopback binds by design).
+#   - the operator browser path goes through Caddy: TLS -> gateway
+#     authentication -> assertion injection (X-DSH-Authenticated-Proxy)
+#     and operator principal injection (X-DSH-Operator-Id);
+#   - the machine path (nodes) stays on the private loopback listener.
+#
+# Copy this file to docker-registry/compose.example.yaml (or adapt your
+# own) and fill .env: GATEWAY_SECRET and the operator principal. The
+# gateway secret is injected by Caddy AFTER its own authentication and
+# is never exposed to browsers.
+
+services:
+  registry-hub:
+    image: node:22
+    command:
+      - node
+      - /opt/dsh-orbit/bin/dsh-orbit-hub.mjs
+    environment:
+      DSH_ORBIT_HUB_DB: /data/orbit/registry.db
+      DSH_ORBIT_HUB_PORT: "5445"
+      # Loopback-only by default; the hub refuses non-loopback binds.
+      DSH_ORBIT_HUB_LISTEN: "127.0.0.1"
+      DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:?set in .env}
+      DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: ${DSH_ORBIT_HUB_OPERATOR_PRINCIPAL:-operator}
+      DSH_ORBIT_HUB_TRUSTED_SCHEME: https
+    volumes:
+      - ../data/orbit:/data/orbit:rw
+    ports:
+      # Private backend listener only: publishes to the loopback, the
+      # registry machine surface never appears on a public interface.
+      - "127.0.0.1:${DSH_ORBIT_HUB_PORT:-5445}:5445"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"http.get('http://127.0.0.1:5445/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # The registry does not route DSH traffic: the existing DSH deployment
+  # (see docker/compose.example.yaml) is unchanged. When multiple DSH
+  # nodes enroll, each node instance runs `dsh-orbit-node run` against
+  # THIS hub's private URL and keeps its own state file.

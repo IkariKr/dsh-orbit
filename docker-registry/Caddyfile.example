@@ -1,0 +1,32 @@
+# v0.3 Registry gateway example (SOP Stage 6).
+#
+# Caddy sits in front of the operator UI + management API. Two trust
+# properties that must hold:
+#   1. The gateway authenticates the operator FIRST and only then
+#      injects the hub's assertion + principal;
+#   2. anything a client could spoof is stripped before injection.
+
+{
+    # replace with your domain and certificate management
+    email admin@example.invalid
+}
+
+https://registry.example.invalid {
+    # The hub's browser trust compares Origin + Sec-Fetch-Site against
+    # the trusted external scheme, so the request forwarded to the hub
+    # is plain http on loopback.
+    reverse_proxy 127.0.0.1:5445 {
+        # gateway-held internal assertion, injected AFTER authentication:
+        header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
+        # opaque operator principal, injected by the gateway only:
+        header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
+        # strip anything a caller could forge:
+        header_up -Origin
+        header_up -Sec-Fetch-Site
+        header_up -Cookie
+    }
+}
+
+# The machine path (node clients) is NOT exposed here: nodes talk to
+# the hub over the private loopback listener only (or a private
+# network), where TLS is terminated at an operator-controlled boundary.
