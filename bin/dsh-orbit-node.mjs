@@ -2,19 +2,20 @@
 // v0.3 Node Registry Client (SOP Stage 2-4).
 //
 // Commands:
-//   (default)     run the heartbeat/report loop
+//   (default)     run the heartbeat/report loop (daemon; keeps alive)
 //   enroll        one-time enrollment with an operator token
-//   status        print persisted + runtime state
-//   doctor        integrity checks + live hub probe (never mutates)
-//   rotate        initiate credential rotation (signed with the old key)
 //   reenroll      explicit re-enrollment (revoked node, operator token)
+//   rotate        initiate credential rotation (signed with the old key)
+//   status        print persisted + runtime state
+//   doctor        integrity checks + non-mutating reachability probe
 //
 // Configuration (environment):
 //   DSH_ORBIT_NODE_STATE              state file path (default ./node-state.json)
-//   DSH_ORBIT_HUB_URL                 hub base URL (required)
+//   DSH_ORBIT_HUB_URL                 hub base URL (required; must match the
+//                                     persisted binding once enrolled)
 //   DSH_ORBIT_ENROLL_TOKEN            one-time enrollment token (enroll only)
 //   DSH_ORBIT_REENROLL_TOKEN          tombstone-bound re-enrollment token
-//   DSH_ORBIT_NODE_HEARTBEAT_SECONDS  cadence 30-300 (default 60)
+//   DSH_ORBIT_NODE_HEARTBEAT_SECONDS  cadence 30-300 (default 60; others fail closed)
 //   DSH_ORBIT_NODE_ORBIT_VERSION      orbit version reported to the hub
 //   DSH_ORBIT_NODE_ORBIT_REVISION     orbit revision reported to the hub
 //   DSH_ORBIT_NODE_DSH_VERSION        DSH version reported to the hub
@@ -22,7 +23,7 @@
 
 import process from "node:process";
 import { NodeClient } from "../src/node/client.mjs";
-import { loadNodeStore, loadNodeStoreAsync } from "../src/node/store.mjs";
+import { assertStateFilePermissions, loadNodeStore, loadNodeStoreAsync } from "../src/node/store.mjs";
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -33,7 +34,7 @@ function requireEnv(name) {
   return value;
 }
 
-function buildClient({ storePath }) {
+function buildClient({ storePath, forbidEnrollmentBinding = false }) {
   const hubBaseUrl = requireEnv("DSH_ORBIT_HUB_URL");
   const availability = {
     orbitVersion: process.env.DSH_ORBIT_NODE_ORBIT_VERSION ?? "0.3.0",
@@ -42,22 +43,33 @@ function buildClient({ storePath }) {
     compatibilityProfile: process.env.DSH_ORBIT_NODE_DSH_PROFILE ?? null,
   };
   const store = loadNodeStore(storePath);
-  const client = new NodeClient({
+  // An enrolled store's persisted binding is part of the identity: a
+  // runtime URL mismatch fails closed (P1-06). The state file holds the
+  // private key: over-permissive POSIX permissions fail closed (P1-10).
+  if (store.state !== "unenrolled") {
+    assertStateFilePermissions(storePath);
+  }
+  return new NodeClient({
     store,
     storePath,
     hubBaseUrl,
     runtimeIdentity: () => availability,
     heartbeatCadenceSeconds: Number.parseInt(process.env.DSH_ORBIT_NODE_HEARTBEAT_SECONDS ?? "60", 10),
   });
-  return client;
 }
 
 const [command = "run"] = process.argv.slice(2);
 const storePath = process.env.DSH_ORBIT_NODE_STATE ?? "./node-state.json";
+let client;
+try {
+  client = buildClient({ storePath });
+} catch (error) {
+  console.error(`dsh-orbit-node: ${error.message}`);
+  process.exit(2);
+}
 
 switch (command) {
   case "enroll": {
-    const client = buildClient({ storePath });
     const token = requireEnv("DSH_ORBIT_ENROLL_TOKEN");
     client
       .enroll({ token })
@@ -71,7 +83,6 @@ switch (command) {
     break;
   }
   case "reenroll": {
-    const client = buildClient({ storePath });
     const token = requireEnv("DSH_ORBIT_REENROLL_TOKEN");
     client
       .reenroll({ token })
@@ -85,7 +96,6 @@ switch (command) {
     break;
   }
   case "rotate": {
-    const client = buildClient({ storePath });
     client
       .rotateCredential()
       .then((result) => {
@@ -98,13 +108,10 @@ switch (command) {
     break;
   }
   case "status": {
-    const client = buildClient({ storePath });
     console.log(JSON.stringify(client.status(), null, 2));
     break;
   }
   case "doctor": {
-    // Doctor loads the store fresh and never writes state.
-    const client = buildClient({ storePath });
     client
       .doctor()
       .then((report) => {
@@ -120,13 +127,15 @@ switch (command) {
   }
   case "run":
   default: {
-    const client = buildClient({ storePath });
+    // The main heartbeat loop timer is REF'd: the daemon must stay alive
+    // on its own (P1-04). Only the shutdown watchdog may unref.
+    let mainTimer = null;
     const cadenceMs = client.heartbeatCadenceSeconds * 1000;
     loadNodeStoreAsync(storePath)
       .then(async (store) => {
         client.store = store;
         await client.recoverAfterRestart();
-        console.log(`dsh-orbit-node: running against ${client.hubBaseUrl} (state ${client.status().state})`);
+        console.log(`dsh-orbit-node: running against ${client.status().hubBaseUrl} (cadence ${client.heartbeatCadenceSeconds}s, state ${client.status().state})`);
         const loop = async () => {
           try {
             const outcome = await client.tick();
@@ -136,7 +145,8 @@ switch (command) {
           } catch (error) {
             process.stderr.write(`dsh-orbit-node: tick failed: ${error.message}\n`);
           }
-          setTimeout(loop, Math.min(cadenceMs, 1000)).unref();
+          // Keep the process alive: no unref() on the main scheduler.
+          mainTimer = setTimeout(loop, Math.min(cadenceMs, 1000));
         };
         loop();
       })
@@ -144,5 +154,16 @@ switch (command) {
         console.error(`dsh-orbit-node: cannot load state: ${error.message}`);
         process.exit(1);
       });
+
+    let shuttingDown = false;
+    const shutdown = (signal) => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      console.log(`dsh-orbit-node: ${signal}, shutting down`);
+      if (mainTimer) clearTimeout(mainTimer);
+      setTimeout(() => process.exit(0), 200).unref();
+    };
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
   }
 }

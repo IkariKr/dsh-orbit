@@ -57,7 +57,18 @@ async function withHub(t, options = {}) {
 
 function makeClient({ statePath, baseUrl, now, runtimeIdentity = runtime }) {
   return new NodeClient({
-    store: { schema: 1, nodeId: null, publicKeyHex: null, privateKeyHex: null, hubBaseUrl: baseUrl, state: "unenrolled", rotation: null, updatedAt: null },
+    store: {
+      schema: 1,
+      nodeId: null,
+      publicKeyHex: null,
+      privateKeyHex: null,
+      hubBaseUrl: null, // unenrolled stores carry no binding yet (invariant)
+      state: "unenrolled",
+      rotation: null,
+      pendingEnrollment: null,
+      pendingReenrollment: null,
+      updatedAt: null,
+    },
     storePath: statePath,
     hubBaseUrl: baseUrl,
     runtimeIdentity,
@@ -272,9 +283,12 @@ test("doctor reports integrity classes and never mutates state", async (t) => {
   const after = await loadNodeStoreAsync(statePath);
   assert.equal(after.updatedAt, before.updatedAt); // doctor wrote nothing
 
-  // After a Hub delete the probe reports the revocation.
+  // Doctor is a reachability probe only: even with the node deleted
+  // Hub-side the probe stays reachable, reports no revocation and
+  // never persists REVOKED — revocation is detected by the heartbeat
+  // path, never by diagnostics (P1-09).
   registry.deleteNode({ actor: "operator", nodeId: client.store.nodeId, requestId: "ef".repeat(16), reason: "retired" });
   const revokedDoctor = await client.doctor();
-  assert.ok(revokedDoctor.findings.some((finding) => finding.check === "hub-probe" && finding.severity === "fail" && finding.detail.includes("revoked")));
+  assert.ok(revokedDoctor.findings.some((finding) => finding.check === "hub-probe" && finding.severity === "ok"));
   assert.equal((await loadNodeStoreAsync(statePath)).state, "active"); // probe did not persist revoked
 });

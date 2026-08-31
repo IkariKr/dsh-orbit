@@ -18,11 +18,14 @@ export class HeartbeatBackoff {
     this.lastDelayMs = 0;
   }
 
-  // Records a failure and returns the delay for the NEXT attempt.
+  // Records a failure and returns the delay for the NEXT attempt. The
+  // jittered delay is capped at maxMs strictly: the cap is on the
+  // observed delay, not on the pre-jitter base (Gate A P2-01).
   recordFailure() {
     const base = Math.min(this.initialMs * BACKOFF_FACTOR ** this.attempt, this.maxMs);
     const jitter = (this.random() * 2 - 1) * BACKOFF_JITTER_RATIO * base;
-    const delay = Math.max(0, Math.round(base + jitter));
+    const jittered = base + jitter;
+    const delay = Math.min(this.maxMs, Math.max(0, Math.round(jittered)));
     this.attempt += 1;
     this.lastDelayMs = delay;
     this.nextAttemptAt = this.now() + delay;
