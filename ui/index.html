@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DSH Orbit Registry</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <h1>DSH Orbit Registry</h1>
+    <div id="session-status" class="session-status">connecting&hellip;</div>
+  </header>
+
+  <nav>
+    <button id="nav-nodes" class="nav-button active" type="button">Nodes</button>
+    <button id="nav-tokens" class="nav-button" type="button">Tokens</button>
+    <button id="nav-logout" class="nav-button" type="button">Logout</button>
+  </nav>
+
+  <main id="main">
+    <div id="state-banner"></div>
+    <section id="nodes-view"></section>
+    <section id="tokens-view" hidden></section>
+  </main>
+
+  <dialog id="confirm-dialog">
+    <p id="confirm-dialog-message"></p>
+    <label>Retirement reason <input id="confirm-reason" type="text" required maxlength="200"></label>
+    <div class="dialog-actions">
+      <button id="confirm-cancel" type="button">Cancel</button>
+      <button id="confirm-ok" type="button">Delete node</button>
+    </div>
+  </dialog>
+
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>

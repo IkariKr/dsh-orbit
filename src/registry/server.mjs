@@ -5,6 +5,7 @@
 // protocol decisions stay in registry.mjs.
 
 import { createServer } from "node:http";
+import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
 import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
@@ -145,6 +146,18 @@ export function createHubServer({ registry, options = {} }) {
   }
   const limiter = new SlidingWindowLimiter();
 
+  // Stage 5: the operator UI shell (pure static assets; the API stays
+  // fully behind the RFC-0007 protections). Public by design — these
+  // files hold no data and no secrets.
+  const UI_ROOT = new URL("../../ui/", import.meta.url);
+  const UI_ASSETS = new Map([
+    ["/", ["index.html", "text/html; charset=utf-8"]],
+    ["/index.html", ["index.html", "text/html; charset=utf-8"]],
+    ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
+    ["/view-model.mjs", ["view-model.mjs", "text/javascript; charset=utf-8"]],
+    ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
+  ]);
+
   const server = createServer((request, response) => {
     // Query strings are excluded from the v0.3 protocol by construction.
     let url;
@@ -157,6 +170,17 @@ export function createHubServer({ registry, options = {} }) {
       return sendJson(response, 400, { error: { code: "query-not-allowed", message: "query strings are not part of the registry protocol" } });
     }
     const path = url.pathname;
+
+    if (request.method === "GET" && UI_ASSETS.has(path)) {
+      const [fileName, contentType] = UI_ASSETS.get(path);
+      readFile(new URL(fileName, UI_ROOT))
+        .then((content) => {
+          response.writeHead(200, { "content-type": contentType, "content-length": content.length });
+          response.end(content);
+        })
+        .catch(() => sendJson(response, 404, { error: { code: "not-found", message: "UI asset missing" } }));
+      return;
+    }
 
     if (MACHINE_ROUTES.has(path)) {
       handleMachineRequest(request, response, path).catch((error) => sendError(response, error));
