@@ -908,14 +908,24 @@ export class Registry {
       }
 
       // Daily rollups for events older than 7 days (RFC-0009): each
-      // (node, day, dimension) group becomes one summary row. Summary
-      // rows are excluded from grouping and inserted only when absent,
-      // so repeated maintenance runs are strictly idempotent
-      // (round-2 P1).
+      // (node, day, dimension) group becomes one summary row. The
+      // summary's final value is the LAST event of that day and
+      // dimension by (at DESC, id DESC) — never a string-max of values
+      // (round-3 P2). Summary rows are excluded from grouping and
+      // inserted only when absent, so repeated maintenance runs are
+      // strictly idempotent.
       const rollupCutoff = cutoff(EVENT_ROLLUP_AFTER_MS);
       const groups = this.db
         .prepare(
-          "SELECT node_id, substr(at, 1, 10) AS day, dimension, COUNT(*) AS count, MAX(to_value) AS final_value FROM events WHERE at < ? AND dimension != 'rollup' GROUP BY node_id, day, dimension",
+          `SELECT node_id, substr(at, 1, 10) AS day, dimension, COUNT(*) AS count,
+                  (SELECT e2.to_value FROM events e2
+                    WHERE e2.node_id = e1.node_id
+                      AND e2.dimension = e1.dimension
+                      AND substr(e2.at, 1, 10) = substr(e1.at, 1, 10)
+                    ORDER BY e2.at DESC, e2.id DESC LIMIT 1) AS final_value
+             FROM events e1
+            WHERE at < ? AND dimension != 'rollup'
+            GROUP BY node_id, substr(at, 1, 10), dimension`,
         )
         .all(rollupCutoff);
       for (const group of groups) {

@@ -10,14 +10,19 @@ export const SCHEMA_VERSION = 3;
 
 // v1 -> v2: nodes gains the operator alert-flag column (RFC-0009
 // "lost + operator alert flag").
-// v2 -> v3: nodes gains last_heartbeat_at (registryContact is strictly
-// heartbeat-driven; report uploads only touch generic lastSeen);
-// browser_sessions gains expiry_audited_at (one-time expiry audit).
+// v2 -> v3: nodes gains last_heartbeat_at and browser_sessions gains
+// expiry_audited_at. State migration (P1): contact times that the old
+// schema can prove came from heartbeats are backfilled so startup
+// maintenance can age them correctly; every other old contact claim
+// (old report uploads wrongly refreshed registryContact) fails closed
+// to registryContact = unknown.
 const upgradeSteps = {
   1: ["ALTER TABLE nodes ADD COLUMN alert_flags TEXT NOT NULL DEFAULT '[]'"],
   2: [
     "ALTER TABLE nodes ADD COLUMN last_heartbeat_at TEXT",
     "ALTER TABLE browser_sessions ADD COLUMN expiry_audited_at TEXT",
+    "UPDATE nodes SET last_heartbeat_at = last_seen WHERE last_seen_source = 'heartbeat' AND last_seen IS NOT NULL",
+    "UPDATE nodes SET registry_contact = 'unknown' WHERE last_seen IS NULL OR last_seen_source IS NULL OR last_seen_source <> 'heartbeat'",
   ],
 };
 

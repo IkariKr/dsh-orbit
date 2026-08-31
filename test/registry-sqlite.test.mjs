@@ -127,3 +127,49 @@ test("a v2 database migrates in place to the current schema", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("v2->v3 state migration: heartbeat-sourced contact backfills, other old claims fail closed to unknown", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-registry-v2state-"));
+  try {
+    const path = join(dir, "registry.db");
+    const db = openRegistryDatabase(path);
+    // Craft a REAL v2 database with the old (pre-v3) contact semantics:
+    // both nodes claim fresh, one via heartbeat traffic, one via report
+    // uploads only.
+    db.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
+    db.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
+    db.exec("PRAGMA user_version = 2");
+    db.prepare(
+      "INSERT INTO nodes (node_id, state, minted_at, authenticated, registry_contact, last_seen, last_seen_source) VALUES ('node_beat', 'active', 't', 'ok', 'fresh', ?, 'heartbeat')",
+    ).run("2026-08-01T00:00:00.000Z");
+    db.prepare(
+      "INSERT INTO nodes (node_id, state, minted_at, authenticated, registry_contact, last_seen, last_seen_source) VALUES ('node_report', 'active', 't', 'ok', 'fresh', ?, 'report-upload')",
+    ).run("2026-08-30T00:00:00.000Z");
+    db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    db.close();
+
+    const upgraded = openRegistryDatabase(path);
+    assert.equal(upgraded.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
+    const beat = upgraded.prepare("SELECT last_heartbeat_at, registry_contact FROM nodes WHERE node_id = 'node_beat'").get();
+    assert.equal(beat.last_heartbeat_at, "2026-08-01T00:00:00.000Z");
+    assert.equal(beat.registry_contact, "fresh");
+    const report = upgraded.prepare("SELECT last_heartbeat_at, registry_contact FROM nodes WHERE node_id = 'node_report'").get();
+    assert.equal(report.last_heartbeat_at, null);
+    assert.equal(report.registry_contact, "unknown");
+
+    // Startup-style immediate maintenance on 2026-08-31: the backfilled
+    // heartbeat node ages to lost; the fail-closed node stays unknown.
+    const { Registry } = await import("../src/registry/registry.mjs");
+    const clock = { now: new Date("2026-08-31T00:00:00.000Z") };
+    const registry = new Registry({ db: upgraded, now: () => clock.now });
+    registry.maintenance();
+    const aged = registry.getNode("node_beat");
+    assert.equal(aged.health.registryContact, "lost");
+    assert.deepEqual(aged.health.alertFlags, ["contact-lost"]);
+    assert.equal(aged.health.reachable, "unknown");
+    assert.equal(registry.getNode("node_report").health.registryContact, "unknown");
+    registry.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

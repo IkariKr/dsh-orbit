@@ -65,7 +65,12 @@ Other environment:
   `latestReport.compatibility`. Every upload, including identical re-uploads,
   writes a `report` event.
 - **Event rollups** are strictly idempotent: summary rows are excluded from
-  further rollups and inserted only when absent.
+  further rollups and inserted only when absent; each summary's final value is
+  the last event of that day/dimension by `(at DESC, id DESC)`, never a
+  string-max of values.
+- **Schema v2→v3 migration**: heartbeat-sourced `last_seen` backfills
+  `last_heartbeat_at` (so startup maintenance ages old nodes correctly);
+  every other old contact claim fails closed to `registryContact = unknown`.
 - **Session expiry** is audited exactly once per session (absolute TTL or
   idle expiry), in the same maintenance transaction.
 - **Runtime identity authority**: heartbeats own `nodes` current runtime

@@ -377,3 +377,43 @@ test("session expiry is audited exactly once, in the maintenance transaction", a
   registry.maintenance();
   assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'session.expired'").get().n, 2);
 });
+
+test("rollup final is the last event by (at DESC, id DESC), never a string-max of values", async (t) => {
+  const { registry, server, clock } = await withClockServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const insert = (at, dimension, fromValue, toValue, source = "maintenance") =>
+    registry.db
+      .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(node.nodeId, at, dimension, fromValue, toValue, source);
+
+  // Day 1: fresh -> stale at 10:00, then stale -> fresh at 20:00. The
+  // day's END state is fresh; a string-max would wrongly report "stale".
+  insert("2026-08-01T10:00:00.000Z", "registry_contact", "fresh", "stale");
+  insert("2026-08-01T20:00:00.000Z", "registry_contact", "stale", "fresh");
+
+  // Day 2: report events with numeric-id values "9" then "10" — the
+  // lexical max is "9", the last event by (at DESC, id DESC) is "10".
+  insert("2026-08-02T10:00:00.000Z", "report", "uploaded", "9", "report-upload");
+  insert("2026-08-02T10:00:00.000Z", "report", "uploaded", "10", "report-upload");
+
+  clock.now = new Date("2026-08-30T00:00:00.000Z");
+  registry.maintenance();
+
+  const contactSummary = registry.db
+    .prepare("SELECT from_value, to_value FROM events WHERE node_id = ? AND dimension = 'rollup' AND from_value = 'registry_contact'")
+    .get(node.nodeId);
+  assert.equal(JSON.parse(contactSummary.to_value).final, "fresh");
+  assert.equal(JSON.parse(contactSummary.to_value).count, 2);
+  const reportSummary = registry.db
+    .prepare("SELECT from_value, to_value FROM events WHERE node_id = ? AND dimension = 'rollup' AND from_value = 'report'")
+    .get(node.nodeId);
+  assert.equal(JSON.parse(reportSummary.to_value).final, "10");
+  assert.equal(JSON.parse(reportSummary.to_value).count, 2);
+
+  // Idempotency is preserved with the corrected final.
+  registry.maintenance();
+  const again = registry.db
+    .prepare("SELECT to_value FROM events WHERE node_id = ? AND dimension = 'rollup' AND from_value = 'registry_contact'")
+    .get(node.nodeId);
+  assert.deepEqual(JSON.parse(again.to_value), JSON.parse(contactSummary.to_value));
+});
