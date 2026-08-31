@@ -1,7 +1,9 @@
-// v0.3 operator UI application (SOP Stage 5). Talks ONLY through the
-// RFC-0007 browser management API: session bootstrap, CSRF header,
-// explicit destructive confirmation (requestId), token plaintext shown
-// exactly once. The UI never re-derives health or re-interprets
+// v0.3 operator UI application (SOP Stage 5 + Gate B closure). Talks
+// ONLY through the RFC-0007 browser management API: session bootstrap,
+// CSRF header, explicit destructive confirmation (requestId),
+// token plaintext shown exactly once and retained until the user
+// leaves/closes the view, tombstoned nodes offer the re-enrollment
+// token mint. The UI never re-derives health or re-interprets
 // destructive semantics.
 
 import {
@@ -71,7 +73,7 @@ export function createRegistryUi({ document, fetchImpl }) {
     } else if (state.kind === "empty-nodes") {
       banner.innerHTML = `<div class="banner empty">no nodes registered yet</div>`;
     } else if (state.kind === "empty-tokens") {
-      banner.innerHTML = `<div class="banner empty">no enrollment tokens yet</div>`;
+      banner.innerHTML = `<div class="banner empty">no enrollment tokens yet — mint the first one below</div>`;
     } else if (state.kind === "session-required") {
       banner.innerHTML = `<div class="banner">session required; retrying&hellip;</div>`;
     } else if (state.kind === "bootstrap-error") {
@@ -112,7 +114,7 @@ export function createRegistryUi({ document, fetchImpl }) {
       .join("")}</div>`;
   }
 
-  function renderNodeRow(node) {
+  function renderCapabilities(node) {
     const capabilities = node.health.capabilities
       .map((name) => `<span class="capability-chip">${escapeHtml(name)}</span>`)
       .join(" ");
@@ -122,34 +124,45 @@ export function createRegistryUi({ document, fetchImpl }) {
             .map((name) => escapeHtml(name))
             .join(", ")}</div>`
         : "";
+    return `${capabilities}${evidence}`;
+  }
+
+  function renderNodeRow(node) {
     const alerts = node.health.alertFlags.map((flag) => `<span class="alert-flag">alert: ${escapeHtml(flag)}</span>`).join(" ");
-    const actions =
-      node.state === "active"
-        ? `<button class="danger" data-delete-id="${escapeHtml(node.nodeId)}">delete</button>`
-        : "";
+    let actions = "";
+    if (node.state === "active") {
+      actions = `<button class="danger" data-delete-id="${escapeHtml(node.nodeId)}">delete</button>`;
+    } else if (node.state === "tombstoned") {
+      actions = `<button class="primary" data-reenroll-id="${escapeHtml(node.nodeId)}">mint re-enrollment token</button>`;
+    }
     return `<div class="panel node-row">
       <div>
         <div class="node-id">${escapeHtml(node.nodeId)}</div>
-        <div class="node-meta">runtime ${escapeHtml(node.runtimeIdentity.dshVersion ?? "-")} rev ${escapeHtml(node.runtimeIdentity.orbitRevision ?? "-")} · lastSeen ${escapeHtml(node.health.lastSeen ?? "never")} (${escapeHtml(node.health.lastSeenSource ?? "-")})</div>
+        <div class="node-meta">runtime ${escapeHtml(node.runtimeIdentity.dshVersion ?? "-")} rev ${escapeHtml(node.runtimeIdentity.orbitRevision ?? "-")} · lastSeen ${escapeHtml(node.health.lastSeen ?? "never")} (${escapeHtml(node.health.lastSeenSource ?? "-")}) · lastHeartbeat ${escapeHtml(node.health.lastHeartbeatAt ?? "never")}</div>
         ${alerts}
-        ${evidence}
       </div>
       <div>
         ${renderBadges(node)}
-        <div class="node-meta" style="margin-top:8px">${capabilities}</div>
+        <div class="node-meta" style="margin-top:8px">${renderCapabilities(node)}</div>
         ${actions}
       </div>
     </div>`;
   }
 
   function renderNodes(view) {
-    if (view.kind !== "nodes") return;
-    $("nodes-view").innerHTML = `<div class="panel">${view.rows.map(renderNodeRow).join("")}</div>`;
+    const list = $("nodes-list");
+    if (view.kind !== "nodes" || view.rows.length === 0) {
+      list.innerHTML = `<div class="panel"><div class="banner empty">no nodes registered yet</div></div>`;
+      return;
+    }
+    list.innerHTML = view.rows.map(renderNodeRow).join("");
   }
 
-  function renderTokens(view) {
-    if (view.kind !== "tokens") return;
-    const rows = view.rows
+  function renderTokenRows(rows) {
+    if (rows.length === 0) {
+      return `<tr><td colspan="7"><div class="banner empty">no enrollment tokens yet — mint the first one above</div></td></tr>`;
+    }
+    return rows
       .map(
         (token) => `<tr>
           <td>${escapeHtml(token.tokenId)}</td>
@@ -162,12 +175,13 @@ export function createRegistryUi({ document, fetchImpl }) {
         </tr>`,
       )
       .join("");
-    $("tokens-view").innerHTML = `<div class="panel">
-      <button class="primary" id="mint-token">Mint enrollment token</button>
-      <div id="mint-result"></div>
-      <table><thead><tr><th>tokenId</th><th>purpose</th><th>bound node</th><th>status</th><th>created</th><th>expires</th><th>consumed</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-    </div>`;
+  }
+
+  // The mint action and its result live OUTSIDE the re-rendered table:
+  // a list refresh NEVER wipes the plaintext-once block (Gate B).
+  function renderTokens(view) {
+    const table = $("token-table-body");
+    table.innerHTML = renderTokenRows(view.kind === "tokens" ? view.rows : []);
   }
 
   function renderDetail(node) {
@@ -191,13 +205,15 @@ export function createRegistryUi({ document, fetchImpl }) {
                 `<div><span>${escapeHtml(event.at ?? "-")}</span><span class="dim">${escapeHtml(event.dimension ?? "-")}</span><span>${escapeHtml(event.from ?? "")} → ${escapeHtml(event.to ?? "")} (${escapeHtml(event.source ?? "")})</span></div>`,
             )
             .join("")}</div>`;
-    $("nodes-view").innerHTML = `
+    const detailView = $("node-detail-view");
+    detailView.innerHTML = `
       <button id="back-to-nodes">← back</button>
       <div class="panel"><h2>${escapeHtml(detail.nodeId)}</h2>
         <dl class="detail-grid">
           <dt>state</dt><dd>${escapeHtml(detail.state)}</dd>
           <dt>runtime identity</dt><dd>orbit ${escapeHtml(detail.runtimeIdentity.orbitVersion ?? "-")} rev ${escapeHtml(detail.runtimeIdentity.orbitRevision ?? "-")} · dsh ${escapeHtml(detail.runtimeIdentity.dshVersion ?? "-")} · profile ${escapeHtml(detail.runtimeIdentity.compatibilityProfile ?? "-")}</dd>
           <dt>lastSeen</dt><dd>${escapeHtml(detail.health.lastSeen ?? "-")} (${escapeHtml(detail.health.lastSeenSource ?? "-")})</dd>
+          <dt>lastHeartbeat</dt><dd>${escapeHtml(detail.health.lastHeartbeatAt ?? "-")}</dd>
           <dt>capabilities</dt><dd>${detail.health.capabilities.map((name) => `<span class="capability-chip">${escapeHtml(name)}</span>`).join(" ") || "-"}</dd>
           <dt>capability evidence</dt><dd class="capability-evidence">${detail.health.capabilityEvidence.map((name) => escapeHtml(name)).join(", ") || "-"}</dd>
           <dt>alerts</dt><dd>${detail.health.alertFlags.map((flag) => `<span class="alert-flag">${escapeHtml(flag)}</span>`).join(" ") || "-"}</dd>
@@ -213,13 +229,10 @@ export function createRegistryUi({ document, fetchImpl }) {
     try {
       const body = await api("/hub/nodes");
       renderNodes(mapNodeList(body.nodes));
-      $("tokens-view").hidden = false;
-      showBanner({});
+      showBanner(body.nodes.length === 0 ? EMPTY_NODES_STATE : {});
     } catch (error) {
       if (error.sessionRequired) {
-        if (await refreshSession()) {
-          return loadNodes();
-        }
+        if (await refreshSession()) return loadNodes();
         showBanner(SESSION_REQUIRED_STATE);
       } else {
         showBanner({ message: `failed to load nodes: ${error.message}` });
@@ -232,14 +245,10 @@ export function createRegistryUi({ document, fetchImpl }) {
     try {
       const body = await api("/hub/tokens");
       renderTokens(mapTokenList(body.tokens));
-      $("nodes-view").hidden = false;
-      showBanner({});
-      $("mint-token").addEventListener("click", () => mintToken());
+      showBanner(body.tokens.length === 0 ? EMPTY_TOKENS_STATE : {});
     } catch (error) {
       if (error.sessionRequired) {
-        if (await refreshSession()) {
-          return loadTokens();
-        }
+        if (await refreshSession()) return loadTokens();
         showBanner(SESSION_REQUIRED_STATE);
       } else {
         showBanner({ message: `failed to load tokens: ${error.message}` });
@@ -247,21 +256,36 @@ export function createRegistryUi({ document, fetchImpl }) {
     }
   }
 
-  async function mintToken() {
+  async function mintEnrollmentToken() {
     const resultEl = $("mint-result");
     resultEl.innerHTML = `<div class="banner loading">minting&hellip;</div>`;
     try {
       const minted = await api("/hub/tokens", { method: "POST", body: { purpose: "enroll" } });
       const view = mapTokenMint(minted);
-      // The plaintext appears exactly once; nothing stores it beyond
-      // this render, and the list never returns it.
+      // Plaintext exactly once; it stays visible until the user leaves
+      // the view — the list refresh below never touches this element.
       resultEl.innerHTML = `<div class="plaintext-once">
         <strong>Copy this token now — it will never be shown again.</strong><br>
-        <code>${escapeHtml(view.plaintextOnce)}</code>
+        <code data-plaintext-once>${escapeHtml(view.plaintextOnce)}</code>
       </div>`;
       await loadTokens();
     } catch (error) {
       resultEl.innerHTML = `<div class="banner error">mint failed: ${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  async function mintReenrollToken(nodeId) {
+    const resultEl = $("reenroll-result");
+    resultEl.innerHTML = `<div class="banner loading">minting&hellip;</div>`;
+    try {
+      const minted = await api(`/hub/nodes/${nodeId}/reenroll`, { method: "POST" });
+      const view = mapTokenMint(minted);
+      resultEl.innerHTML = `<div class="plaintext-once">
+        <strong>Re-enrollment token for ${escapeHtml(nodeId)} — copy now, shown once.</strong><br>
+        <code data-plaintext-once>${escapeHtml(view.plaintextOnce)}</code>
+      </div>`;
+    } catch (error) {
+      resultEl.innerHTML = `<div class="banner error">re-enrollment token mint failed: ${escapeHtml(error.message)}</div>`;
     }
   }
 
@@ -274,13 +298,15 @@ export function createRegistryUi({ document, fetchImpl }) {
     try {
       const result = await api(`/hub/nodes/${nodeId}/delete`, { method: "POST", body: { requestId, reason } });
       const view = mapDeleteResult(result);
+      // Refresh FIRST so the result banner is not clobbered by the
+      // refresh's own loading banner.
+      await loadNodes();
+      await loadTokens();
       showBanner({
         message: view.idempotentReplay
           ? `node ${nodeId} already deleted by this request (idempotent replay)`
           : `node ${nodeId} deleted (state ${view.state})`,
       });
-      await loadNodes();
-      await loadTokens();
     } catch (error) {
       showBanner({ message: `delete failed: ${error.message}` });
       await loadNodes();
@@ -302,12 +328,9 @@ export function createRegistryUi({ document, fetchImpl }) {
       $("tokens-view").hidden = false;
       await loadTokens();
     });
-    $("nodes-view").addEventListener("click", (event) => {
+    $("mint-token").addEventListener("click", () => mintEnrollmentToken());
+    $("nodes-list").addEventListener("click", async (event) => {
       const target = event.target;
-      if (target.id === "back-to-nodes") {
-        loadNodes();
-        return;
-      }
       if (target.dataset?.deleteId !== undefined) {
         const nodeId = target.dataset.deleteId;
         $("confirm-dialog-message").textContent = `Delete node ${nodeId}? Requiring a reason and a one-time requestId.`;
@@ -317,10 +340,15 @@ export function createRegistryUi({ document, fetchImpl }) {
         $("confirm-cancel").onclick = () => $("confirm-dialog").close();
         return;
       }
-      const row = target.closest(".node-id");
-      if (row) {
-        loadNodeDetail(row.textContent.trim());
+      if (target.dataset?.reenrollId !== undefined) {
+        await mintReenrollToken(target.dataset.reenrollId);
+        return;
       }
+      const row = target.closest(".node-id");
+      if (row) loadNodeDetail(row.textContent.trim());
+    });
+    $("node-detail-view").addEventListener("click", (event) => {
+      if (event.target.id === "back-to-nodes") loadNodes();
     });
     $("nav-logout").addEventListener("click", async () => {
       try {
@@ -338,6 +366,8 @@ export function createRegistryUi({ document, fetchImpl }) {
     showBanner(LOADING_STATE);
     try {
       const body = await api(`/hub/nodes/${nodeId}`);
+      $("nodes-list").innerHTML = "";
+      $("node-detail-view").hidden = false;
       renderDetail(body);
       showBanner({});
     } catch (error) {

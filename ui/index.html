@@ -20,8 +20,23 @@
 
   <main id="main">
     <div id="state-banner"></div>
-    <section id="nodes-view"></section>
-    <section id="tokens-view" hidden></section>
+    <section id="nodes-view">
+      <div id="nodes-list"></div>
+      <div id="reenroll-result"></div>
+      <div id="node-detail-view" hidden></div>
+    </section>
+    <section id="tokens-view" hidden>
+      <div class="panel">
+        <button id="mint-token" class="primary" type="button">Mint enrollment token</button>
+        <div id="mint-result"></div>
+      </div>
+      <div class="panel">
+        <table>
+          <thead><tr><th>tokenId</th><th>purpose</th><th>bound node</th><th>status</th><th>created</th><th>expires</th><th>consumed</th></tr></thead>
+          <tbody id="token-table-body"></tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <dialog id="confirm-dialog">

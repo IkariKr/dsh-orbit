@@ -1,36 +1,33 @@
-# v0.3 Registry deployment example (SOP Stage 6).
+# v0.3 Registry deployment example (SOP Stage 6, Gate B closure).
 #
-# Topology: Caddy terminates TLS at the edge; the Hub listens ONLY on
-# the host loopback (the hub refuses non-loopback binds by design).
-#   - the operator browser path goes through Caddy: TLS -> gateway
-#     authentication -> assertion injection (X-DSH-Authenticated-Proxy)
-#     and operator principal injection (X-DSH-Operator-Id);
-#   - the machine path (nodes) stays on the private loopback listener.
+# Topology:
+#   Operator browser --TLS--> Gateway (Caddy) --loopback--> Hub :5445
+#   Node A/B (DSH) -------private machine path--------> Hub :5445
 #
-# Copy this file to docker-registry/compose.example.yaml (or adapt your
-# own) and fill .env: GATEWAY_SECRET and the operator principal. The
-# gateway secret is injected by Caddy AFTER its own authentication and
-# is never exposed to browsers.
+# The Hub container publishes ONLY to the host loopback
+# ("127.0.0.1:5445:5445"); nothing is on a public interface. The
+# gateway runs on the HOST (or with network_mode: host) so it reaches
+# the hub through that same loopback — the hub's frozen listener
+# policy (loopback-only, plain-HTTP private backend) is never relaxed.
+#
+# The machine surface is NOT routed by the gateway (see the
+# Caddyfile @machine rule): node traffic uses the private listener.
 
 services:
   registry-hub:
-    image: node:22
-    command:
-      - node
-      - /opt/dsh-orbit/bin/dsh-orbit-hub.mjs
+    build:
+      context: ..
+      dockerfile: docker-registry/Dockerfile
+    image: dsh-orbit-registry:${DSH_ORBIT_REGISTRY_TAG:-v0.3.0-s6}
     environment:
-      DSH_ORBIT_HUB_DB: /data/orbit/registry.db
-      DSH_ORBIT_HUB_PORT: "5445"
-      # Loopback-only by default; the hub refuses non-loopback binds.
-      DSH_ORBIT_HUB_LISTEN: "127.0.0.1"
       DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:?set in .env}
       DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: ${DSH_ORBIT_HUB_OPERATOR_PRINCIPAL:-operator}
       DSH_ORBIT_HUB_TRUSTED_SCHEME: https
     volumes:
       - ../data/orbit:/data/orbit:rw
     ports:
-      # Private backend listener only: publishes to the loopback, the
-      # registry machine surface never appears on a public interface.
+      # Private backend listener only: host loopback, never a public
+      # interface. The gateway (host/network_mode:host) connects here.
       - "127.0.0.1:${DSH_ORBIT_HUB_PORT:-5445}:5445"
     read_only: true
     tmpfs:
@@ -42,13 +39,12 @@ services:
     pids_limit: 128
     stop_grace_period: 15s
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"http.get('http://127.0.0.1:5445/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"require('node:http').get('http://127.0.0.1:5445/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 5s
 
-  # The registry does not route DSH traffic: the existing DSH deployment
-  # (see docker/compose.example.yaml) is unchanged. When multiple DSH
-  # nodes enroll, each node instance runs `dsh-orbit-node run` against
-  # THIS hub's private URL and keeps its own state file.
+# The gateway (Caddy) terminates TLS and routes ONLY the browser
+# surface; deploy it with network_mode: host (Linux) so it can reach
+# 127.0.0.1:5445. Machine routes are refused at the gateway (403).

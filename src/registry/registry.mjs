@@ -791,6 +791,8 @@ export class Registry {
         capabilitiesStale: row.capabilities_stale === 1,
         lastSeen: row.last_seen,
         lastSeenSource: row.last_seen_source,
+        // The heartbeat clock, surfaced explicitly (Stage 6):
+        lastHeartbeatAt: row.last_heartbeat_at ?? null,
       },
       runtimeIdentity: {
         orbitVersion: row.orbit_version,

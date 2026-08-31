@@ -71,3 +71,23 @@ deployment with a persistent DB:
 - backup/restore drill, DB migration drills, corruption handling,
   retention drills (Stage 7);
 - the final release/attestation (Stage 8).
+## Gate B closure notes
+
+- The gateway example now runs a REAL authentication gate: nothing is
+  injected before the operator authenticates; client-supplied
+  assertion/principal headers are stripped first; the browser's own
+  Cookie / Origin / Sec-Fetch-Site pass through (the hub's RFC-0007
+  checks depend on them); the machine surface (`/api/v1/*`) is refused
+  at the gateway with 403 — the docs and the config agree.
+- The Hub runs from a pinned image (`docker-registry/Dockerfile`,
+  `node:22.14.0-bookworm-slim`, zero deps) and publishes ONLY to the
+  host loopback; the gateway runs on the host/`network_mode: host` and
+  reaches the hub through that same loopback. The frozen listener
+  policy (loopback-only plain-HTTP private backend) is never relaxed.
+- `test/registry-gateway-e2e.test.mjs` executes the whole topology with
+  a real TLS-terminating gateway: unauthenticated refused, forged
+  internal headers stripped, browser headers pass through, machine
+  denied, a gateway restart drill (browser down → Hub/nodes untouched
+  → recover), and the two-node outage/delete/reenroll scenario via the
+  correct ingress paths. Evidence: `docs/release-attestations/
+  v0.3-stage6-e2e.md`.

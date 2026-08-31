@@ -63,6 +63,7 @@ export function mapNodeRow(node) {
       alertFlags: Array.isArray(health.alertFlags) ? health.alertFlags : [],
       lastSeen: health.lastSeen ?? null,
       lastSeenSource: health.lastSeenSource ?? null,
+      lastHeartbeatAt: health.lastHeartbeatAt ?? null,
     },
     runtimeIdentity: {
       orbitVersion: runtime.orbitVersion ?? null,

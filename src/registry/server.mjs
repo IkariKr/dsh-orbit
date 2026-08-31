@@ -422,6 +422,11 @@ export function createHubServer({ registry, options = {} }) {
 
     const nodeMatch = path.match(/^\/hub\/nodes\/([^/]+)\/(delete|reenroll)\/?$/);
     if (nodeMatch) {
+      // /delete and /reenroll are strictly POST (RFC-0007 surface);
+      // any other method is 405, never executed.
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "delete/reenroll accept POST only" } });
+      }
       const nodeId = decodeURIComponent(nodeMatch[1]);
       if (nodeMatch[2] === "delete") {
         const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
