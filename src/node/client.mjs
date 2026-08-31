@@ -133,8 +133,15 @@ export class NodeClient {
   }
 
   async persist(next) {
-    this.store = { ...this.store, ...next, updatedAt: this.now().toISOString() };
-    await writeNodeStore(this.storePath, this.store);
+    // Commit order: the disk write is authoritative. The candidate is
+    // only published to this.store AFTER writeNodeStore() succeeds, so
+    // a validation/write/rename failure leaves BOTH memory and disk at
+    // the previous committed state — and a retried identity-changing
+    // operation re-persists its pending intent before any network
+    // request.
+    const candidate = { ...this.store, ...next, updatedAt: this.now().toISOString() };
+    await writeNodeStore(this.storePath, candidate);
+    this.store = candidate;
   }
 
   // ------------------------------------------------------------------
