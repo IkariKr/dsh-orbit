@@ -417,3 +417,77 @@ test("rollup final is the last event by (at DESC, id DESC), never a string-max o
     .get(node.nodeId);
   assert.deepEqual(JSON.parse(again.to_value), JSON.parse(contactSummary.to_value));
 });
+
+test("rollup only processes complete natural days: a midday cutoff never deletes partial-day raw events", async (t) => {
+  const { registry, server, clock } = await withClockServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const insert = (at, dimension, fromValue, toValue, source = "maintenance") =>
+    registry.db
+      .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(node.nodeId, at, dimension, fromValue, toValue, source);
+
+  // Day 2026-08-22: fully past the cutoff. Day 2026-08-23 is the cutoff
+  // day: one event at 02:00 (older than 7 days) and one at 20:00 (not
+  // yet 7 days old).
+  insert("2026-08-22T12:00:00.000Z", "registry_contact", "fresh", "stale");
+  insert("2026-08-23T02:00:00.000Z", "registry_contact", "fresh", "stale");
+  insert("2026-08-23T20:00:00.000Z", "registry_contact", "stale", "fresh");
+
+  // Cutoff = now - 7d lands exactly at 2026-08-23T12:00:00.000Z.
+  clock.now = new Date("2026-08-30T12:00:00.000Z");
+  registry.maintenance();
+
+  // Day 22 rolled up completely (raw events gone; the day keeps only
+  // its summary row)...
+  assert.equal(
+    registry.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM events WHERE node_id = ? AND at >= '2026-08-22T00:00:00.000Z' AND at < '2026-08-23T00:00:00.000Z' AND dimension != 'rollup'",
+      )
+      .get(node.nodeId).n,
+    0,
+  );
+  const day22Summary = registry.db
+    .prepare("SELECT to_value FROM events WHERE node_id = ? AND dimension = 'rollup' AND from_value = 'registry_contact' AND at = '2026-08-22T23:59:59.999Z'")
+    .get(node.nodeId);
+  assert.equal(JSON.parse(day22Summary.to_value).count, 1);
+
+  // ...but the cutoff day is NOT rolled up at all: BOTH raw events
+  // remain (the 02:00 event is preserved even though it is technically
+  // older than 7 days, because the natural day is incomplete).
+  assert.equal(
+    registry.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM events WHERE node_id = ? AND at >= '2026-08-23T00:00:00.000Z' AND at < '2026-08-24T00:00:00.000Z' AND dimension != 'rollup'",
+      )
+      .get(node.nodeId).n,
+    2,
+  );
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM events WHERE node_id = ? AND dimension = 'rollup' AND from_value = 'registry_contact' AND at = '2026-08-23T23:59:59.999Z'").get(node.nodeId).n, 0);
+
+  // Next day the full natural day becomes eligible: count covers BOTH
+  // events and the final is the day's last event.
+  clock.now = new Date("2026-08-31T00:00:00.000Z");
+  registry.maintenance();
+  assert.equal(
+    registry.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM events WHERE node_id = ? AND at >= '2026-08-23T00:00:00.000Z' AND at < '2026-08-24T00:00:00.000Z' AND dimension != 'rollup'",
+      )
+      .get(node.nodeId).n,
+    0,
+  );
+  const day23Summary = registry.db
+    .prepare("SELECT to_value FROM events WHERE node_id = ? AND dimension = 'rollup' AND from_value = 'registry_contact' AND at = '2026-08-23T23:59:59.999Z'")
+    .get(node.nodeId);
+  const parsed = JSON.parse(day23Summary.to_value);
+  assert.equal(parsed.count, 2);
+  assert.equal(parsed.final, "fresh");
+
+  // Repeated maintenance stays identical.
+  const snapshot = () => registry.db.prepare("SELECT COUNT(*) AS n FROM events WHERE node_id = ?").get(node.nodeId).n;
+  const before = snapshot();
+  registry.maintenance();
+  registry.maintenance();
+  assert.equal(snapshot(), before);
+});
