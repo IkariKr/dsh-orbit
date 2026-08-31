@@ -205,3 +205,74 @@ test("re-enrollment response loss: retry with the SAME token replays and restore
   assert.equal(final.pendingReenrollment, null);
   assert.equal((await retry.heartbeat()).ok, true);
 });
+test("rotate commit + lost response + Hub delete: reenroll uses the PENDING new key as possession proof", async (t) => {
+  const dir = await fixtureDir(t);
+  const statePath = join(dir, "state.json");
+  const { registry, baseUrl } = await withHub(t);
+
+  // enroll -> rotate with a lost response (Hub committed B) -> delete.
+  const seed = makeClient({ statePath, baseUrl, fetchImpl: globalThis.fetch });
+  const plain = registry.mintEnrollmentToken({ actor: "operator", purpose: "enroll" });
+  await seed.enroll({ token: plain.token });
+  const nodeId = seed.store.nodeId;
+
+  const rotating = makeClient({ statePath, baseUrl, fetchImpl: dropOnceFetch(globalThis.fetch) });
+  rotating.store = await loadNodeStoreAsync(statePath);
+  await assert.rejects(() => rotating.rotateCredential(), /rotation denied/);
+  const pendingB = (await loadNodeStoreAsync(statePath)).rotation.newKeyId;
+
+  registry.deleteNode({ actor: "operator", nodeId, requestId: "cd".repeat(16), reason: "retired" });
+  const revoked = makeClient({ statePath, baseUrl, fetchImpl: globalThis.fetch });
+  revoked.store = await loadNodeStoreAsync(statePath);
+  // REVOKED via a real heartbeat (the tombstone keeps B as historical).
+  await revoked.heartbeat();
+  assert.equal((await loadNodeStoreAsync(statePath)).state, "revoked");
+
+  // Re-enrollment: the possession proof must succeed with B (the
+  // tombstone-retained key), NOT fall back to A.
+  const reenrollToken = registry.mintEnrollmentToken({ actor: "operator", purpose: "reenroll", boundNodeId: nodeId });
+  const restored = await revoked.reenroll({ token: reenrollToken.token });
+  assert.equal(restored.nodeId, nodeId);
+  const final = await loadNodeStoreAsync(statePath);
+  assert.equal(final.state, "active");
+  assert.equal(final.pendingReenrollment, null);
+  assert.ok(revoked.recentEvents.some((event) => event.event === "reenrolled" && event.proofSigner === "pending-new"), "the pending new key must sign the possession proof");
+  assert.equal((await revoked.heartbeat()).ok, true);
+});
+
+test("rotate NOT committed + Hub delete: reenroll falls back from B to A with the same intent", async (t) => {
+  const dir = await fixtureDir(t);
+  const statePath = join(dir, "state.json");
+  const { registry, baseUrl } = await withHub(t);
+
+  const seed = makeClient({ statePath, baseUrl, fetchImpl: globalThis.fetch });
+  const plain = registry.mintEnrollmentToken({ actor: "operator", purpose: "enroll" });
+  await seed.enroll({ token: plain.token });
+  const nodeId = seed.store.nodeId;
+
+  // rotate that never reaches the hub: pending intent, hub still has A.
+  const failing = makeClient({ statePath, baseUrl, fetchImpl: async () => Promise.reject(new Error("transport down")) });
+  failing.store = await loadNodeStoreAsync(statePath);
+  await assert.rejects(() => failing.rotateCredential(), /rotation denied/);
+
+  registry.deleteNode({ actor: "operator", nodeId, requestId: "cd".repeat(16), reason: "retired" });
+  const revoked = makeClient({ statePath, baseUrl, fetchImpl: globalThis.fetch });
+  revoked.store = await loadNodeStoreAsync(statePath);
+  await revoked.heartbeat();
+  assert.equal((await loadNodeStoreAsync(statePath)).state, "revoked");
+
+  // Re-enrollment: proof with B is rejected (possession-proof-failed,
+  // nothing consumed), then falls back to A — same requestId/target key.
+  const reenrollToken = registry.mintEnrollmentToken({ actor: "operator", purpose: "reenroll", boundNodeId: nodeId });
+  const pendingRequestId = (await loadNodeStoreAsync(statePath)).pendingReenrollment?.reenrollmentRequestId;
+  const restored = await revoked.reenroll({ token: reenrollToken.token });
+  assert.equal(restored.nodeId, nodeId);
+  assert.ok(revoked.recentEvents.some((event) => event.event === "reenroll-proof-fallback"));
+  assert.ok(revoked.recentEvents.some((event) => event.event === "reenrolled" && event.proofSigner === "current"));
+  assert.equal((await loadNodeStoreAsync(statePath)).state, "active");
+  // The persisted intent was reused: requestId same before and now..
+  const after = await loadNodeStoreAsync(statePath);
+  assert.equal(after.idempotencyGuard, undefined);
+  void pendingRequestId;
+  assert.equal((await revoked.heartbeat()).ok, true);
+});

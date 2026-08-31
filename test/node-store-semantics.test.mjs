@@ -66,6 +66,7 @@ test("unenrolled store rejects stray identity material; pendingEnrollment carrie
       enrollmentRequestId: "cd".repeat(16),
       publicKeyHex: keys.publicKeyHex,
       privateKeyHex: keys.privateKeyHex,
+      hubBaseUrl: "http://hub-a.example/",
       generatedAt: "2026-08-31T00:00:00.000Z",
     },
   };
@@ -77,16 +78,17 @@ test("unenrolled store rejects stray identity material; pendingEnrollment carrie
 test("pending rotation requires a full, consistent new keypair", async () => {
   const { deriveKeyId } = await import("../src/registry/crypto.mjs");
   const keys = generateNodeKeyPair();
+  const store = enrolledStore();
   const pendingRotation = {
-    oldKeyId: deriveKeyId("aa".repeat(32)),
-    oldPrivateKeyHex: "aa".repeat(48),
+    oldKeyId: deriveKeyId(store.publicKeyHex),
+    oldPrivateKeyHex: store.privateKeyHex,
     newKeyId: deriveKeyId(keys.publicKeyHex),
     newPublicKeyHex: keys.publicKeyHex,
     newPrivateKeyHex: keys.privateKeyHex,
     generatedAt: "2026-08-31T00:00:00.000Z",
     overlapUntil: null,
   };
-  const store = { ...enrolledStore(), rotation: pendingRotation };
+  store.rotation = pendingRotation;
   assert.deepEqual(validateNodeStore(store), []);
   const missingNewKey = { ...store, rotation: { ...pendingRotation, newPublicKeyHex: null, newPrivateKeyHex: null } };
   assert.ok(validateNodeStore(missingNewKey).some((problem) => problem.includes("pending rotation lacks the new keypair")));
@@ -122,4 +124,67 @@ test("round-trip through load stays valid and pending fields default to null", a
   assert.equal(reloaded.pendingEnrollment, null);
   assert.equal(reloaded.pendingReenrollment, null);
   assert.deepEqual(validateNodeStore(reloaded), []);
+});
+test("relational invariants: cross-state and key-to-identity relations are enforced", async () => {
+  const { deriveKeyId } = await import("../src/registry/crypto.mjs");
+  const keys = generateNodeKeyPair();
+  const base = enrolledStore();
+  const unenrolled = { ...base, state: "unenrolled", nodeId: null, hubBaseUrl: null, publicKeyHex: null, privateKeyHex: null };
+  const pendingReenroll = (nodeId) => ({ reenrollmentRequestId: "cd".repeat(16), publicKeyHex: keys.publicKeyHex, privateKeyHex: keys.privateKeyHex, nodeId, generatedAt: "t" });
+
+  // unenrolled + pendingReenrollment / rotation -> invalid.
+  assert.ok(validateNodeStore({ ...unenrolled, pendingReenrollment: pendingReenroll(base.nodeId) }).some((problem) => problem.includes("pendingReenrollment")));
+  assert.ok(validateNodeStore({ ...unenrolled, rotation: { oldKeyId: "aa".repeat(16), oldPrivateKeyHex: "aa".repeat(48), newKeyId: "bb".repeat(16), overlapUntil: "2099-01-01T00:00:00.000Z" } }).some((problem) => problem.includes("rotation")));
+
+  // active + pendingReenrollment -> invalid.
+  assert.ok(validateNodeStore({ ...base, pendingReenrollment: pendingReenroll(base.nodeId) }).some((problem) => problem.includes("pendingReenrollment")));
+
+  // revoked + pendingReenrollment nodeId mismatch -> invalid.
+  assert.ok(validateNodeStore({ ...base, state: "revoked", pendingReenrollment: pendingReenroll("node_" + "ff".repeat(16)) }).some((problem) => problem.includes("does not match")));
+
+  // Pending rotation whose old key does not match the main identity.
+  const otherKeys = generateNodeKeyPair();
+  const badPendingRotation = {
+    ...base,
+    rotation: {
+      oldKeyId: deriveKeyId(otherKeys.publicKeyHex),
+      oldPrivateKeyHex: otherKeys.privateKeyHex,
+      newKeyId: deriveKeyId(keys.publicKeyHex),
+      newPublicKeyHex: keys.publicKeyHex,
+      newPrivateKeyHex: keys.privateKeyHex,
+      generatedAt: "2026-08-31T00:00:00.000Z",
+      overlapUntil: null,
+    },
+  };
+  assert.ok(validateNodeStore(badPendingRotation).some((problem) => problem.includes("pending rotation oldKeyId does not match")));
+
+  // Completed rotation whose newKeyId does not match the main identity.
+  const badCompleted = {
+    ...base,
+    rotation: { oldKeyId: deriveKeyId(base.publicKeyHex), oldPrivateKeyHex: base.privateKeyHex, newKeyId: deriveKeyId(otherKeys.publicKeyHex), overlapUntil: "2099-01-01T00:00:00.000Z" },
+  };
+  assert.ok(validateNodeStore(badCompleted).some((problem) => problem.includes("completed rotation newKeyId does not match")));
+
+  // A consistent pending rotation with old key == main key passes.
+  const goodPending = {
+    ...base,
+    rotation: {
+      oldKeyId: deriveKeyId(base.publicKeyHex),
+      oldPrivateKeyHex: base.privateKeyHex,
+      newKeyId: deriveKeyId(keys.publicKeyHex),
+      newPublicKeyHex: keys.publicKeyHex,
+      newPrivateKeyHex: keys.privateKeyHex,
+      generatedAt: "2026-08-31T00:00:00.000Z",
+      overlapUntil: null,
+    },
+  };
+  assert.deepEqual(validateNodeStore(goodPending), []);
+
+  // pendingEnrollment without its Hub binding -> invalid.
+  assert.ok(
+    validateNodeStore({
+      ...unenrolled,
+      pendingEnrollment: { enrollmentRequestId: "cd".repeat(16), publicKeyHex: keys.publicKeyHex, privateKeyHex: keys.privateKeyHex, generatedAt: "t" },
+    }).some((problem) => problem.includes("Hub binding")),
+  );
 });

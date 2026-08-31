@@ -43,12 +43,10 @@ function buildClient({ storePath, forbidEnrollmentBinding = false }) {
     compatibilityProfile: process.env.DSH_ORBIT_NODE_DSH_PROFILE ?? null,
   };
   const store = loadNodeStore(storePath);
-  // An enrolled store's persisted binding is part of the identity: a
-  // runtime URL mismatch fails closed (P1-06). The state file holds the
-  // private key: over-permissive POSIX permissions fail closed (P1-10).
-  if (store.state !== "unenrolled") {
-    assertStateFilePermissions(storePath);
-  }
+  // The state file can carry private keys in ANY state — including a
+  // pendingEnrollment on an unenrolled store (round-2 P2-01) — so the
+  // POSIX permission check applies to every existing state file.
+  assertStateFilePermissions(storePath);
   return new NodeClient({
     store,
     storePath,

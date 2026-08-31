@@ -30,11 +30,12 @@ export const HEARTBEAT_CADENCE_SECONDS_MAX = 300;
 
 const MAX_RECENT_EVENTS = 50;
 
-// Unified revocation classification (Gate A P1-07): only these codes
-// prove the Hub revoked this identity. Timestamp/signature/replay/rate
-// and other 401s are configuration or transient errors and must never
-// persist REVOKED.
-const REVOCATION_CODES = new Set(["revoked", "key-revoked", "unknown-key"]);
+// Unified revocation classification (Gate A P1-07, round-2 P1-04):
+// ONLY revoked/key-revoked prove the Hub revoked this identity and may
+// persist REVOKED. unknown-key is a credential-mismatch runtime error
+// (authentication denied, NOT a tombstone) and never persists REVOKED;
+// pending-rotation probes interpret unknown-key separately.
+const REVOCATION_CODES = new Set(["revoked", "key-revoked"]);
 
 export function isCredentialRevocation(body) {
   return REVOCATION_CODES.has(body?.error?.code);
@@ -70,6 +71,9 @@ export class NodeClient {
     this.now = now;
     this.fetchImpl = fetchImpl;
     this.backoff = new HeartbeatBackoff({ now: () => this.now().getTime() });
+    // Report retries get their OWN backoff: report outcomes must never
+    // change the heartbeat schedule (round-2 P1-02).
+    this.reportBackoff = new HeartbeatBackoff({ now: () => this.now().getTime() });
     this.recentEvents = [];
     this.lastHeartbeatAt = null;
     this.lastReportAt = null;
@@ -85,11 +89,22 @@ export class NodeClient {
     this.enforceBinding();
   }
 
-  // Hub binding (P1-06): store.hubBaseUrl is part of the identity.
-  // Runtime configuration that differs from the persisted binding fails
-  // closed instead of silently talking to another Hub.
+  // Hub binding (P1-06, round-2 P1-01): store.hubBaseUrl is part of the
+  // identity, and so is the binding of a persisted pending enrollment.
+  // Runtime configuration that differs from either fails closed instead
+  // of silently talking to another Hub.
   enforceBinding() {
-    if (this.store.state === "unenrolled") return;
+    if (this.store.state === "unenrolled") {
+      const pending = this.store.pendingEnrollment;
+      if (pending && typeof pending.hubBaseUrl === "string" && pending.hubBaseUrl !== "") {
+        if (pending.hubBaseUrl !== this.baseHubUrl) {
+          throw new Error(
+            `pending enrollment is bound to ${pending.hubBaseUrl} but the runtime configuration targets ${this.baseHubUrl}; refusing to replay enrollment against another Hub`,
+          );
+        }
+      }
+      return;
+    }
     if (typeof this.store.hubBaseUrl === "string" && this.store.hubBaseUrl !== "") {
       let persisted;
       try {
@@ -143,10 +158,12 @@ export class NodeClient {
         enrollmentRequestId: randomHex(16),
         publicKeyHex: keys.publicKeyHex,
         privateKeyHex: keys.privateKeyHex,
+        hubBaseUrl: this.baseHubUrl,
         generatedAt: this.now().toISOString(),
       };
       await this.persist({ ...this.store, pendingEnrollment: pending });
     }
+    this.enforceBinding(); // the pending binding and runtime config must agree
     const response = await this.transport(ENROLL_PATH, {
       body: { token, enrollmentRequestId: pending.enrollmentRequestId, publicKey: pending.publicKeyHex },
     });
@@ -330,7 +347,9 @@ export class NodeClient {
       body: report,
     });
     if (result.status === 200) {
-      this.backoff.recordSuccess();
+      // Report outcomes use the REPORT backoff: they must never change
+      // the heartbeat schedule (round-2 P1-02).
+      this.reportBackoff.recordSuccess();
       this.lastContactAt = this.now().toISOString();
       this.lastReportAt = this.lastContactAt;
       this.recordEvent("report-uploaded", {
@@ -347,7 +366,7 @@ export class NodeClient {
       throw new Error(`report upload denied: ${this.lastError.code} (${this.lastError.message})`);
     }
     const { code, message } = wireError(result.status, result.body);
-    this.backoff.recordFailure();
+    this.reportBackoff.recordFailure();
     this.recordEvent("report-failed", { code, message });
     throw new Error(`report upload denied: ${code} (${message})`);
   }
@@ -405,68 +424,67 @@ export class NodeClient {
   }
 
   // Commit detection after an uncertain rotate (P1-02): probe with the
-  // PENDING new key; if the Hub accepts it, the commit happened and we
-  // promote locally. If the new key is unknown and the old key still
-  // works, the Hub did NOT commit: re-submit the SAME pending public
-  // key — never a freshly generated third key.
-  async recoverPendingRotation() {
-    const rotation = this.store.rotation;
-    if (!this.isPendingRotation()) return { state: this.store.state, attempted: false };
-    const newProbe = await this.heartbeatAs({
-      keyId: rotation.newKeyId,
-      keyHex: rotation.newPrivateKeyHex,
-      persistOnRevoked: false,
-    });
-    if (newProbe.ok) {
-      await this.promoteRotation({ rotation, overlapUntil: null });
-      this.scheduleNextHeartbeat();
-      return { state: "active", attempted: true, ok: true, committedDetected: true };
-    }
-    if (newProbe.state === "revoked" && newProbe.error?.code !== "unknown-key") {
-      // The node was deleted while the rotate was in flight ('revoked'
-      // /'key-revoked'). A pending new key the Hub does not know yet
-      // ('unknown-key') means the rotate did NOT commit — not revoked.
-      await this.persist({ ...this.store, state: "revoked" });
-      this.runtimeState = "revoked";
-      return { state: "revoked", attempted: true, ok: false, error: newProbe.error };
-    }
-    if (newProbe.state === "retrying" || (newProbe.state === "revoked" && newProbe.error?.code === "unknown-key")) {
-      // Hub reachable (it answered) but the new key is unknown: not
-      // committed. Does the old key still work?
-      const oldProbe = await this.heartbeatAs({
-        keyId: rotation.oldKeyId,
-        keyHex: rotation.oldPrivateKeyHex,
+    // PENDING new key; if the Hub accepts it, the commit happened and we
+    // promote locally. If the new key is unknown (401 unknown-key is
+    // authentication-denied, not a tombstone) and the old key still
+    // works, the Hub did NOT commit: re-submit the SAME pending public
+    // key — never a freshly generated third key.
+    async recoverPendingRotation() {
+      const rotation = this.store.rotation;
+      if (!this.isPendingRotation()) return { state: this.store.state, attempted: false };
+      const newProbe = await this.heartbeatAs({
+        keyId: rotation.newKeyId,
+        keyHex: rotation.newPrivateKeyHex,
         persistOnRevoked: false,
       });
-      if (oldProbe.ok) {
-        const resubmitted = await this.signedRequest({
-          path: ROTATE_PATH,
-          nodeId: this.store.nodeId,
-          keyId: rotation.oldKeyId,
-          keyHex: rotation.oldPrivateKeyHex,
-          body: { newPublicKey: rotation.newPublicKeyHex },
-        });
-        if (resubmitted.status === 200) {
-          this.recordEvent("rotation-resubmitted", { newKeyId: rotation.newKeyId });
-          await this.promoteRotation({ rotation, overlapUntil: resubmitted.body.overlapUntil });
-          this.scheduleNextHeartbeat();
-          return { state: "active", attempted: true, ok: true, resubmitted: true };
-        }
-        const { code, message } = wireError(resubmitted.status, resubmitted.body);
-        this.recordEvent("rotation-resubmit-failed", { code, message });
-        return { state: "active", attempted: true, ok: false, error: { code, message } };
+      if (newProbe.ok) {
+        await this.promoteRotation({ rotation, overlapUntil: null });
+        this.scheduleNextHeartbeat();
+        return { state: "active", attempted: true, ok: true, committedDetected: true };
       }
-      if (oldProbe.state === "revoked") {
+      if (newProbe.state === "revoked") {
+        // The old identity was deleted while the rotate was in flight.
         await this.persist({ ...this.store, state: "revoked" });
         this.runtimeState = "revoked";
-        return { state: "revoked", attempted: true, ok: false, error: oldProbe.error };
+        return { state: "revoked", attempted: true, ok: false, error: newProbe.error };
       }
-      return { state: "retrying", attempted: true, ok: false, error: oldProbe.error };
+      if (newProbe.state === "retrying") {
+        // Hub answered but rejected the pending key: not committed. Does
+        // the old key still work?
+        const oldProbe = await this.heartbeatAs({
+          keyId: rotation.oldKeyId,
+          keyHex: rotation.oldPrivateKeyHex,
+          persistOnRevoked: false,
+        });
+        if (oldProbe.ok) {
+          const resubmitted = await this.signedRequest({
+            path: ROTATE_PATH,
+            nodeId: this.store.nodeId,
+            keyId: rotation.oldKeyId,
+            keyHex: rotation.oldPrivateKeyHex,
+            body: { newPublicKey: rotation.newPublicKeyHex },
+          });
+          if (resubmitted.status === 200) {
+            this.recordEvent("rotation-resubmitted", { newKeyId: rotation.newKeyId });
+            await this.promoteRotation({ rotation, overlapUntil: resubmitted.body.overlapUntil });
+            this.scheduleNextHeartbeat();
+            return { state: "active", attempted: true, ok: true, resubmitted: true };
+          }
+          const { code, message } = wireError(resubmitted.status, resubmitted.body);
+          this.recordEvent("rotation-resubmit-failed", { code, message });
+          return { state: "active", attempted: true, ok: false, error: { code, message } };
+        }
+        if (oldProbe.state === "revoked") {
+          await this.persist({ ...this.store, state: "revoked" });
+          this.runtimeState = "revoked";
+          return { state: "revoked", attempted: true, ok: false, error: oldProbe.error };
+        }
+        return { state: "retrying", attempted: true, ok: false, error: oldProbe.error };
+      }
+      // Network/5xx/429: inconclusive; the pending rotation stays and the
+      // next tick probes again.
+      return { state: this.store.state, attempted: true, ok: false, error: newProbe.error };
     }
-    // Network/5xx/429: inconclusive; the pending rotation stays and the
-    // next tick probes again.
-    return { state: this.store.state, attempted: true, ok: false, error: newProbe.error };
-  }
 
   async promoteRotation({ rotation, overlapUntil }) {
     const effectiveOverlap =
@@ -516,35 +534,73 @@ export class NodeClient {
     const rawBody = Buffer.from(
       JSON.stringify({ reenrollmentToken: token, reenrollmentRequestId: pending.reenrollmentRequestId, newPublicKey: pending.publicKeyHex }),
     );
-    const signature = signSigningString(
-      this.store.privateKeyHex,
-      buildSigningString({
-        label: REENROLL_V1_LABEL,
-        method: "POST",
-        path: REENROLL_PATH,
-        timestamp,
-        nonce,
-        bodyHash: sha256Hex(rawBody),
-        nodeId: this.store.nodeId,
-      }),
-    );
+
+    // Possession-proof signer selection (round-2 P1-03): when a rotation
+    // was in flight at deletion time, the tombstone retains the LATEST
+    // key — which may be the pending new key B (rotate committed) or the
+    // old key A (rotate never committed). Both secrets exist locally, so
+    // the proof tries B first and falls back to A ONLY on
+    // possession-proof-failed, which by the frozen RFC consumes nothing.
+    // Both attempts share the same persisted requestId + target key.
+    const signerCandidates = [];
+    const rotation = this.store.rotation;
+    if (rotation !== null && rotation.overlapUntil === null && typeof rotation.newPrivateKeyHex === "string") {
+      signerCandidates.push({ keyId: rotation.newKeyId, keyHex: rotation.newPrivateKeyHex, reason: "pending-new" });
+    }
+    signerCandidates.push({ keyId: deriveKeyId(this.store.publicKeyHex), keyHex: this.store.privateKeyHex, reason: "current" });
+
     let response;
-    try {
-      response = await this.fetchImpl(`${this.baseHubUrl.replace(/\/$/, "")}${REENROLL_PATH}`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-orbit-node": this.store.nodeId,
-          "x-orbit-timestamp": timestamp,
-          "x-orbit-nonce": nonce,
-          "x-orbit-key": deriveKeyId(this.store.publicKeyHex),
-          "x-orbit-signature": signature,
-        },
-        body: rawBody,
-      });
-    } catch (error) {
-      this.recordEvent("reenroll-failed", { code: "network", message: error.message });
-      throw new Error(`re-enrollment outcome unknown (network failure): retry with the same re-enrollment token (${error.message})`);
+    let signerUsed = "";
+    for (const signer of signerCandidates) {
+      const signature = signSigningString(
+        signer.keyHex,
+        buildSigningString({
+          label: REENROLL_V1_LABEL,
+          method: "POST",
+          path: REENROLL_PATH,
+          timestamp,
+          nonce,
+          bodyHash: sha256Hex(rawBody),
+          nodeId: this.store.nodeId,
+        }),
+      );
+      try {
+        response = await this.fetchImpl(`${this.baseHubUrl.replace(/\/$/, "")}${REENROLL_PATH}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-orbit-node": this.store.nodeId,
+            "x-orbit-timestamp": timestamp,
+            "x-orbit-nonce": nonce,
+            "x-orbit-key": signer.keyId,
+            "x-orbit-signature": signature,
+          },
+          body: rawBody,
+        });
+      } catch (error) {
+        this.recordEvent("reenroll-failed", { code: "network", message: error.message });
+        throw new Error(`re-enrollment outcome unknown (network failure): retry with the same re-enrollment token (${error.message})`);
+      }
+      const probed = typeof response.json === "function" ? await response.json().catch(() => ({})) : {};
+      const probedStatus = response.status ?? 0;
+      if (probedStatus === 200) {
+        response = { status: probedStatus, json: async () => probed };
+        signerUsed = signer.reason;
+        break;
+      }
+      if (probedStatus === 401 && (probed?.error?.code === "possession-proof-failed" || probed?.error?.code === "key-revoked") && signer.reason === "pending-new") {
+        // The Hub rejects a possession proof whose keyId is not the
+        // tombstone-retained historical key (key-revoked, checked before
+        // the signature) or whose signature does not verify
+        // (possession-proof-failed). Per the frozen RFC nothing was
+        // consumed, so the next candidate (the current main key) tries
+        // the SAME request with the SAME intent.
+        this.recordEvent("reenroll-proof-fallback", { to: "current", code: probed?.error?.code });
+        continue;
+      }
+      response = { status: probedStatus, json: async () => probed };
+      signerUsed = signer.reason;
+      break;
     }
     const body = typeof response.json === "function" ? await response.json().catch(() => ({})) : {};
     const status = response.status ?? 0;
@@ -565,7 +621,7 @@ export class NodeClient {
         pendingReenrollment: null,
       });
       this.runtimeState = "running";
-      this.recordEvent("reenrolled", { nodeId: body.nodeId, keyId: body.keyId });
+      this.recordEvent("reenrolled", { nodeId: body.nodeId, keyId: body.keyId, proofSigner: signerUsed });
       return { nodeId: body.nodeId, keyId: body.keyId };
     }
     const { code, message } = wireError(status, body);

@@ -91,12 +91,18 @@ export function validateNodeStore(store) {
     }
   }
 
-  // State/identity invariants (P1-08)
+  // State/identity invariants (P1-08) + cross-state relations (P2-02)
   if (store.state === "unenrolled") {
     if (store.nodeId !== null) problems.push("unenrolled store must not carry a nodeId");
     if (store.hubBaseUrl !== null) problems.push("unenrolled store must not carry a Hub binding");
     if (store.publicKeyHex !== null || store.privateKeyHex !== null) {
       problems.push("unenrolled store must not carry main identity keys (keys belong in pendingEnrollment)");
+    }
+    if (store.pendingReenrollment !== null && store.pendingReenrollment !== undefined) {
+      problems.push("unenrolled store must not carry a pendingReenrollment");
+    }
+    if (store.rotation !== null && store.rotation !== undefined) {
+      problems.push("unenrolled store must not carry a rotation marker");
     }
   } else {
     for (const [field, label] of [
@@ -119,10 +125,21 @@ export function validateNodeStore(store) {
     if (store.pendingEnrollment !== null && store.pendingEnrollment !== undefined) {
       problems.push("active/revoked store must not carry a pendingEnrollment");
     }
+    if (store.pendingReenrollment !== null && store.pendingReenrollment !== undefined && store.state !== "revoked") {
+      problems.push("active store must not carry a pendingReenrollment (re-enrollment requires REVOKED)");
+    }
+    // Re-enrollment intent must target the SAME nodeId (P2-02).
+    if (store.state === "revoked" && store.pendingReenrollment !== null && store.pendingReenrollment !== undefined) {
+      if (store.pendingReenrollment.nodeId !== store.nodeId) {
+        problems.push("pendingReenrollment nodeId does not match the store nodeId");
+      }
+    }
   }
 
-  // Pending enrollment (P1-01): requestId + keypair persisted BEFORE the
-  // request so an exact replay is possible; the token is never stored.
+  // Pending enrollment (P1-01): requestId + keypair + the canonical Hub
+  // binding persisted BEFORE the request so an exact replay is possible
+  // and the intent can never be replayed against another Hub; the token
+  // itself is never stored.
   if (store.pendingEnrollment !== null && store.pendingEnrollment !== undefined) {
     const pending = store.pendingEnrollment;
     if (typeof pending !== "object" || !HEX32.test(pending.enrollmentRequestId ?? "")) {
@@ -132,6 +149,17 @@ export function validateNodeStore(store) {
       problems.push("pendingEnrollment lacks a valid keypair");
     } else if (!keyPairMatches(pending.publicKeyHex, pending.privateKeyHex)) {
       problems.push("pendingEnrollment keypair does not self-verify");
+    }
+    if (typeof pending.hubBaseUrl !== "string" || pending.hubBaseUrl === "") {
+      problems.push("pendingEnrollment lacks its Hub binding");
+    } else {
+      try {
+        if (canonicalHubBaseUrl(pending.hubBaseUrl) !== pending.hubBaseUrl) {
+          problems.push("pendingEnrollment Hub binding is not canonicalized");
+        }
+      } catch (error) {
+        problems.push(`pendingEnrollment Hub binding is invalid: ${error.message}`);
+      }
     }
   }
 
@@ -146,6 +174,22 @@ export function validateNodeStore(store) {
       if (!HEX32.test(rotation.oldKeyId ?? "")) problems.push("rotation marker lacks a valid oldKeyId");
       if (!HEX96.test(rotation.oldPrivateKeyHex ?? "")) problems.push("rotation marker lacks a valid retained old private key");
       if (!HEX32.test(rotation.newKeyId ?? "")) problems.push("rotation marker lacks a valid newKeyId");
+      if (store.state !== "unenrolled") {
+        // The rotation's keys must relate to the MAIN identity
+        // (P2-02): while pending the old key IS the main key; once
+        // completed the new key IS the main key.
+        const mainKeyId = keyIdOf(store.publicKeyHex);
+        if (pending) {
+          if (mainKeyId !== null && rotation.oldKeyId !== mainKeyId) {
+            problems.push("pending rotation oldKeyId does not match the current main key");
+          }
+          if (mainKeyId !== null && !keyPairMatches(store.publicKeyHex, rotation.oldPrivateKeyHex)) {
+            problems.push("pending rotation old private key does not sign for the current main public key");
+          }
+        } else if (mainKeyId !== null && rotation.newKeyId !== mainKeyId) {
+          problems.push("completed rotation newKeyId does not match the current main key");
+        }
+      }
       if (pending) {
         // Pending: full new keypair required and consistent.
         if (!HEX64.test(rotation.newPublicKeyHex ?? "") || !HEX96.test(rotation.newPrivateKeyHex ?? "")) {

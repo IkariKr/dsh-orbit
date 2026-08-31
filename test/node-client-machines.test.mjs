@@ -77,7 +77,7 @@ test("heartbeat 429 and 5xx: retrying, persisted state stays active (never REVOK
 test("non-revocation 401s never persist REVOKED — heartbeat, report, and rotation agree (P1-07)", async (t) => {
   const statePath = await fixture(t);
   const base = enrolledStore();
-  for (const errorCode of ["timestamp-out-of-skew", "signature-invalid", "replay", "bad-request"]) {
+  for (const errorCode of ["timestamp-out-of-skew", "signature-invalid", "replay", "bad-request", "unknown-key"]) {
     await writeNodeStore(statePath, base);
     const client = makeClient({ statePath, store: { ...base }, hubBaseUrl: "http://127.0.0.1:5445/", fetchImpl: fakeFetch({ status: 401, body: { error: { code: errorCode, message: "x" } } }) });
     const beat = await client.heartbeat();
@@ -95,8 +95,10 @@ test("non-revocation 401s never persist REVOKED — heartbeat, report, and rotat
 });
 
 test("revocation codes persist REVOKED from every path", async (t) => {
+  // unknown-key is a credential-mismatch error, NOT a tombstone: it is
+  // excluded from REVOCATION_CODES (round-2 P1-04).
   const statePath = await fixture(t);
-  for (const code of ["revoked", "key-revoked", "unknown-key"]) {
+  for (const code of ["revoked", "key-revoked"]) {
     const base = enrolledStore();
     await writeNodeStore(statePath, base);
     const client = makeClient({ statePath, store: { ...base }, hubBaseUrl: "http://127.0.0.1:5445/", fetchImpl: fakeFetch({ status: 401, body: { error: { code, message: "x" } } }) });
@@ -172,4 +174,84 @@ test("doctor uses a non-mutating reachability probe (P1-09) and reports permissi
   if (process.platform !== "win32") {
     assert.ok(stateFindings === undefined || stateFindings.severity === "ok");
   }
+});
+test("unknown-key on the CURRENT identity never persists REVOKED (round-2 P1-04)", async (t) => {
+  const statePath = await fixture(t);
+  await writeNodeStore(statePath, enrolledStore());
+  const client = makeClient({
+    statePath,
+    store: { ...enrolledStore() },
+    hubBaseUrl: "http://127.0.0.1:5445/",
+    fetchImpl: fakeFetch({ status: 401, body: { error: { code: "unknown-key", message: "authentication denied" } } }),
+  });
+  const outcome = await client.heartbeat();
+  assert.equal(outcome.state, "retrying");
+  assert.equal(outcome.ok, false);
+  assert.equal((await loadNodeStoreAsync(statePath)).state, "active");
+});
+
+test("report outcomes never change the heartbeat schedule (round-2 P1-02)", async (t) => {
+  const statePath = await fixture(t);
+  const clock = { now: new Date("2026-08-31T00:00:00.000Z") };
+  let heartbeats = 0;
+  const fetchImpl = async (url) => {
+    if (url.includes("/api/v1/heartbeat")) {
+      heartbeats += 1;
+      return { status: 200, json: async () => ({ ok: true, registryContact: "fresh" }) };
+    }
+    if (url.includes("/api/v1/report-upload")) {
+      return { status: 400, json: async () => ({ error: { code: "invalid-report", message: "bad" } }) };
+    }
+    return { status: 404, json: async () => ({}) };
+  };
+  const client = makeClient({ statePath, store: { ...enrolledStore() }, hubBaseUrl: "http://127.0.0.1:5445/", fetchImpl, now: () => clock.now, cadence: 60 });
+
+  const first = await client.tick(); // heartbeat at cadence start
+  assert.equal(first.ok, true);
+  assert.equal(heartbeats, 1);
+
+  // A failing report must NOT shorten the heartbeat wait.
+  await assert.rejects(() => client.uploadReport({ some: "junk" }), /report upload denied/);
+  assert.equal(client.status().backoff.attempt, 0, "report failure must not touch the heartbeat backoff");
+  clock.now = new Date(clock.now.getTime() + 1000);
+  const early = await client.tick();
+  assert.equal(early.attempted, false);
+  assert.equal(heartbeats, 1);
+  // At the cadence boundary the heartbeat is still on schedule.
+  clock.now = new Date(clock.now.getTime() + 59_000);
+  const due = await client.tick();
+  assert.equal(due.ok, true);
+  assert.equal(heartbeats, 2);
+});
+
+test("a pendingEnrollment binding refuses a different Hub (round-2 P1-01)", async (t) => {
+  const statePath = await fixture(t);
+  const keys = generateNodeKeyPair();
+  const pendingStore = {
+    schema: 1,
+    nodeId: null,
+    publicKeyHex: null,
+    privateKeyHex: null,
+    hubBaseUrl: null,
+    state: "unenrolled",
+    rotation: null,
+    pendingEnrollment: {
+      enrollmentRequestId: "cd".repeat(16),
+      publicKeyHex: keys.publicKeyHex,
+      privateKeyHex: keys.privateKeyHex,
+      hubBaseUrl: "http://hub-a.example/",
+      generatedAt: "2026-08-31T00:00:00.000Z",
+    },
+    pendingReenrollment: null,
+    updatedAt: "2026-08-31T00:00:00.000Z",
+  };
+  await writeNodeStore(statePath, pendingStore);
+  // Same Hub: accepted.
+  const ok = makeClient({ statePath, store: { ...pendingStore }, hubBaseUrl: "http://hub-a.example/", fetchImpl: fakeFetch({ status: 200 }) });
+  assert.equal(ok.status().pendingEnrollment, true);
+  // Different Hub: fail closed, the intent is never replayed elsewhere.
+  assert.throws(
+    () => makeClient({ statePath, store: { ...pendingStore }, hubBaseUrl: "http://hub-b.example/", fetchImpl: fakeFetch({ status: 200 }) }),
+    /refusing to replay enrollment against another Hub/,
+  );
 });
