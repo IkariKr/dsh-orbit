@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createMachineIngressServer } from "../src/registry/machine-ingress.mjs";
@@ -24,6 +24,19 @@ function request(port, path, { method = "GET", headers = {}, body = "" } = {}) {
     headers: response.headers,
     body: await response.text(),
   }));
+}
+
+function rawRequest(port, path, { method = "POST", headers = {}, body = "" } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: "127.0.0.1", port, method, path, headers }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
+    if (body !== "") req.write(body);
+    req.end();
+  });
 }
 
 test("private machine ingress denies browser paths and query strings before upstream", async (t) => {
@@ -52,6 +65,14 @@ test("private machine ingress denies browser paths and query strings before upst
   const query = await request(ingressPort, "/api/v1/heartbeat?debug=1", { method: "POST", body: "{}" });
   assert.equal(query.status, 400);
   assert.equal(JSON.parse(query.body).error.code, "query-not-allowed");
+
+  const dotSegment = await rawRequest(ingressPort, "/api/v1/heartbeat/../enroll", { method: "POST", body: "{}" });
+  assert.equal(dotSegment.status, 403);
+  assert.equal(JSON.parse(dotSegment.body).error.code, "machine-ingress-denied");
+
+  const encodedPath = await request(ingressPort, "/api/v1/%68eartbeat", { method: "POST", body: "{}" });
+  assert.equal(encodedPath.status, 403);
+  assert.equal(JSON.parse(encodedPath.body).error.code, "machine-ingress-denied");
   assert.equal(upstreamHits, 0);
 });
 

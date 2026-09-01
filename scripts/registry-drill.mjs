@@ -538,25 +538,8 @@ async function main() {
     productionThresholdsUnchanged: true,
   };
 
-  // --- 0. versions (array spawn: cmd.exe must not touch Go templates) ---
+  // --- 0. versions/build provenance ---
   const runDocker = (args) => spawnSync("docker", args, { cwd: REPO, encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" } }).stdout.trim();
-  evidence.caddyVersion = runDocker(["run", "--rm", "caddy:2-alpine", "caddy", "version"]).split(/\s+/)[0] ?? "unknown";
-  const imageEvidence = (image) => {
-    const inspected = JSON.parse(runDocker(["inspect", image]))[0] ?? {};
-    return {
-      id: inspected.Id ?? "unknown",
-      digest: inspected.RepoDigests?.[0] ?? "local-image-no-registry-digest",
-      created: inspected.Created ?? "unknown",
-    };
-  };
-  evidence.hubImage = imageEvidence("dsh-orbit-registry:drill");
-  evidence.dshImages = {
-    a: imageEvidence("dsh-orbit:dsh-drill-a"),
-    b: imageEvidence("dsh-orbit:dsh-drill-b"),
-  };
-  evidence.dshImage = evidence.dshImages;
-  evidence.hubImageDigest = evidence.hubImage.digest;
-  evidence.dshImageDigest = `${evidence.dshImages.a.digest}; ${evidence.dshImages.b.digest}`;
   evidence.dshVersion = "0.1.1-rc.2";
   evidence.hubListenPolicy = "127.0.0.1:5445 (loopback; frozen policy intact)";
 
@@ -572,6 +555,32 @@ async function main() {
   const dshBContainer = sh(`docker compose -f ${COMPOSE} ps -q dsh-b`).trim().split("\n")[0];
   if (!hubContainer || !caddyContainer || !dshAContainer || !dshBContainer) throw new Error("containers not running; start with --compose-up");
   evidence.containers = { hub: hubContainer, caddy: caddyContainer, dshA: dshAContainer, dshB: dshBContainer };
+
+  // Capture the ACTUAL images backing the running containers, after any
+  // --build step. Inspecting mutable tags before compose-up can record stale
+  // image IDs from a previous drill and break exact candidate provenance.
+  const runningImageEvidence = (containerId) => {
+    const container = JSON.parse(runDocker(["inspect", containerId]))[0] ?? {};
+    const imageId = container.Image;
+    if (typeof imageId !== "string" || imageId === "") throw new Error(`container ${containerId} has no image identity`);
+    const image = JSON.parse(runDocker(["image", "inspect", imageId]))[0] ?? {};
+    return {
+      id: image.Id ?? imageId,
+      digest: image.RepoDigests?.[0] ?? "local-image-no-registry-digest",
+      created: image.Created ?? "unknown",
+    };
+  };
+  evidence.hubImage = runningImageEvidence(hubContainer);
+  evidence.dshImages = {
+    a: runningImageEvidence(dshAContainer),
+    b: runningImageEvidence(dshBContainer),
+  };
+  evidence.dshImage = evidence.dshImages;
+  evidence.hubImageDigest = evidence.hubImage.digest;
+  evidence.dshImageDigest = `${evidence.dshImages.a.digest}; ${evidence.dshImages.b.digest}`;
+  evidence.caddyImage = runningImageEvidence(caddyContainer);
+  evidence.caddyVersion = exec("caddy", ["caddy", "version"]).split(/\s+/)[0] ?? "unknown";
+
   const caddyValidation = spawnSync("docker", ["exec", caddyContainer, "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"], {
     cwd: REPO, encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" },
   });
@@ -833,6 +842,18 @@ async function main() {
   writeFileSync(AGING_CLOCK_PATH, "{}\n");
   evidence.aging.resetBeforeReconnect = true;
   evidence.aging.resetWallClock = new Date().toISOString();
+
+  // Cross at least one real 30s maintenance tick after the accelerated
+  // clock is removed. Maintenance must be aging-only: resetting the test
+  // clock may not heal A. A must remain lost until a real heartbeat arrives.
+  await sleep(35_000);
+  view = await nodesApi();
+  const aAfterClockReset = row(view, aNodeId);
+  if (aAfterClockReset.health.registryContact !== "lost" || !aAfterClockReset.health.alertFlags.includes("contact-lost")) {
+    throw new Error(`aging reset healed A without heartbeat: ${JSON.stringify(aAfterClockReset.health)}`);
+  }
+  evidence.aging.resetDidNotHealWithoutHeartbeat = true;
+  evidence.steps.push("aging override reset: A remained lost across a real maintenance tick until heartbeat");
 
   // --- 6. A reconnect ---
   await startNode("dsh-a", "/data/dsh-a");

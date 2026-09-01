@@ -162,9 +162,15 @@ test("controlled contact aging is isolated from wall-clock auth, reports, and an
   assert.equal(registry.getNode(a.nodeId).health.registryContact, "lost");
   assert.equal(registry.getNode(a.nodeId).health.capabilities.length, 3);
 
-  // Reset the drill-only clock before reconnect. A real wall-clock heartbeat
-  // then restores fresh and clears contact-lost; B remains fresh throughout.
+  // Reset the drill-only clock before reconnect. Maintenance is aging-only:
+  // moving the contact clock backwards must NOT heal a stale/lost node.
+  // Only the subsequent authenticated heartbeat may restore fresh.
   contactClocks.set(a.nodeId, wall.now);
+  registry.maintenance();
+  assert.equal(registry.getNode(a.nodeId).health.registryContact, "lost");
+  assert.deepEqual(registry.getNode(a.nodeId).health.alertFlags, ["contact-lost"]);
+  assert.equal(registry.getNode(b.nodeId).health.registryContact, "fresh");
+
   const reconnect = await signedMachineRequest(server.baseUrl, {
     path: "/api/v1/heartbeat",
     nodeId: a.nodeId,

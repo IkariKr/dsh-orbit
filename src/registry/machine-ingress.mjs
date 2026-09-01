@@ -21,30 +21,25 @@ export function createMachineIngressServer({
   }
 
   const server = createServer((request, response) => {
-    let url;
-    try {
-      url = new URL(request.url ?? "/", "http://registry-machine.local");
-    } catch {
-      response.writeHead(400, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: { code: "bad-request", message: "malformed request URL" } }));
-      request.resume();
-      return;
-    }
-    if (url.search !== "") {
+    // Match the raw request-target exactly. WHATWG URL parsing normalizes
+    // dot segments, which would turn e.g. /api/v1/heartbeat/../enroll into
+    // an allowed route and violate RFC-0006's no-path-canonicalization rule.
+    const rawTarget = request.url ?? "/";
+    if (rawTarget.includes("?")) {
       response.writeHead(400, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { code: "query-not-allowed", message: "query strings are not part of the registry protocol" } }));
       request.resume();
       return;
     }
-    if (!MACHINE_INGRESS_PATH_SET.has(url.pathname)) {
+    if (!MACHINE_INGRESS_PATH_SET.has(rawTarget)) {
       response.writeHead(403, { "content-type": "application/json" });
-      response.end(JSON.stringify({ error: { code: "machine-ingress-denied", message: "private ingress accepts only fixed machine routes" } }));
+      response.end(JSON.stringify({ error: { code: "machine-ingress-denied", message: "private ingress accepts only exact fixed machine routes" } }));
       request.resume();
       return;
     }
 
     const proxy = upstreamRequest(
-      `${upstreamUrl.origin}${url.pathname}`,
+      `${upstreamUrl.origin}${rawTarget}`,
       { method: request.method, headers: request.headers },
       (upstreamResponse) => {
         response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);

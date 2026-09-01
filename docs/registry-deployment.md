@@ -95,22 +95,24 @@ for real container/browser evidence.
 
 ## Gate B status
 
-The current mounted execution is **incomplete and remains at Review Gate B
-HOLD**. It proved real Caddy validation, the TLS mount, gateway 401/403
-admission behavior, persistent Hub/SQLite startup, real DSH A/B health,
-private enrollment, report upload, Hub-derived capabilities,
-`lastHeartbeatAt`, gateway restart recovery, and a clean PID-managed A stop.
-After the stop, the driver timed out while polling for A `stale`; a direct
-post-run inspection observed A `stale` and B still `fresh`, but this is not a
-complete Stage 6 result. The run did not reach the required real 24-hour
-`lost`, reconnect, delete/denial, reenrollment, or final B-isolation checks.
+The latest mounted run completed the trusted-browser, real-Caddy, persistent
+Hub/SQLite, real non-root DSH A/B, private enrollment, real compatibility
+report, gateway restart, accelerated stale/lost, reconnect, delete/denial,
+reenrollment, and final B-isolation lifecycle. Its sanitized evidence is in
+`docs/release-attestations/v0.3-stage6-e2e.md`.
 
-The browser backend also rejected the mounted drill's explicit self-signed
-certificate with `ERR_CERT_AUTHORITY_INVALID` before rendering the UI. Curl
-or Node HTTPS requests with certificate verification disabled are not browser
-walkthrough evidence. Gate B must not be closed until a browser-trusted
-certificate path and a complete mounted lifecycle are both proven without
-weakening the frozen TLS or health semantics.
+Final review nevertheless keeps **Review Gate B HOLD** until one short
+remediation rerun is complete. Review found that maintenance could heal
+`stale`/`lost` if the drill contact clock moved backwards on reset, that the
+private machine ingress canonicalized dot-segment request targets before its
+allowlist, and that the drill captured mutable image-tag identities before the
+compose build. The fixes make maintenance aging-only (heartbeat is the only
+path back to `fresh`), use exact raw machine request-target matching, inspect
+the images of the running containers after startup, and require A to remain
+`lost` across a real maintenance tick after the accelerated clock is removed.
+
+The full mounted drill must be rerun from a clean commit containing those
+fixes. Stage 7 remains unauthorized until that evidence passes review.
 
 ## Known follow-ups (Stage 7 scope, not authorized)
 

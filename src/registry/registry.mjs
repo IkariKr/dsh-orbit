@@ -966,10 +966,20 @@ export class Registry {
       const contacted = this.db.prepare("SELECT * FROM nodes WHERE state = 'active' AND last_heartbeat_at IS NOT NULL").all();
       for (const node of contacted) {
         const gapMs = this.registryContactNow(node).getTime() - Date.parse(node.last_heartbeat_at);
-        let target = "fresh";
-        if (gapMs > HEARTBEAT_LOST_MS) target = "lost";
-        else if (gapMs > HEARTBEAT_MISSED_BEATS_STALE * cadenceMs) target = "stale";
-        if (target !== node.registry_contact) {
+        // Maintenance is aging-only. It may advance fresh -> stale -> lost,
+        // but it must never make contact healthier when a clock moves
+        // backwards (including the mounted-drill aging override reset).
+        // Only an authenticated heartbeat restores registryContact=fresh.
+        let target = null;
+        if (gapMs > HEARTBEAT_LOST_MS && node.registry_contact !== "lost") {
+          target = "lost";
+        } else if (
+          gapMs > HEARTBEAT_MISSED_BEATS_STALE * cadenceMs &&
+          node.registry_contact === "fresh"
+        ) {
+          target = "stale";
+        }
+        if (target !== null) {
           this.transitionDimension(node.node_id, "registry_contact", target, "maintenance");
           this.db.prepare("UPDATE nodes SET registry_contact = ? WHERE node_id = ?").run(target, node.node_id);
           if (target === "lost") {

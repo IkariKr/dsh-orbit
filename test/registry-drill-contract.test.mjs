@@ -22,6 +22,8 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /nodeIds: \[aNodeId, bNodeId\]/);
   assert.match(source, /runVerificationSequence\(/);
   assert.match(source, /createCompatibilityReport\(/);
+  assert.match(source, /runningImageEvidence\(/);
+  assert.match(source, /aging reset healed A without heartbeat/);
   assert.doesNotMatch(source, /Object\.fromEntries\(/);
   assert.doesNotMatch(source, /rejectUnauthorized:\s*false/);
 });
