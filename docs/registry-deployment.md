@@ -95,24 +95,24 @@ for real container/browser evidence.
 
 ## Gate B status
 
-The latest mounted run completed the trusted-browser, real-Caddy, persistent
-Hub/SQLite, real non-root DSH A/B, private enrollment, real compatibility
-report, gateway restart, accelerated stale/lost, reconnect, delete/denial,
+The remediation mounted run from clean commit
+`2f713e8bbd023ac49080bd2da44023c4a31323db` completed the trusted-browser,
+real-Caddy, persistent Hub/SQLite, real non-root DSH A/B, private enrollment,
+real compatibility report, gateway restart, accelerated stale/lost,
+aging-reset maintenance tick, authenticated reconnect, delete/denial,
 reenrollment, and final B-isolation lifecycle. Its sanitized evidence is in
-`docs/release-attestations/v0.3-stage6-e2e.md`.
+`docs/release-attestations/v0.3-stage6-e2e.md`; raw evidence remains in
+`data/drill-evidence.json` for the next Review.
 
-Final review nevertheless keeps **Review Gate B HOLD** until one short
-remediation rerun is complete. Review found that maintenance could heal
-`stale`/`lost` if the drill contact clock moved backwards on reset, that the
-private machine ingress canonicalized dot-segment request targets before its
-allowlist, and that the drill captured mutable image-tag identities before the
-compose build. The fixes make maintenance aging-only (heartbeat is the only
-path back to `fresh`), use exact raw machine request-target matching, inspect
-the images of the running containers after startup, and require A to remain
-`lost` across a real maintenance tick after the accelerated clock is removed.
+The remediation specifically proves that maintenance is aging-only: resetting
+the accelerated clock does not heal A, and only its authenticated heartbeat
+returns `registryContact` to `fresh`. The private machine ingress uses exact
+raw request-target matching and rejects query, encoded, dot-segment, browser,
+and unknown variants before upstream. Image identities were captured from the
+running containers after compose build/start.
 
-The full mounted drill must be rerun from a clean commit containing those
-fixes. Stage 7 remains unauthorized until that evidence passes review.
+Review Gate B remains **HOLD** pending review of this evidence. Stage 7 remains
+unauthorized and has not started.
 
 ## Known follow-ups (Stage 7 scope, not authorized)
 
