@@ -1,0 +1,204 @@
+# Mounted deployment drill (Gate B live evidence). Runs the REAL
+# topology on Docker Desktop:
+#   browser --TLS--> caddy (hub netns) --127.0.0.1:5445--> hub
+#   dsh-a / dsh-b (bridge, own netns) --private machine ingress--> hub
+#
+# The Hub process binds 127.0.0.1:5445 exclusively (frozen listener
+# policy intact). The machine-ingress sidecar lives in the Hub's
+# network namespace, listens on the compose bridge (5446) and proxies
+# to the loopback listener — the documented private machine boundary.
+
+services:
+  registry-hub:
+    build:
+      context: ..
+      dockerfile: docker-registry/Dockerfile
+    image: dsh-orbit-registry:drill
+    environment:
+      DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:-drill-gateway-secret}
+      DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: operator
+      DSH_ORBIT_HUB_TRUSTED_SCHEME: https
+      DSH_ORBIT_HUB_DRILL_AGING: "1"
+      DSH_ORBIT_HUB_DRILL_AGING_CLOCK: /data/orbit/drill-aging-clock
+    user: "1000:1000"
+    volumes:
+      - ../data/orbit-drill:/data/orbit:rw
+    ports:
+      - "127.0.0.1:5445:5445"
+      - "127.0.0.1:8443:8443"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    stop_grace_period: 15s
+
+  machine-ingress:
+    image: dsh-orbit-registry:drill
+    user: "1000:1000"
+    entrypoint: []
+    network_mode: "service:registry-hub"
+    depends_on:
+      - registry-hub
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    command:
+      - node
+      - /opt/dsh-orbit/bin/dsh-orbit-machine-ingress.mjs
+
+  caddy:
+    image: caddy:2-alpine
+    user: "1000:1000"
+    network_mode: "service:registry-hub"
+    depends_on:
+      - registry-hub
+    environment:
+      DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:-drill-gateway-secret}
+      DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: operator
+    volumes:
+      - ./drill.Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../data/orbit-drill/tls:/etc/caddy/tls:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+      - /data:rw,nosuid,nodev,size=16m
+
+  dsh-a-init:
+    image: dsh-orbit:dsh-drill-a
+    entrypoint: []
+    user: "0"
+    restart: "no"
+    volumes:
+      - dsh-a-data:/data/dsh-a
+    read_only: true
+    command: ["sh", "-c", "mkdir -p /data/dsh-a/profiles/node_modules /data/dsh-a/profiles/web; chown -R 10001:10001 /data/dsh-a; chmod 750 /data/dsh-a/profiles"]
+
+  dsh-a-gateway:
+    image: caddy:2-alpine
+    network_mode: "service:dsh-a"
+    depends_on:
+      dsh-a:
+        condition: service_healthy
+    environment:
+      DSH_PUBLIC_HOST: dsh-a.test
+      DSH_PROXY_AUTH: drill-proxy-secret
+    volumes:
+      - ./dsh-drill.Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../data/orbit-drill/tls:/etc/caddy/tls:ro
+    read_only: true
+    user: "1000:1000"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+
+  dsh-a:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        DSH_PUBLIC_HOST: dsh-a.test
+    image: dsh-orbit:dsh-drill-a
+    user: "10001:10001"
+    depends_on:
+      registry-hub:
+        condition: service_started
+      machine-ingress:
+        condition: service_started
+      dsh-a-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:18443:9443"
+    environment:
+      DSH_HOME: /data/dsh-a
+      HOME: /data/dsh-a
+      DSH_PUBLIC_HOST: dsh-a.test
+      DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
+      DSH_PROFILE_ROOT: /data/dsh-a/profiles/web
+      DSH_PROFILE_CONNECTION_ROOT: /data/dsh-a/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib
+    volumes:
+      - dsh-a-data:/data/dsh-a
+      - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/dsh-orbit-ready && wget -q -O /dev/null http://127.0.0.1:3080"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    # Long-lived DSH uses the image's production entrypoint unchanged.
+    # Orbit Node is launched separately by the drill.
+
+  dsh-b-init:
+    image: dsh-orbit:dsh-drill-b
+    entrypoint: []
+    user: "0"
+    restart: "no"
+    volumes:
+      - dsh-b-data:/data/dsh-b
+    read_only: true
+    command: ["sh", "-c", "mkdir -p /data/dsh-b/profiles/node_modules /data/dsh-b/profiles/web; chown -R 10001:10001 /data/dsh-b; chmod 750 /data/dsh-b/profiles"]
+
+  dsh-b-gateway:
+    image: caddy:2-alpine
+    network_mode: "service:dsh-b"
+    depends_on:
+      dsh-b:
+        condition: service_healthy
+    environment:
+      DSH_PUBLIC_HOST: dsh-b.test
+      DSH_PROXY_AUTH: drill-proxy-secret
+    volumes:
+      - ./dsh-drill.Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../data/orbit-drill/tls:/etc/caddy/tls:ro
+    read_only: true
+    user: "1000:1000"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+
+  dsh-b:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        DSH_PUBLIC_HOST: dsh-b.test
+    image: dsh-orbit:dsh-drill-b
+    user: "10001:10001"
+    depends_on:
+      registry-hub:
+        condition: service_started
+      machine-ingress:
+        condition: service_started
+      dsh-b-init:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:18444:9443"
+    environment:
+      DSH_HOME: /data/dsh-b
+      HOME: /data/dsh-b
+      DSH_PUBLIC_HOST: dsh-b.test
+      DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
+      DSH_PROFILE_ROOT: /data/dsh-b/profiles/web
+      DSH_PROFILE_CONNECTION_ROOT: /data/dsh-b/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib
+    volumes:
+      - dsh-b-data:/data/dsh-b
+      - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/dsh-orbit-ready && wget -q -O /dev/null http://127.0.0.1:3080"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    # Long-lived DSH uses the image's production entrypoint unchanged.
+    # Orbit Node is launched separately by the drill.
+
+volumes:
+  dsh-a-data:
+  dsh-b-data:

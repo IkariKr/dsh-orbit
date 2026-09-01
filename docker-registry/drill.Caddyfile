@@ -1,0 +1,48 @@
+# Drill gateway (Gate B mounted-deployment evidence).
+# Mirrors docker-registry/Caddyfile.example for LOCAL execution:
+#   - tls internal (drill-only; production uses a real issuer);
+#   - :8443 matches any Host so the browser can reach
+#     https://127.0.0.1:8443 directly;
+#   - machine surface FIRST (never proxied);
+#   - authentication gate FIRST, then strip + inject;
+#   - Cookie / Origin / Sec-Fetch-Site pass through untouched.
+
+{
+    http_port 80
+    https_port 8443
+}
+
+https://:8443 {
+    @machine path /api/v1/*
+    handle @machine {
+        respond 403
+    }
+
+    @assets path / /index.html /app.mjs /view-model.mjs /styles.css
+    handle @assets {
+        basic_auth {
+            operator $2a$14$bsm0UM/r9TDI0b70bwS.LuMKOadTMk3N1TSjSmlDtbpzmByVxEFqG
+        }
+        reverse_proxy 127.0.0.1:5445 {
+            header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
+            header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
+        }
+    }
+
+    handle {
+        basic_auth {
+            operator $2a$14$bsm0UM/r9TDI0b70bwS.LuMKOadTMk3N1TSjSmlDtbpzmByVxEFqG
+        }
+        reverse_proxy 127.0.0.1:5445 {
+            header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
+            header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
+        }
+    }
+
+# Explicit drill-only self-signed cert (IP SAN 127.0.0.1). The IAB/browser
+# must trust this certificate through an explicit local trust setup before
+# browser UI evidence can be accepted; curl/Node verification bypass is not
+# a substitute.
+
+    tls /etc/caddy/tls/tls.crt /etc/caddy/tls/tls.key
+}

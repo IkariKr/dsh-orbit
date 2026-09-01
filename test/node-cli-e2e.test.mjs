@@ -4,7 +4,7 @@
 // a new object in the same process.
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -12,6 +12,7 @@ import test from "node:test";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
 import { createHubServer } from "../src/registry/server.mjs";
+import { validReport } from "./helpers/registry-fixture.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -98,4 +99,35 @@ test("child-process enrollment + restart: identity preserved, exactly one Node o
   assert.equal(node.state, "active");
   const storedKeyId = registry.db.prepare("SELECT key_id FROM node_keys WHERE node_id = ? AND state = 'active'").get(nodeId).key_id;
   assert.equal(storedKeyId, statusKeyId, "the keyId must match across processes");
+
+  const reportPath = join(dir, "report.json");
+  await writeFile(reportPath, JSON.stringify(validReport()), "utf8");
+  const uploaded = await runCli({ env: { args: ["upload-report"], vars: { ...common, DSH_ORBIT_REPORT_FILE: reportPath } } });
+  assert.equal(uploaded.code, 0, uploaded.stderr);
+  assert.equal(uploaded.stderr, "");
+  assert.match(uploaded.stdout, /uploaded: orbitCompatible pass, capabilities 3/);
+  assert.equal(registry.getNode(nodeId).health.orbitCompatible, "pass");
+  assert.equal(registry.getNode(nodeId).health.dshHealthy, "ok");
+
+  const missingEnv = await runCli({ env: { args: ["upload-report"], vars: common } });
+  assert.equal(missingEnv.code, 2);
+  assert.match(missingEnv.stderr, /DSH_ORBIT_REPORT_FILE is required/);
+
+  const malformedPath = join(dir, "malformed.json");
+  await writeFile(malformedPath, "not-json", "utf8");
+  const malformed = await runCli({ env: { args: ["upload-report"], vars: { ...common, DSH_ORBIT_REPORT_FILE: malformedPath } } });
+  assert.equal(malformed.code, 1);
+  assert.match(malformed.stderr, /report upload failed/);
+
+  const missingPath = join(dir, "missing.json");
+  const missing = await runCli({ env: { args: ["upload-report"], vars: { ...common, DSH_ORBIT_REPORT_FILE: missingPath } } });
+  assert.equal(missing.code, 1);
+  assert.match(missing.stderr, /report upload failed/);
+  assert.match(missing.stderr, /ENOENT|no such file/i);
+
+  registry.deleteNode({ actor: "operator", nodeId, requestId: "ab".repeat(16), reason: "cli-contract" });
+  const revoked = await runCli({ env: { args: ["upload-report"], vars: { ...common, DSH_ORBIT_REPORT_FILE: reportPath } } });
+  assert.equal(revoked.code, 1);
+  assert.match(revoked.stderr, /report upload failed/);
+  assert.match(revoked.stderr, /revoked|key-revoked/i);
 });

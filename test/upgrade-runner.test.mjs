@@ -13,6 +13,7 @@ import {
   preflight,
   probeCandidateToken,
   runCandidateWorkflow,
+  verifyResolvedComposeConfig,
 } from "../src/upgrade-runner.mjs";
 import {
   COMPATIBILITY_OUTCOMES,
@@ -78,6 +79,7 @@ function resolvedCompose(config, overrides = {}) {
     services: {
       dsh: {
         image: config.candidateImage,
+        user: "10001:10001",
         volumes: [
           { source: config.candidateDataRoot, target: "/data" },
           { source: config.candidateWorkspaceRoot, target: "/workspace" },
@@ -120,7 +122,7 @@ function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessio
           resolvedCompose(config, {
             services: {
               dsh: resolvedCompose(config).services.dsh,
-              [config.gatewayService]: { volumes: gatewayVolumes },
+              [config.gatewayService]: { user: "1000:1000", volumes: gatewayVolumes },
             },
           });
         return { code: 0, stdout: JSON.stringify(resolvedConfig), stderr: "" };
@@ -385,6 +387,24 @@ test("every docker command is scoped to the candidate project and both compose f
   });
 });
 
+test("patch verification rejects a mismatched reported DSH upstream version", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir));
+    const { runCommand, fetchPage, snapshotHook, tlsProbe } = fakeExecutors(config);
+    const mismatched = async (file, args, options) => {
+      const result = await runCommand(file, args, options);
+      if (file === "docker" && args.includes("--check")) {
+        return { ...result, stdout: result.stdout.replace("DSH upstream: 0.1.1-rc.2", "DSH upstream: 9.9.9") };
+      }
+      return result;
+    };
+    const result = await runCandidateWorkflow({ config, runCommand: mismatched, fetchPage, snapshotHook, tlsProbe });
+    assert.equal(result.report.checks.globalPatch.status, "fail");
+    assert.match(result.report.checks.globalPatch.detail, /reported DSH upstream/);
+    assert.equal(result.report.checks.profilePatch.status, "pass");
+  });
+});
+
 test("a required verification failure stops the sequence and marks later checks not_run", async () => {
   await withTempDir(async (dir) => {
     const config = fixtureConfig(workdir(dir));
@@ -499,6 +519,57 @@ test("probeCandidateToken verifies the running stack carries the run token", asy
     await assert.rejects(
       probeCandidateToken({ config, candidateToken: "wrong", runCommand }),
       UpgradeBindingError,
+    );
+  });
+});
+
+test("numeric zero uid formatting fails the binding verification", async () => {
+  await withTempDir(async (dir) => {
+    const config = fixtureConfig(workdir(dir));
+    for (const user of ["0:10001", "00:10001", "000:10001", "000000000000000000000:10001", "10001:10001x"]) {
+      const resolved = resolvedCompose(config, {
+        services: {
+          dsh: {
+            ...resolvedCompose(config).services.dsh,
+            user,
+          },
+          [config.gatewayService]: {
+            user: "1000:1000",
+            volumes: [
+              { source: `${config.workdir}/gateway-identity-cert.pem`, target: config.gatewayCertTarget },
+              { source: `${config.workdir}/gateway-identity-key.pem`, target: config.gatewayKeyTarget },
+            ],
+          },
+        },
+      });
+      assert.throws(
+        () => verifyResolvedComposeConfig(resolved, config, {
+          certPath: `${config.workdir}/gateway-identity-cert.pem`,
+          keyPath: `${config.workdir}/gateway-identity-key.pem`,
+        }),
+        (error) => error instanceof UpgradeBindingError && /explicit non-root uid:gid/.test(error.message),
+        `must reject ${user}`,
+      );
+    }
+
+    const gatewayZero = resolvedCompose(config, {
+      services: {
+        dsh: resolvedCompose(config).services.dsh,
+        [config.gatewayService]: {
+          user: "00:1000",
+          volumes: [
+            { source: `${config.workdir}/gateway-identity-cert.pem`, target: config.gatewayCertTarget },
+            { source: `${config.workdir}/gateway-identity-key.pem`, target: config.gatewayKeyTarget },
+          ],
+        },
+      },
+    });
+    assert.throws(
+      () => verifyResolvedComposeConfig(gatewayZero, config, {
+        certPath: `${config.workdir}/gateway-identity-cert.pem`,
+        keyPath: `${config.workdir}/gateway-identity-key.pem`,
+      }),
+      (error) => error instanceof UpgradeBindingError && /caddy service must use an explicit non-root uid:gid/.test(error.message),
     );
   });
 });

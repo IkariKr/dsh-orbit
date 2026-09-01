@@ -48,9 +48,10 @@ function quoteYaml(value) {
 }
 
 export function generateComposeOverride(config, candidateToken, gatewayIdentity = null) {
+  const service = config.composeService ?? "dsh";
   const lines = [
     "services:",
-    "  dsh:",
+    `  ${service}:`,
     `    image: ${quoteYaml(config.candidateImage)}`,
     "    environment:",
     `      ${CANDIDATE_TOKEN_ENV}: ${quoteYaml(candidateToken)}`,
@@ -92,19 +93,39 @@ function resolvedTargetOf(volume) {
   return volume?.target ?? volume?.Destination ?? "";
 }
 
+function parseUidGid(value) {
+  const match = typeof value === "string" ? value.match(/^(\d+):(\d+)$/) : null;
+  if (!match) return null;
+  const uid = Number(match[1]);
+  const gid = Number(match[2]);
+  if (!Number.isSafeInteger(uid) || !Number.isSafeInteger(gid)) return null;
+  return { uid, gid };
+}
+
+function isExplicitNonRootUser(value) {
+  const parsed = parseUidGid(value);
+  return parsed !== null && parsed.uid !== 0;
+}
+
 export function verifyResolvedComposeConfig(resolved, config, gatewayIdentity = null) {
   const problems = [];
   if (resolved?.name !== config.project) {
     problems.push(`resolved project name ${JSON.stringify(resolved?.name)} is not ${JSON.stringify(config.project)}`);
   }
-  const dsh = resolved?.services?.dsh;
+  const service = config.composeService ?? "dsh";
+  const dsh = resolved?.services?.[service];
   if (!dsh) {
-    problems.push("resolved configuration has no dsh service");
+    problems.push(`resolved configuration has no ${service} service`);
     throw new UpgradeBindingError(`candidate compose binding verification failed: ${problems.join("; ")}`);
   }
   if (dsh.image !== config.candidateImage) {
-    problems.push(`resolved image ${JSON.stringify(dsh.image)} is not the candidate image ${JSON.stringify(config.candidateImage)}`);
+    problems.push(`resolved image ${JSON.stringify(dsh.image)} is not the candidate image ${config.candidateImage}`);
   }
+  const dshUser = String(dsh.user ?? "");
+  if (!isExplicitNonRootUser(dshUser)) {
+    problems.push(`resolved ${service} service must use an explicit non-root uid:gid, got ${JSON.stringify(dsh.user ?? null)}`);
+  }
+
   const volumes = dsh.volumes ?? [];
   const dataVolume = volumes.find((volume) => resolvedTargetOf(volume) === "/data");
   if (!dataVolume || resolvedSourceOf(dataVolume) !== config.candidateDataRoot) {
@@ -154,6 +175,10 @@ export function verifyResolvedComposeConfig(resolved, config, gatewayIdentity = 
     if (!gateway) {
       problems.push(`resolved configuration has no ${config.gatewayService} service`);
     } else {
+      const gatewayUser = String(gateway.user ?? "");
+      if (!isExplicitNonRootUser(gatewayUser)) {
+        problems.push(`resolved ${config.gatewayService} service must use an explicit non-root uid:gid, got ${JSON.stringify(gateway.user ?? null)}`);
+      }
       const gatewayVolumes = gateway.volumes ?? [];
       for (const [target, source] of [
         [config.gatewayCertTarget, gatewayIdentity.certPath],
@@ -225,6 +250,7 @@ export function loadUpgradeConfig(env) {
       gatewayCertTarget: env.DSH_UPGRADE_GATEWAY_CERT_TARGET ?? "/run/certs/fullchain.pem",
       gatewayKeyTarget: env.DSH_UPGRADE_GATEWAY_KEY_TARGET ?? "/run/certs/privkey.pem",
       project: env.DSH_UPGRADE_PROJECT ?? "dsh-orbit-candidate",
+      composeService: env.DSH_UPGRADE_COMPOSE_SERVICE ?? "dsh",
       composeFile: env.DSH_UPGRADE_COMPOSE ?? `${REPO_ROOT}docker/compose.example.yaml`,
       workdir: env.DSH_UPGRADE_WORKDIR ?? `${REPO_ROOT}.upgrade-run`,
     },
@@ -341,17 +367,18 @@ function failDetail(output, fallback) {
   return line ?? fallback;
 }
 
+function composeService(config) {
+  return config.composeService ?? "dsh";
+}
+
 function composeArgs(config, ...subcommand) {
-  return [
-    "compose",
-    "-f",
-    config.composeFile,
-    "-f",
-    `${config.workdir}/compose.override.yaml`,
-    "-p",
-    config.project,
-    ...subcommand,
-  ];
+  const args = ["compose", "-f", config.composeFile];
+  const overrideFile = config.composeOverrideFile === undefined
+    ? `${config.workdir}/compose.override.yaml`
+    : config.composeOverrideFile;
+  if (overrideFile) args.push("-f", overrideFile);
+  args.push("-p", config.project, ...subcommand);
+  return args;
 }
 
 export async function resolveCandidateBinding({ config, runCommand = defaultRunCommand, gatewayIdentity = null }) {
@@ -409,10 +436,10 @@ export async function resolveCandidateBinding({ config, runCommand = defaultRunC
 }
 
 export async function probeCandidateToken({ config, candidateToken, runCommand = defaultRunCommand }) {
-  const probe = await runCommand("docker", composeArgs(config, "exec", "-T", "dsh", "printenv", CANDIDATE_TOKEN_ENV));
+  const probe = await runCommand("docker", composeArgs(config, "exec", "-T", composeService(config), "printenv", CANDIDATE_TOKEN_ENV));
   if (probe.code !== 0 || probe.stdout.trim() !== candidateToken) {
     throw new UpgradeBindingError(
-      `candidate stack identity mismatch: the running dsh container does not carry this run's candidate token`,
+      `candidate stack identity mismatch: the running ${composeService(config)} container does not carry this run's candidate token`,
     );
   }
 }
@@ -453,11 +480,12 @@ export async function generateGatewayIdentityCertificate({ config, runCommand = 
   return { ...identity, fingerprint: certificate.fingerprint256 };
 }
 
-async function defaultTlsProbe({ host, port, servername }) {
+async function defaultTlsProbe({ host, port, servername, ca = null }) {
   return new Promise((resolve, reject) => {
-    // Node forbids SNI with an IP literal; certificate IP SANs are matched without it
+    // Node forbids SNI with an IP literal; certificate IP SANs are matched without it.
+    // Trust is explicit for the per-run certificate; validation is never disabled.
     const socket = tls.connect(
-      { host, port, ...(isIP(host) ? {} : { servername }), rejectUnauthorized: false },
+      { host, port, ...(isIP(host) ? {} : { servername }), ...(ca ? { ca } : {}), rejectUnauthorized: true },
       () => {
       const certificate = socket.getPeerCertificate();
       socket.destroy();
@@ -471,12 +499,13 @@ async function defaultTlsProbe({ host, port, servername }) {
   });
 }
 
-export async function verifyGatewayIdentity({ config, identity, tlsProbe = defaultTlsProbe }) {
+export async function verifyGatewayIdentity({ config, identity, tlsProbe = defaultTlsProbe, ca = null }) {
   const endpoint = new URL(config.candidateEndpoint);
   const presented = await tlsProbe({
     host: endpoint.hostname,
     port: Number(endpoint.port || 443),
     servername: endpoint.hostname,
+    ...(ca ? { ca } : {}),
   });
   if (presented !== identity.fingerprint) {
     throw new UpgradeBindingError(
@@ -534,14 +563,19 @@ export async function runVerificationSequence({
       names: ["globalPatch", "profilePatch"],
       required: true,
       run: async () => {
-        const patch = await runCommand("docker", composeArgs(config, "exec", "-T", "dsh", "node", PATCHER, "--check"));
-        const roots = patch.stdout
-          .split("\n")
-          .filter((line) => line.startsWith("/"))
-          .map((line) => line.trim());
+        const patch = await runCommand("docker", composeArgs(config, "exec", "-T", composeService(config), "node", PATCHER, "--check"));
+        const lines = patch.stdout.split("\n").map((line) => line.trim());
+        const upstreamVersion = lines.find((line) => line.startsWith("DSH upstream:"))?.slice("DSH upstream:".length).trim();
+        const roots = lines.filter((line) => line.startsWith("/"));
         const globalOk = roots[0]?.includes(": ok") ?? false;
         const profileOk = roots[1]?.includes(": ok") ?? false;
-        record("globalPatch", globalOk ? "pass" : "fail", globalOk ? roots[0] : failDetail(patch.stderr, `patch check exit ${patch.code}`));
+        const versionOk = upstreamVersion === config.dshVersion;
+        const globalDetail = !versionOk
+          ? `patch check reported DSH upstream ${JSON.stringify(upstreamVersion ?? null)}, expected ${JSON.stringify(config.dshVersion)}`
+          : globalOk
+            ? roots[0]
+            : failDetail(patch.stderr, `patch check exit ${patch.code}`);
+        record("globalPatch", globalOk && versionOk ? "pass" : "fail", globalDetail);
         record(
           "profilePatch",
           profileOk ? "pass" : "fail",
@@ -759,8 +793,8 @@ export async function runCandidateWorkflow({
       };
     } else {
       await probeCandidateToken({ config, candidateToken, runCommand });
-      await verifyGatewayIdentity({ config, identity: gatewayIdentity, tlsProbe });
       const identityCa = await readFile(gatewayIdentity.certPath, "utf8");
+      await verifyGatewayIdentity({ config, identity: gatewayIdentity, tlsProbe, ca: identityCa });
       const { checks } = await runVerificationSequence({
         config,
         runCommand,
@@ -803,12 +837,17 @@ export async function runVerifyWorkflow({
       `no candidate override found in ${config.workdir}; run the candidate workflow first`,
     );
   }
-  await resolveCandidateBinding({ config, runCommand });
-  await probeCandidateToken({ config, candidateToken, runCommand });
   const identityCertPath = `${config.workdir}/gateway-identity-cert.pem`;
-  const identity = { fingerprint: new X509Certificate(await readFile(identityCertPath)).fingerprint256 };
-  await verifyGatewayIdentity({ config, identity, tlsProbe });
+  const identityKeyPath = `${config.workdir}/gateway-identity-key.pem`;
+  await resolveCandidateBinding({
+    config,
+    runCommand,
+    gatewayIdentity: { certPath: identityCertPath, keyPath: identityKeyPath },
+  });
+  await probeCandidateToken({ config, candidateToken, runCommand });
   const identityCa = await readFile(identityCertPath, "utf8");
+  const identity = { fingerprint: new X509Certificate(identityCa).fingerprint256 };
+  await verifyGatewayIdentity({ config, identity, tlsProbe, ca: identityCa });
   const { checks } = await runVerificationSequence({
     config,
     runCommand,

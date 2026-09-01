@@ -41,6 +41,15 @@ services:
       - ./hooks:/opt/dsh-orbit/hooks:ro
 ```
 
+Before the first start, prepare bind-mounted directories on the host. The long-lived DSH process runs as UID/GID `10001:10001`, while the Caddy process runs as `1000:1000`; the container entrypoints do not run as root to repair host ownership. Create the directories and grant only the required service ownership, for example:
+
+```sh
+install -d -m 0750 -o 10001 -g 10001 ./data ./workspace
+install -d -m 0750 -o 1000 -g 1000 ./caddy-data ./caddy-config
+```
+
+If an existing deployment already contains files, review and correct ownership before recreating the containers. Do not add a root long-lived service as a workaround; any one-shot initialization must be separately scoped, bounded, and completed before the non-root service starts.
+
 This arrangement has three properties:
 
 1. the public Git repository remains free of deployment credentials and machine-specific configuration;

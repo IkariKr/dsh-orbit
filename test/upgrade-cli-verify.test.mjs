@@ -76,6 +76,7 @@ function resolvedCompose(config, merged) {
       dsh: merged
         ? {
             image: config.candidateImage,
+            user: "10001:10001",
             volumes: [
               { source: config.candidateDataRoot, target: "/data" },
               { source: config.candidateWorkspaceRoot, target: "/workspace" },
@@ -84,7 +85,7 @@ function resolvedCompose(config, merged) {
             environment: { DSH_ORBIT_CANDIDATE_TOKEN: "abc123def4567890" },
           }
         : { image: config.candidateImage, volumes: [], ports: [], environment: {} },
-      [config.gatewayService]: { volumes: gatewayVolumes },
+      [config.gatewayService]: { user: "1000:1000", volumes: gatewayVolumes },
     },
   };
 }
@@ -278,6 +279,38 @@ test("verify propagates the per-run CA to the runner checks and the smoke suites
     } finally {
       server.close();
     }
+  });
+});
+
+test("verify rejects a root gateway even when the candidate run already exists", async () => {
+  await withTempDir(async (baseDir) => {
+    const workdir = join(baseDir, "run");
+    await mkdir(workdir, { recursive: true });
+    for (const dir of ["candidate-data", "candidate-workspace", "production-data"]) {
+      await mkdir(join(workdir, dir), { recursive: true });
+    }
+    const config = fixtureConfig(workdir, 18444);
+    await writeFile(
+      `${workdir}/compose.override.yaml`,
+      `services:\n  dsh:\n    environment:\n      DSH_ORBIT_CANDIDATE_TOKEN: "abc123def4567890"\n`,
+      "utf8",
+    );
+    await writeFile(`${workdir}/gateway-identity-cert.pem`, GATEWAY_CERT_PEM, "utf8");
+    await writeFile(`${workdir}/gateway-identity-key.pem`, GATEWAY_KEY_PEM, "utf8");
+    const runCommand = async (file, args) => {
+      if (file === "docker" && args.includes("config")) {
+        const merged = args.includes(`${workdir}/compose.override.yaml`);
+        const resolved = resolvedCompose(config, merged);
+        if (merged) resolved.services.caddy.user = "00:1000";
+        return { code: 0, stdout: JSON.stringify(resolved), stderr: "" };
+      }
+      if (file === "docker" && args.includes("printenv")) return { code: 0, stdout: "abc123def4567890\n", stderr: "" };
+      throw new Error(`unexpected command: ${file} ${args.join(" ")}`);
+    };
+    await assert.rejects(
+      runVerifyWorkflow({ config, runCommand }),
+      (error) => /caddy service must use an explicit non-root uid:gid/.test(error.message),
+    );
   });
 });
 

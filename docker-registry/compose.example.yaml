@@ -1,17 +1,18 @@
-# v0.3 Registry deployment example (SOP Stage 6, Gate B closure).
+# v0.3 Registry deployment example (SOP Stage 6).
 #
-# Topology:
-#   Operator browser --TLS--> Gateway (Caddy) --loopback--> Hub :5445
-#   Node A/B (DSH) -------private machine path--------> Hub :5445
+# This minimal file defines the Hub service only. A containerized gateway
+# and machine-ingress sidecar must share the Hub network namespace, as in
+# docker-registry/drill.compose.yaml:
 #
-# The Hub container publishes ONLY to the host loopback
-# ("127.0.0.1:5445:5445"); nothing is on a public interface. The
-# gateway runs on the HOST (or with network_mode: host) so it reaches
-# the hub through that same loopback — the hub's frozen listener
-# policy (loopback-only, plain-HTTP private backend) is never relaxed.
+#   Browser --TLS--> Caddy (shared Hub namespace) --> Hub 127.0.0.1:5445
+#   Node A/B --private bridge--> registry-hub:5446 machine-ingress
+#                                      --> Hub 127.0.0.1:5445
 #
-# The machine surface is NOT routed by the gateway (see the
-# Caddyfile @machine rule): node traffic uses the private listener.
+# The Hub binds loopback only. Do not change it to 0.0.0.0, publish 5446 to
+# the host, or route /api/v1/* through the browser gateway.
+#
+# The machine surface is NOT routed by the gateway (see the Caddyfile
+# @machine rule): node traffic uses the private listener.
 
 services:
   registry-hub:
@@ -27,7 +28,8 @@ services:
       - ../data/orbit:/data/orbit:rw
     ports:
       # Private backend listener only: host loopback, never a public
-      # interface. The gateway (host/network_mode:host) connects here.
+      # interface. A containerized gateway sharing this Hub network
+      # namespace reaches the same loopback listener.
       - "127.0.0.1:${DSH_ORBIT_HUB_PORT:-5445}:5445"
     read_only: true
     tmpfs:
@@ -46,5 +48,7 @@ services:
       start_period: 5s
 
 # The gateway (Caddy) terminates TLS and routes ONLY the browser
-# surface; deploy it with network_mode: host (Linux) so it can reach
-# 127.0.0.1:5445. Machine routes are refused at the gateway (403).
+# surface. Deploy it with network_mode: service:registry-hub (or an
+# equivalent shared network namespace) so it can reach 127.0.0.1:5445.
+# Machine routes are refused at the gateway (403); a private
+# machine-ingress sidecar handles Node traffic on the compose network.

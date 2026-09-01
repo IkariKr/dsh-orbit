@@ -92,6 +92,93 @@ test("a heartbeat after contact loss restores fresh and clears the alert flag", 
   assert.deepEqual(recovered.health.alertFlags, []);
 });
 
+test("controlled contact aging is isolated from wall-clock auth, reports, and another node", async (t) => {
+  const wall = { now: new Date("2026-08-31T00:00:00.000Z") };
+  const contactClocks = new Map();
+  const registry = createTestRegistry({
+    now: () => wall.now,
+    registryContactNow: (node) => contactClocks.get(node.node_id) ?? wall.now,
+  });
+  const server = await createTestServer(registry, {});
+  t.after(async () => {
+    await server.close();
+    registry.close();
+  });
+
+  const a = await enrollNode(server.baseUrl, registry);
+  const b = await enrollNode(server.baseUrl, registry);
+  const timestamp = () => Math.trunc(wall.now.getTime() / 1000);
+  for (const node of [a, b]) {
+    const heartbeat = await signedMachineRequest(server.baseUrl, {
+      path: "/api/v1/heartbeat",
+      nodeId: node.nodeId,
+      keyId: node.keyId,
+      keyHex: node.privateKeyHex,
+      body: defaultRuntimeIdentity(),
+      timestamp: timestamp(),
+    });
+    assert.equal(heartbeat.status, 200);
+    const report = await signedMachineRequest(server.baseUrl, {
+      path: "/api/v1/report-upload",
+      nodeId: node.nodeId,
+      keyId: node.keyId,
+      keyHex: node.privateKeyHex,
+      body: validReport(),
+      timestamp: timestamp(),
+    });
+    assert.equal(report.status, 200);
+  }
+  contactClocks.set(a.nodeId, wall.now);
+  contactClocks.set(b.nodeId, wall.now);
+  registry.maintenance();
+
+  // Only A's private contact-aging clock advances. Production constants are
+  // still the fixed 60s cadence, 3 missed beats, and 24h lost threshold.
+  const aLastHeartbeat = Date.parse(registry.getNode(a.nodeId).health.lastHeartbeatAt);
+  contactClocks.set(a.nodeId, new Date(aLastHeartbeat + 181 * 1000));
+  registry.maintenance();
+  assert.equal(registry.getNode(a.nodeId).health.registryContact, "stale");
+  assert.equal(registry.getNode(b.nodeId).health.registryContact, "fresh");
+  assert.deepEqual(registry.getNode(b.nodeId).health.capabilities.map((entry) => entry.name).sort(), ["sessions.resume", "settings.remote", "web.routes"]);
+
+  contactClocks.set(a.nodeId, new Date(aLastHeartbeat + LOST_MS + 1));
+  registry.maintenance();
+  assert.equal(registry.getNode(a.nodeId).health.registryContact, "lost");
+  assert.deepEqual(registry.getNode(a.nodeId).health.alertFlags, ["contact-lost"]);
+  assert.equal(registry.getNode(b.nodeId).health.registryContact, "fresh");
+
+  // The accelerated clock is not used for machine timestamp validation or
+  // report timestamps: both requests carry the current wall-clock time and
+  // are accepted while A remains contact-lost.
+  const reportWhileLost = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/report-upload",
+    nodeId: a.nodeId,
+    keyId: a.keyId,
+    keyHex: a.privateKeyHex,
+    body: validReport(),
+    timestamp: timestamp(),
+  });
+  assert.equal(reportWhileLost.status, 200);
+  assert.equal(registry.getNode(a.nodeId).health.registryContact, "lost");
+  assert.equal(registry.getNode(a.nodeId).health.capabilities.length, 3);
+
+  // Reset the drill-only clock before reconnect. A real wall-clock heartbeat
+  // then restores fresh and clears contact-lost; B remains fresh throughout.
+  contactClocks.set(a.nodeId, wall.now);
+  const reconnect = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/heartbeat",
+    nodeId: a.nodeId,
+    keyId: a.keyId,
+    keyHex: a.privateKeyHex,
+    body: defaultRuntimeIdentity(),
+    timestamp: timestamp(),
+  });
+  assert.equal(reconnect.status, 200);
+  assert.equal(registry.getNode(a.nodeId).health.registryContact, "fresh");
+  assert.deepEqual(registry.getNode(a.nodeId).health.alertFlags, []);
+  assert.equal(registry.getNode(b.nodeId).health.registryContact, "fresh");
+});
+
 test("report evidence ages: fresh at 6d23h, stale past 7 days with capabilities withheld", async (t) => {
   const { registry, server, clock } = await withClockServer(t);
   const node = await enrollNode(server.baseUrl, registry);

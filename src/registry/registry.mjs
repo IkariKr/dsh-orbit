@@ -86,9 +86,16 @@ function requireIdentityJson(body) {
 }
 
 export class Registry {
-  constructor({ db, now = () => new Date(), heartbeatCadenceSeconds = HEARTBEAT_CADENCE_SECONDS_DEFAULT, rotationOverlapHours = ROTATION_OVERLAP_HOURS_DEFAULT }) {
+  constructor({
+    db,
+    now = () => new Date(),
+    registryContactNow = null,
+    heartbeatCadenceSeconds = HEARTBEAT_CADENCE_SECONDS_DEFAULT,
+    rotationOverlapHours = ROTATION_OVERLAP_HOURS_DEFAULT,
+  }) {
     this.db = db;
     this.now = now;
+    this.registryContactNow = registryContactNow ?? (() => this.now());
     this.heartbeatCadenceSeconds = heartbeatCadenceSeconds;
     if (rotationOverlapHours < ROTATION_OVERLAP_HOURS_MIN || rotationOverlapHours > ROTATION_OVERLAP_HOURS_MAX) {
       throw new Error(`rotation overlap must be within ${ROTATION_OVERLAP_HOURS_MIN}-${ROTATION_OVERLAP_HOURS_MAX} hours`);
@@ -958,7 +965,7 @@ export class Registry {
       // (round-2 P1). Only actual transitions write events.
       const contacted = this.db.prepare("SELECT * FROM nodes WHERE state = 'active' AND last_heartbeat_at IS NOT NULL").all();
       for (const node of contacted) {
-        const gapMs = at - Date.parse(node.last_heartbeat_at);
+        const gapMs = this.registryContactNow(node).getTime() - Date.parse(node.last_heartbeat_at);
         let target = "fresh";
         if (gapMs > HEARTBEAT_LOST_MS) target = "lost";
         else if (gapMs > HEARTBEAT_MISSED_BEATS_STALE * cadenceMs) target = "stale";

@@ -7,6 +7,7 @@ services:
         DSH_VERSION: ${DSH_VERSION:-0.1.1-rc.2}
         DSH_PUBLIC_HOST: ${DSH_PUBLIC_HOST:?set DSH_PUBLIC_HOST in .env}
     image: dsh-orbit:${DSH_VERSION:-0.1.1-rc.2}
+    user: "10001:10001"
     env_file:
       - ../.env
     environment:
@@ -42,6 +43,7 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    user: "1000:1000"
     network_mode: service:dsh
     depends_on:
       dsh:

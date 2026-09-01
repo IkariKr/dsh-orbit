@@ -22,6 +22,7 @@
 //   DSH_ORBIT_NODE_DSH_PROFILE        DSH compatibility profile
 
 import process from "node:process";
+import { readFile } from "node:fs/promises";
 import { NodeClient } from "../src/node/client.mjs";
 import { assertStateFilePermissions, loadNodeStore, loadNodeStoreAsync } from "../src/node/store.mjs";
 
@@ -105,6 +106,20 @@ switch (command) {
       });
     break;
   }
+  case "upload-report": {
+    const reportFile = requireEnv("DSH_ORBIT_REPORT_FILE");
+    try {
+      const report = JSON.parse(await readFile(reportFile, "utf8"));
+      const result = await client.uploadReport(report);
+      const count = Array.isArray(result.capabilities) ? result.capabilities.length : 0;
+      console.log(`uploaded: orbitCompatible ${result.orbitCompatible}, capabilities ${count}`);
+    } catch (error) {
+      console.error(`report upload failed: ${error.message}`);
+      process.exitCode = 1;
+    }
+    break;
+  }
+
   case "status": {
     console.log(JSON.stringify(client.status(), null, 2));
     break;

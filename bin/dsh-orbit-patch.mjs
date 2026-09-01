@@ -23,7 +23,8 @@ const PROFILE_CONNECTION_ROOT =
   `${PROFILE_ROOT}/node_modules/@deepseek-ai/dsh-client-connection/lib`;
 const PUBLIC_HOST = process.env.DSH_PUBLIC_HOST;
 const PROXY_AUTH_FILE = process.env.DSH_PROXY_AUTH_FILE || "/run/secrets/dsh_proxy_auth";
-// LEGACY THIRD-PARTY COMPATIBILITY DEBT (ADR-0001): freeze-only. dsh-ssh plugin = process.env.DSH_ORBIT_PATCH_DSH_SSH === "1";
+// LEGACY THIRD-PARTY COMPATIBILITY DEBT (ADR-0001): freeze-only.
+const SSH_PATCH_ENABLED = process.env.DSH_ORBIT_PATCH_DSH_SSH === "1";
 const SSH_PLUGIN_ROOT =
   process.env.DSH_SSH_PLUGIN_ROOT ||
   `${PROFILE_ROOT}/node_modules/@linxin666/dsh-ssh`;

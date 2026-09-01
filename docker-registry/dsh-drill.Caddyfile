@@ -1,0 +1,22 @@
+# Per-node DSH gateway used only by the mounted Stage 6 drill.
+{
+    auto_https off
+    admin off
+    servers :9443 {
+        protocols h1 h2
+    }
+}
+
+https://:9443 {
+    tls /etc/caddy/tls/tls.crt /etc/caddy/tls/tls.key
+
+    basic_auth {
+        operator $2a$14$bsm0UM/r9TDI0b70bwS.LuMKOadTMk3N1TSjSmlDtbpzmByVxEFqG
+    }
+
+    reverse_proxy 127.0.0.1:3080 {
+        header_up Host {$DSH_PUBLIC_HOST}
+        header_up X-Forwarded-Proto https
+        header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}
+    }
+}

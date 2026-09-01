@@ -1,4 +1,4 @@
-# v0.3 Registry gateway example (SOP Stage 6, Gate B closure).
+# v0.3 Registry gateway example (SOP Stage 6).
 #
 # The browser ingress ends HERE; the machine ingress NEVER ends here.
 # Enforced at the gateway:
@@ -12,8 +12,10 @@
 #   5. /api/v1/* (machine surface) is refused: nodes talk to the hub
 #      over the private loopback listener only.
 
-{# the gateway must run on the host network to reach the hub's
-   loopback publish: docker run --network host ... or network_mode: host #}
+# The gateway shares the Hub container's network namespace
+# (network_mode: service:registry-hub in compose), so it reaches the hub's
+# loopback listener exactly as documented — the frozen loopback-only
+# listener policy is never relaxed.
 {
     # replace with your domain and certificate management
     email admin@example.invalid
@@ -24,12 +26,15 @@ registration.example.invalid {
     # proxied — matchers are evaluated in order.
     @machine path /api/v1/*
     handle @machine {
-        respond 403 "machine ingress is private; node traffic uses the loopback listener"
+        respond 403
     }
 
     # The UI shell (no session needed; contains no data).
     @assets path / /index.html /app.mjs /view-model.mjs /styles.css
     handle @assets {
+        basic_auth {
+            operator $2a$10$REPLACE_WITH_BCRYPT_HASH
+        }
         reverse_proxy 127.0.0.1:5445 {
             header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
             header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
