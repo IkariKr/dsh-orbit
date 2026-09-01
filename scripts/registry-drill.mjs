@@ -51,6 +51,7 @@ const BROWSER_BOOTSTRAP_CHECKPOINT_PATH = join(
 const BROWSER_CHECKPOINT_PATH = join(REPO, "data", "orbit-drill", "browser-checkpoint.json");
 const BROWSER_BINDINGS_PATH = join(REPO, "data", "orbit-drill", "browser-checkpoint-bindings.json");
 const RUN_ID = randomUUID();
+let resolvedOpenSsl = null;
 
 const evidence = {
   runId: RUN_ID,
@@ -76,15 +77,41 @@ function requireCleanCandidateWorktree() {
   };
 }
 
+function resolveOpenSsl() {
+  if (resolvedOpenSsl !== null) return resolvedOpenSsl;
+  const candidates = [];
+  if (process.env.DSH_ORBIT_OPENSSL_BIN) candidates.push(process.env.DSH_ORBIT_OPENSSL_BIN);
+  if (process.platform === "win32") {
+    const where = spawnSync("where.exe", ["openssl.exe"], { cwd: REPO, encoding: "utf8" });
+    candidates.push(...(where.stdout ?? "").split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean));
+    candidates.push(
+      "C:\\Program Files\\Git\\mingw64\\bin\\openssl.exe",
+      "C:\\Program Files\\Git\\usr\\bin\\openssl.exe",
+    );
+  }
+  candidates.push("openssl");
+  for (const candidate of candidates) {
+    const probe = spawnSync(candidate, ["version"], { cwd: REPO, encoding: "utf8" });
+    if (probe.status === 0) {
+      resolvedOpenSsl = candidate;
+      return candidate;
+    }
+  }
+  throw new Error(
+    "OpenSSL is required for the trusted drill certificate. Install OpenSSL, add openssl.exe to PATH, or set DSH_ORBIT_OPENSSL_BIN to its full path",
+  );
+}
+
 function certificateUsable(path, caPath = null) {
   if (!existsSync(path)) return false;
-  const expiry = spawnSync("openssl", ["x509", "-in", path, "-noout", "-checkend", "60"], {
+  const openssl = resolveOpenSsl();
+  const expiry = spawnSync(openssl, ["x509", "-in", path, "-noout", "-checkend", "60"], {
     cwd: REPO,
     encoding: "utf8",
   });
   if (expiry.status !== 0) return false;
   if (caPath !== null) {
-    const verified = spawnSync("openssl", ["verify", "-CAfile", caPath, path], {
+    const verified = spawnSync(openssl, ["verify", "-CAfile", caPath, path], {
       cwd: REPO,
       encoding: "utf8",
     });
@@ -94,10 +121,11 @@ function certificateUsable(path, caPath = null) {
 }
 
 function ensureDrillCertificate() {
+  const openssl = resolveOpenSsl();
   mkdirSync(join(REPO, "data", "orbit-drill", "tls"), { recursive: true });
   const caReady = existsSync(DRILL_CA_KEY_PATH) && certificateUsable(DRILL_CA_PATH);
   if (!caReady) {
-    file("openssl", [
+    file(openssl, [
       "req",
       "-x509",
       "-newkey",
@@ -121,7 +149,7 @@ function ensureDrillCertificate() {
     certificateUsable(DRILL_CERT_PATH, DRILL_CA_PATH);
   if (!leafReady) {
     writeFileSync(DRILL_EXT_PATH, "subjectAltName=IP:127.0.0.1,DNS:dsh-a.test,DNS:dsh-b.test\n");
-    file("openssl", [
+    file(openssl, [
       "req",
       "-new",
       "-newkey",
@@ -134,7 +162,7 @@ function ensureDrillCertificate() {
       "-subj",
       "/CN=127.0.0.1",
     ]);
-    file("openssl", [
+    file(openssl, [
       "x509",
       "-req",
       "-in",
@@ -161,8 +189,8 @@ function ensureDrillCertificate() {
   evidence.tls = {
     validation: "enabled",
     caPath: DRILL_CA_PATH,
-    caFingerprint: file("openssl", ["x509", "-in", DRILL_CA_PATH, "-noout", "-fingerprint", "-sha256"]),
-    leafFingerprint: file("openssl", ["x509", "-in", DRILL_CERT_PATH, "-noout", "-fingerprint", "-sha256"]),
+    caFingerprint: file(openssl, ["x509", "-in", DRILL_CA_PATH, "-noout", "-fingerprint", "-sha256"]),
+    leafFingerprint: file(openssl, ["x509", "-in", DRILL_CERT_PATH, "-noout", "-fingerprint", "-sha256"]),
     sans: ["127.0.0.1", "dsh-a.test", "dsh-b.test"],
   };
   mkdirSync(dirname(BROWSER_BINDINGS_PATH), { recursive: true });

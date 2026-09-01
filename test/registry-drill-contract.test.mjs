@@ -16,6 +16,8 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /checkpoint\.runId/);
   assert.match(source, /checkpoint\.commit/);
   assert.match(source, /BROWSER_BINDINGS_PATH/);
+  assert.match(source, /resolveOpenSsl\(\)/);
+  assert.match(source, /DSH_ORBIT_OPENSSL_BIN/);
   assert.match(source, /checkpoint\.leafFingerprint/);
   assert.match(source, /nodeIds: \[aNodeId, bNodeId\]/);
   assert.match(source, /runVerificationSequence\(/);
