@@ -67,9 +67,27 @@ function requireCleanCandidateWorktree() {
   };
 }
 
+function certificateUsable(path, caPath = null) {
+  if (!existsSync(path)) return false;
+  const expiry = spawnSync("openssl", ["x509", "-in", path, "-noout", "-checkend", "60"], {
+    cwd: REPO,
+    encoding: "utf8",
+  });
+  if (expiry.status !== 0) return false;
+  if (caPath !== null) {
+    const verified = spawnSync("openssl", ["verify", "-CAfile", caPath, path], {
+      cwd: REPO,
+      encoding: "utf8",
+    });
+    if (verified.status !== 0) return false;
+  }
+  return true;
+}
+
 function ensureDrillCertificate() {
   mkdirSync(join(REPO, "data", "orbit-drill", "tls"), { recursive: true });
-  if (!existsSync(DRILL_CA_PATH) || !existsSync(DRILL_CA_KEY_PATH)) {
+  const caReady = existsSync(DRILL_CA_KEY_PATH) && certificateUsable(DRILL_CA_PATH);
+  if (!caReady) {
     file("openssl", [
       "req",
       "-x509",
@@ -87,39 +105,50 @@ function ensureDrillCertificate() {
       "/CN=dsh-orbit-drill-ca",
     ]);
   }
-  writeFileSync(DRILL_EXT_PATH, "subjectAltName=IP:127.0.0.1,DNS:dsh-a.test,DNS:dsh-b.test\n");
-  file("openssl", [
-    "req",
-    "-new",
-    "-newkey",
-    "rsa:2048",
-    "-nodes",
-    "-keyout",
-    DRILL_CERT_KEY_PATH,
-    "-out",
-    DRILL_CSR_PATH,
-    "-subj",
-    "/CN=127.0.0.1",
-  ]);
-  file("openssl", [
-    "x509",
-    "-req",
-    "-in",
-    DRILL_CSR_PATH,
-    "-CA",
-    DRILL_CA_PATH,
-    "-CAkey",
-    DRILL_CA_KEY_PATH,
-    "-CAcreateserial",
-    "-out",
-    DRILL_CERT_PATH,
-    "-days",
-    "2",
-    "-sha256",
-    "-extfile",
-    DRILL_EXT_PATH,
-  ]);
-  try { chmodSync(DRILL_CERT_PATH, 0o644); chmodSync(DRILL_CERT_KEY_PATH, 0o644); chmodSync(DRILL_CA_PATH, 0o644); } catch {}
+
+  const leafReady =
+    existsSync(DRILL_CERT_KEY_PATH) &&
+    existsSync(DRILL_EXT_PATH) &&
+    certificateUsable(DRILL_CERT_PATH, DRILL_CA_PATH);
+  if (!leafReady) {
+    writeFileSync(DRILL_EXT_PATH, "subjectAltName=IP:127.0.0.1,DNS:dsh-a.test,DNS:dsh-b.test\n");
+    file("openssl", [
+      "req",
+      "-new",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-keyout",
+      DRILL_CERT_KEY_PATH,
+      "-out",
+      DRILL_CSR_PATH,
+      "-subj",
+      "/CN=127.0.0.1",
+    ]);
+    file("openssl", [
+      "x509",
+      "-req",
+      "-in",
+      DRILL_CSR_PATH,
+      "-CA",
+      DRILL_CA_PATH,
+      "-CAkey",
+      DRILL_CA_KEY_PATH,
+      "-CAcreateserial",
+      "-out",
+      DRILL_CERT_PATH,
+      "-days",
+      "2",
+      "-sha256",
+      "-extfile",
+      DRILL_EXT_PATH,
+    ]);
+  }
+  try {
+    chmodSync(DRILL_CERT_PATH, 0o644);
+    chmodSync(DRILL_CERT_KEY_PATH, 0o644);
+    chmodSync(DRILL_CA_PATH, 0o644);
+  } catch {}
   evidence.tls = {
     validation: "enabled",
     caPath: DRILL_CA_PATH,
