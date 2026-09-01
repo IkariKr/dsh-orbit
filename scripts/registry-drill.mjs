@@ -9,12 +9,12 @@
 // which forwards to the Hub's loopback-only 127.0.0.1:5445 listener.
 //
 // Usage:
-//   node scripts/registry-drill.mjs [--compose-up] [--keep]
+//   node scripts/registry-drill.mjs [--compose-up] [--wait-for-browser] [--keep]
 // Prints a JSON evidence record and writes data/drill-evidence.json.
 
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { dirname, join } from "node:path";
@@ -42,9 +42,18 @@ const DRILL_CERT_PATH = join(REPO, "data", "orbit-drill", "tls", "tls.crt");
 const DRILL_CERT_KEY_PATH = join(REPO, "data", "orbit-drill", "tls", "tls.key");
 const DRILL_CSR_PATH = join(REPO, "data", "orbit-drill", "tls", "tls.csr");
 const DRILL_EXT_PATH = join(REPO, "data", "orbit-drill", "tls", "tls.ext");
+const BROWSER_BOOTSTRAP_CHECKPOINT_PATH = join(
+  REPO,
+  "data",
+  "orbit-drill",
+  "browser-bootstrap-checkpoint.json",
+);
 const BROWSER_CHECKPOINT_PATH = join(REPO, "data", "orbit-drill", "browser-checkpoint.json");
+const BROWSER_BINDINGS_PATH = join(REPO, "data", "orbit-drill", "browser-checkpoint-bindings.json");
+const RUN_ID = randomUUID();
 
 const evidence = {
+  runId: RUN_ID,
   commit: REVISION,
   startedAt: new Date().toISOString(),
   steps: [],
@@ -156,18 +165,90 @@ function ensureDrillCertificate() {
     leafFingerprint: file("openssl", ["x509", "-in", DRILL_CERT_PATH, "-noout", "-fingerprint", "-sha256"]),
     sans: ["127.0.0.1", "dsh-a.test", "dsh-b.test"],
   };
+  mkdirSync(dirname(BROWSER_BINDINGS_PATH), { recursive: true });
+  writeFileSync(
+    BROWSER_BINDINGS_PATH,
+    JSON.stringify(
+      {
+        runId: RUN_ID,
+        commit: REVISION,
+        gatewayUrl: GATEWAY_URL,
+        caFingerprint: evidence.tls.caFingerprint,
+        leafFingerprint: evidence.tls.leafFingerprint,
+        tlsValidation: "enabled",
+      },
+      null,
+      2,
+    ) + "\n",
+    { encoding: "utf8", mode: 0o640 },
+  );
 }
 
-function requireBrowserCheckpoint() {
-  if (!existsSync(BROWSER_CHECKPOINT_PATH)) {
-    throw new Error(`browser checkpoint missing: complete the trusted HTTPS UI walkthrough and write ${BROWSER_CHECKPOINT_PATH}`);
+function readCheckpoint(path, label) {
+  if (!existsSync(path)) {
+    throw new Error(`${label} missing: complete the required browser walkthrough and write ${path}`);
   }
-  let checkpoint;
   try {
-    checkpoint = JSON.parse(readFileSync(BROWSER_CHECKPOINT_PATH, "utf8"));
+    return JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
-    throw new Error(`browser checkpoint is invalid JSON: ${error.message}`);
+    throw new Error(`${label} is invalid JSON: ${error.message}`);
   }
+}
+
+function validateBrowserBindings(checkpoint, label) {
+  const bindings = [
+    ["runId", checkpoint.runId, RUN_ID],
+    ["commit", checkpoint.commit, REVISION],
+    ["gatewayUrl", checkpoint.gatewayUrl, GATEWAY_URL],
+    ["caFingerprint", checkpoint.caFingerprint, evidence.tls?.caFingerprint],
+    ["leafFingerprint", checkpoint.leafFingerprint, evidence.tls?.leafFingerprint],
+  ];
+  const mismatched = bindings
+    .filter(([, actual, expected]) => actual !== expected)
+    .map(([name]) => name);
+  if (mismatched.length > 0) {
+    throw new Error(`${label} binding mismatch: ${mismatched.join(", ")}`);
+  }
+}
+
+async function waitForCheckpoint(path, label, { attempts = 1800, intervalMs = 1000 } = {}) {
+  return waitFor(label, async () => {
+    if (!existsSync(path)) return false;
+    try {
+      return JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      return false;
+    }
+  }, { attempts, intervalMs });
+}
+
+async function requireBrowserBootstrapCheckpoint({ wait = false } = {}) {
+  const checkpoint = wait
+    ? await waitForCheckpoint(BROWSER_BOOTSTRAP_CHECKPOINT_PATH, "browser bootstrap checkpoint")
+    : readCheckpoint(BROWSER_BOOTSTRAP_CHECKPOINT_PATH, "browser bootstrap checkpoint");
+  const required = ["trustedHttps", "authenticated", "sessionBootstrapped", "tokenMinted", "plaintextOneTimeVerified"];
+  const missing = required.filter((key) => checkpoint[key] !== true);
+  if (missing.length > 0) {
+    throw new Error(`browser bootstrap checkpoint incomplete: ${missing.join(", ")}`);
+  }
+  if (checkpoint.tlsValidation !== "enabled") {
+    throw new Error("browser bootstrap checkpoint must record tlsValidation=enabled");
+  }
+  validateBrowserBindings(checkpoint, "browser bootstrap checkpoint");
+  evidence.browserBootstrap = {
+    checkpoint: "passed",
+    tlsValidation: "enabled",
+    recordedAt: checkpoint.recordedAt ?? null,
+    gatewayUrl: GATEWAY_URL,
+    caFingerprint: evidence.tls.caFingerprint,
+    leafFingerprint: evidence.tls.leafFingerprint,
+  };
+}
+
+async function requireBrowserCheckpoint({ wait = false, nodeIds = [] } = {}) {
+  const checkpoint = wait
+    ? await waitForCheckpoint(BROWSER_CHECKPOINT_PATH, "browser lifecycle checkpoint")
+    : readCheckpoint(BROWSER_CHECKPOINT_PATH, "browser lifecycle checkpoint");
   const required = ["trustedHttps", "authenticated", "nodesObserved", "nodeDetailObserved", "sessionBootstrapped", "tokenMinted", "plaintextOneTimeVerified"];
   const missing = required.filter((key) => checkpoint[key] !== true);
   if (missing.length > 0) {
@@ -176,7 +257,11 @@ function requireBrowserCheckpoint() {
   if (checkpoint.tlsValidation !== "enabled") {
     throw new Error("browser checkpoint must record tlsValidation=enabled");
   }
+  if (!Array.isArray(checkpoint.nodeIds) || nodeIds.some((nodeId) => !checkpoint.nodeIds.includes(nodeId))) {
+    throw new Error(`browser lifecycle checkpoint must include the live nodeIds: ${nodeIds.join(", ")}`);
+  }
   const bindings = [
+    ["runId", checkpoint.runId, RUN_ID],
     ["commit", checkpoint.commit, REVISION],
     ["gatewayUrl", checkpoint.gatewayUrl, GATEWAY_URL],
     ["caFingerprint", checkpoint.caFingerprint, evidence.tls?.caFingerprint],
@@ -195,6 +280,7 @@ function requireBrowserCheckpoint() {
     gatewayUrl: GATEWAY_URL,
     caFingerprint: evidence.tls.caFingerprint,
     leafFingerprint: evidence.tls.leafFingerprint,
+    nodeIds: [...checkpoint.nodeIds],
   };
 }
 
@@ -395,8 +481,11 @@ exit 4
 async function main() {
   const args = process.argv.slice(2);
   requireCleanCandidateWorktree();
+  rmSync(BROWSER_BOOTSTRAP_CHECKPOINT_PATH, { force: true });
+  rmSync(BROWSER_CHECKPOINT_PATH, { force: true });
   ensureDrillCertificate();
   const composeUp = args.includes("--compose-up");
+  const waitForBrowser = args.includes("--wait-for-browser");
   const keep = args.includes("--keep");
   let stackStarted = false;
   runCleanup = async () => {
@@ -466,9 +555,11 @@ async function main() {
   await waitFor("gateway tls", async () => (await gatewayFetch("/")).status === 200);
 
   // The mounted lifecycle is not final evidence until the real browser
-  // walkthrough has proved trusted HTTPS and one-time token handling.
-  requireBrowserCheckpoint();
-  evidence.steps.push("browser: trusted HTTPS UI checkpoint accepted before lifecycle");
+  // walkthrough has proved trusted HTTPS, authentication, session bootstrap,
+  // and one-time token handling. Nodes do not exist yet, so node-list/detail
+  // observation is checked at the second barrier below.
+  await requireBrowserBootstrapCheckpoint({ wait: waitForBrowser });
+  evidence.steps.push("browser: trusted HTTPS bootstrap checkpoint accepted");
 
   // --- 2. operator session through the gateway (real browser surface) ---
   const unauthenticated = await gatewayFetch("/hub/nodes", { authenticate: false });
@@ -641,6 +732,11 @@ async function main() {
     throw new Error(`lastHeartbeatAt missing: A=${JSON.stringify(aRow.health.lastHeartbeatAt)} B=${JSON.stringify(bRow.health.lastHeartbeatAt)}`);
   }
   evidence.steps.push(`both fresh with ${aRow.health.capabilities.length} capabilities each; registryContact A=${aRow.health.registryContact} B=${bRow.health.registryContact}; lastHeartbeatAt surfaced for both`);
+
+  // Nodes now exist and are visible. Require the browser to inspect the live
+  // Nodes list and at least one node detail before the failure lifecycle.
+  await requireBrowserCheckpoint({ wait: waitForBrowser, nodeIds: [aNodeId, bNodeId] });
+  evidence.steps.push("browser: trusted HTTPS live Nodes/detail checkpoint accepted");
 
   // --- 4. gateway restart drill ---
   const preRestart = await nodesApi();

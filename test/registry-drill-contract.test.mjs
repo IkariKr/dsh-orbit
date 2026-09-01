@@ -7,10 +7,17 @@ const DRIVER = new URL("../scripts/registry-drill.mjs", import.meta.url);
 test("mounted drill requires trusted browser evidence and real compatibility reports", async () => {
   const source = await readFile(DRIVER, "utf8");
   assert.match(source, /requireCleanCandidateWorktree\(\);/);
-  assert.match(source, /requireBrowserCheckpoint\(\);/);
+  assert.match(source, /requireBrowserBootstrapCheckpoint\(\{ wait: waitForBrowser \}\)/);
+  assert.match(source, /requireBrowserCheckpoint\(\{ wait: waitForBrowser, nodeIds: \[aNodeId, bNodeId\] \}\)/);
+  assert.match(source, /--wait-for-browser/);
+  assert.match(source, /attempts = 1800/);
+  assert.match(source, /browser bootstrap checkpoint/);
   assert.match(source, /tlsValidation !== "enabled"/);
+  assert.match(source, /checkpoint\.runId/);
   assert.match(source, /checkpoint\.commit/);
+  assert.match(source, /BROWSER_BINDINGS_PATH/);
   assert.match(source, /checkpoint\.leafFingerprint/);
+  assert.match(source, /nodeIds: \[aNodeId, bNodeId\]/);
   assert.match(source, /runVerificationSequence\(/);
   assert.match(source, /createCompatibilityReport\(/);
   assert.doesNotMatch(source, /Object\.fromEntries\(/);
