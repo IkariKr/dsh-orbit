@@ -4,7 +4,7 @@ DSH Orbit only claims compatibility with DeepSeek Harness versions that have bee
 
 | DeepSeek Harness | DSH Orbit | Remote settings | Profile-local patch | Status |
 | --- | --- | --- | --- | --- |
-| `0.1.1-rc.2` | `0.1.0` | Supported | Required and verified | Tested |
+| `0.1.1-rc.2` | `0.3.0` | Supported | Required and verified | Tested |
 
 ## Compatibility policy
 

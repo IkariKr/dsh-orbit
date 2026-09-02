@@ -64,23 +64,34 @@ Prohibited in Orbit core:
 
 Existing plugin-specific compatibility code (the `@linxin666/dsh-ssh` terminal fence patch and related configuration, smoke, and tests) is treated as legacy third-party compatibility debt: it is freeze-only, marked as such in the code, and removed once DSH itself provides a sufficiently generic trusted-client / authenticated-proxy capability. See `docs/third-party-debt.md`.
 
-## Planned fleet architecture
+## Implemented v0.3 Registry MVP topology
 
-The fleet work is intentionally separate from the DSH runtime.
+The v0.3 release candidate implements the private Registry Hub/Node control
+plane described by the frozen RFCs:
 
 ```text
-                    Browser
-                       |
-                  Orbit Hub
-                 /    |    \
-                /     |     \
-          Orbit Node  Node  Node
-              |        |     |
-             DSH      DSH   DSH
+Browser --HTTPS--> authenticated gateway --> Hub (loopback browser API)
+                                             ^
+                                             |
+Node A/B --private machine ingress----------+
+       |
+      DSH runtime per node
 ```
 
-The planned Hub is a control plane. It should manage identity, discovery, routing, health, capabilities, and session selection. Agent execution remains on each DSH node.
+The Hub manages enrollment, identity keys, heartbeat contact, compatibility
+reports, evidence-backed capabilities, browser sessions, deletion, and
+operator-assisted tombstone reenrollment. DSH execution remains on each node.
+The browser gateway and private machine ingress are separate paths; `/api/v1/*`
+is not browser-proxied and the Hub does not bind publicly.
 
-Capabilities are **Hub-derived, evidence-backed feature assertions** rather than requiring every device to run the same DSH version. Version information remains useful for compatibility diagnostics, but feature availability converges on Hub-side capability derivation from each node's latest compatibility report (see `docs/rfc/0009-capability-contract-and-health.md`); nodes never advertise capabilities.
+Capabilities are **Hub-derived, evidence-backed feature assertions**. Nodes do
+not advertise capabilities, and reports do not restore heartbeat contact. See
+`docs/registry-mvp.md`, `docs/registry-deployment.md`, and the frozen RFCs for
+the contract details.
 
-See `docs/roadmap.md` for the staged plan.
+## Explicitly out of scope
+
+Endpoint routing, reverse connections, multi-node sessions, fleet execution,
+and third-party plugin compatibility remain outside the v0.3 MVP. The existing
+third-party compatibility debt is freeze-only and is not expanded by this
+release candidate. See `docs/roadmap.md` and `docs/third-party-debt.md`.

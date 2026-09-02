@@ -1,4 +1,4 @@
-# Registry deployment and operations (v0.3, SOP Stage 6)
+# Registry deployment and operations (v0.3, SOP Stages 6–8)
 
 This stage connects Hub, Node, Gateway and DSH for real. The
 automated multi-node E2E (`test/registry-multinode-e2e.test.mjs`)
@@ -99,7 +99,12 @@ Loopback and in-process gateway tests cover this contract in
 mounted deployment attestation is separate and may not substitute those tests
 for real container/browser evidence.
 
-## Gate B status
+## Gate B and Stage 7 status
+
+Review Gate B was approved after the remediation evidence package. Stage 7
+operational hardening is complete and its attestation is awaiting review. The
+Stage 8 release candidate is documentation-only and is awaiting final review;
+no tag, publication, or production promotion has occurred.
 
 The remediation mounted run from clean commit
 `2f713e8bbd023ac49080bd2da44023c4a31323db` completed the trusted-browser,
@@ -117,13 +122,13 @@ raw request-target matching and rejects query, encoded, dot-segment, browser,
 and unknown variants before upstream. Image identities were captured from the
 running containers after compose build/start.
 
-Review Gate B remains **HOLD** pending review of this evidence. Stage 7 remains
-unauthorized and has not started.
+Review Gate B is **approved**. Stage 7 is complete; see
+`docs/release-attestations/v0.3-stage7-operational-hardening.md` for the
+operator-grade evidence. Stage 8 remains at its final-review stop point; see
+`docs/release-attestations/v0.3.0-rc.1.md`.
 
-## Known follow-ups (Stage 7 scope, not authorized)
+## Stage 8 stop point
 
-- backup/restore drill, DB migration drills, corruption handling, and
-  retention drills (Stage 7);
-- final release/attestation after Gate B passes (Stage 8).
-
-Stage 7 is not started by this document or by the current mounted run.
+The release candidate adds no feature work and has not been tagged, published,
+or promoted. Tagging, release publication, and production promotion require a
+separate final review after this stage.

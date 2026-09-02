@@ -92,6 +92,14 @@ Other environment:
   explicit `status` (`active` / `expired` / `consumed`) and never exposes a
   digest or plaintext.
 
+## Release runbooks
+
+- [Configuration reference](configuration-reference.md)
+- [Operator SOP](sop/v0.3-operator-sop.md)
+- [Node enrollment SOP](sop/v0.3-node-enrollment-sop.md)
+- [Registry backup/restore SOP](sop/v0.3-registry-backup-restore-sop.md)
+- [Troubleshooting](troubleshooting.md)
+
 ## Verification
 
 - `npm run check` runs the full suite including the registry acceptance

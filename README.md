@@ -8,7 +8,24 @@ The project focuses on secure remote access, upgrade compatibility, and multi-no
 
 ## Status
 
-DSH Orbit is early-stage software and currently targets DeepSeek Harness `0.1.1-rc.2`.
+DSH Orbit `0.3.0` targets DeepSeek Harness `0.1.1-rc.2`. The v0.3 Registry
+MVP release candidate is `v0.3.0-rc.1`, awaiting final review; it is not yet
+tagged, published, or promoted.
+
+The v0.3 release provides the deployment and compatibility layer plus the
+implemented private Registry Hub/Node control plane. The DSH configuration
+plane remains behind an authenticated reverse proxy and the Registry machine
+surface remains private.
+
+Release documentation:
+
+- [Architecture](docs/architecture.md)
+- [Configuration reference](docs/configuration-reference.md)
+- [Operator SOP](docs/sop/v0.3-operator-sop.md)
+- [Node enrollment SOP](docs/sop/v0.3-node-enrollment-sop.md)
+- [Registry backup/restore SOP](docs/sop/v0.3-registry-backup-restore-sop.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [v0.3.0-rc.1 attestation](docs/release-attestations/v0.3.0-rc.1.md)
 
 The first release provides the deployment and compatibility layer needed to expose the DSH configuration plane behind an authenticated reverse proxy without publishing the DSH service directly.
 

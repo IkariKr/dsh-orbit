@@ -4,6 +4,18 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
+## 0.3.0-rc.1 - 2026-08-31
+
+### Added
+
+- the frozen v0.3 Registry MVP release candidate for DeepSeek Harness `0.1.1-rc.2`, including private Hub/Node enrollment, heartbeat, compatibility evidence, browser management, and operator runbooks;
+- Stage 7 operational hardening evidence for migration, SQLite backup/restore, integrity failure handling, process recovery, long downtime, retention, and explicit file privacy;
+- release documentation for configuration, operation, enrollment, Registry backup/restore, troubleshooting, and the exact release-candidate attestation.
+
+### Release status
+
+- `v0.3.0-rc.1` is awaiting final review. It is not tagged, published, or promoted to production.
+
 ## 0.2.6 - 2026-08-30
 
 ### Fixed
