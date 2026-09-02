@@ -4,6 +4,7 @@
 // node_keys, enrollment_tokens, enrollment_results, seen_nonces,
 // reports, events, audit, browser_sessions.
 
+import { chmodSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 export const SCHEMA_VERSION = 3;
@@ -111,6 +112,31 @@ function readUserVersion(db) {
     throw new RegistryDatabaseError("malformed-schema", "registry database has an invalid schema version");
   }
   return version;
+}
+
+export function checkRegistryIntegrity(db, phase = "startup") {
+  const integrityCheck = db.prepare("PRAGMA integrity_check").get()?.integrity_check;
+  if (integrityCheck !== "ok") {
+    throw new RegistryDatabaseError(
+      "integrity-failed",
+      `registry database ${phase} integrity_check returned ${JSON.stringify(integrityCheck)}`,
+    );
+  }
+  const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check").all();
+  if (foreignKeyViolations.length > 0) {
+    throw new RegistryDatabaseError(
+      "integrity-failed",
+      `registry database ${phase} foreign_key_check returned ${foreignKeyViolations.length} violation(s)`,
+    );
+  }
+  return { integrityCheck, foreignKeyViolations: 0 };
+}
+
+function enforceRegistryFileMode(path) {
+  if (process.platform === "win32" || path === ":memory:") return;
+  for (const filePath of [path, `${path}-wal`, `${path}-shm`]) {
+    if (existsSync(filePath)) chmodSync(filePath, 0o600);
+  }
 }
 
 function normalizeSql(sql) {
@@ -456,12 +482,15 @@ export function openRegistryDatabase(path) {
         );
       }
     }
+    checkRegistryIntegrity(db, "pre-migration");
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA synchronous = NORMAL");
     db.exec("PRAGMA foreign_keys = ON");
     db.exec("PRAGMA busy_timeout = 5000");
     migrate(db);
     validateRegistrySchema(db);
+    checkRegistryIntegrity(db, "post-migration");
+    enforceRegistryFileMode(path);
     return db;
   } catch (error) {
     try {

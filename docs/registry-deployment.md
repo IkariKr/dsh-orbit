@@ -56,6 +56,12 @@ DSH Node B --bridge--> registry-hub:5446 machine-ingress
 - Shutdown is graceful on SIGINT/SIGTERM for both processes. The mounted
   drill uses an owned PID sidecar for each detached Node daemon and verifies
   `/proc/<pid>/cmdline` before sending SIGTERM; it does not use `pkill -f`.
+- Registry DB, backup, and restore image files are explicitly tightened to
+  POSIX mode `0600` after successful validation/publication; this does not rely
+  on the process umask. Windows has no equivalent POSIX permission-bit gate.
+- Hub startup runs both SQLite `integrity_check` and `foreign_key_check` before
+  WAL/migration mutation and again after migration, and refuses to enter
+  registry listening on either page corruption or existing FK violations.
 
 ## Restart drills
 

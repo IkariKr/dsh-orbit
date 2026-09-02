@@ -123,6 +123,23 @@ test("backup rejects overwrite and restores after mutations with WAL sidecars qu
   reopened.close();
 });
 
+test("fresh, backup, and restored Registry images are explicitly private on POSIX", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX permission bits are not applicable on Windows");
+    return;
+  }
+  const dir = await fixtureDir(t, "orbit-registry-permissions-");
+  const sourcePath = join(dir, "registry.db");
+  const backupPath = join(dir, "backup", "registry.db");
+  const db = openRegistryDatabase(sourcePath);
+  assert.equal((await stat(sourcePath)).mode & 0o777, 0o600);
+  await backupRegistryDatabase({ db, sourcePath, destinationPath: backupPath });
+  assert.equal((await stat(backupPath)).mode & 0o777, 0o600);
+  db.close();
+  await restoreRegistryDatabase({ backupPath, targetPath: sourcePath, writersQuiesced: true });
+  assert.equal((await stat(sourcePath)).mode & 0o777, 0o600);
+});
+
 test("future, malformed, and corrupt databases fail closed without rebuilding the source", async (t) => {
   const dir = await fixtureDir(t);
   const futurePath = join(dir, "future.db");

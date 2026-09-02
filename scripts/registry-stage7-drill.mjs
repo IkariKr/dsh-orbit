@@ -6,6 +6,8 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,14 +16,75 @@ import { backupRegistryDatabase, inspectRegistryDatabase, restoreRegistryDatabas
 import { Registry } from "../src/registry/registry.mjs";
 import { openRegistryDatabase, SCHEMA_VERSION } from "../src/registry/sqlite.mjs";
 import { generateNodeKeyPair, deriveKeyId } from "../src/registry/crypto.mjs";
+import { runStage7ProcessDrill } from "./stage7-process-scenarios.mjs";
 
-const REPO_ROOT = new URL("../", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
+const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const runId = `stage7-${new Date().toISOString().replaceAll(/[-:.TZ]/g, "")}-${process.pid}`;
 const outputPath = process.env.DSH_ORBIT_STAGE7_EVIDENCE ?? join(REPO_ROOT, "data", "stage7-drill-evidence.json");
 const keepRoot = process.env.DSH_ORBIT_STAGE7_KEEP_ROOT === "1";
 
 function git(args) {
   return execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+}
+
+function requireCleanCandidateWorktree() {
+  const status = git(["status", "--porcelain=v1", "--untracked-files=all"]);
+  if (status !== "") {
+    throw new Error(`Stage 7 drill requires a clean candidate worktree; commit ${git(["rev-parse", "HEAD"])} has uncommitted changes`);
+  }
+  return status;
+}
+
+function collectRequiredPredicates(evidence) {
+  const predicates = {
+    cleanWorktreeBefore: evidence.cleanWorktreeBefore,
+    migrations: ["v1", "v2", "v3"].every((version) => {
+      const item = evidence.migration?.[version];
+      return item?.preservedState === true && item?.idempotent === true && item?.integrityCheck === "ok";
+    }),
+    failureModes: evidence.failureModes?.noRebuildOrOverwrite === true &&
+      evidence.failureModes?.futureDatabaseUnchanged === true &&
+      evidence.failureModes?.corruptDatabaseUnchanged === true,
+    freshInstall: evidence.freshInstall?.emptyBeforeStartup === true &&
+      evidence.freshInstall?.maintenance?.invoked === true &&
+      evidence.freshInstall?.maintenance?.integrityCheck === "ok",
+    backupRestore: evidence.backupRestore?.method === "sqlite-vacuum-into" &&
+      evidence.backupRestore?.mutationChangedState === true &&
+      evidence.backupRestore?.restoredBackupState === true &&
+      evidence.backupRestore?.postBackupMutationAbsent === true &&
+      evidence.backupRestore?.walSidecarsNotCopied === true,
+    retention: evidence.retention?.reportPurgedAfter90Days === true &&
+      evidence.retention?.tenDayEventRolledUp === true &&
+      evidence.retention?.oldEventPurgedAfter90Days === true &&
+      evidence.retention?.auditPurgedAfter365Days === true &&
+      evidence.retention?.repeatedMaintenanceStable === true,
+    processBoundary: evidence.processBoundary?.hubRestart?.hubAClosed === true &&
+      evidence.processBoundary?.hubRestart?.hubBReady === true &&
+      evidence.processBoundary?.hubRestart?.sameNodeId === true &&
+      evidence.processBoundary?.hubRestart?.sameKeyId === true &&
+      evidence.processBoundary?.hubRestart?.reportPreserved === true &&
+      evidence.processBoundary?.hubRestart?.healthPreserved === true &&
+      evidence.processBoundary?.rotationRecovery?.upstreamCommitted === true &&
+      evidence.processBoundary?.rotationRecovery?.pendingPersistedBeforeKill === true &&
+      evidence.processBoundary?.rotationRecovery?.childKilled === true &&
+      evidence.processBoundary?.rotationRecovery?.samePendingKeyPromoted === true &&
+      evidence.processBoundary?.rotationRecovery?.noThirdKey === true &&
+      evidence.processBoundary?.rotationRecovery?.noOrphanNode === true &&
+      evidence.processBoundary?.reenrollmentRecovery?.upstreamCommitted === true &&
+      evidence.processBoundary?.reenrollmentRecovery?.pendingPersistedBeforeKill === true &&
+      evidence.processBoundary?.reenrollmentRecovery?.childKilled === true &&
+      evidence.processBoundary?.reenrollmentRecovery?.exactReplaySucceeded === true &&
+      evidence.processBoundary?.reenrollmentRecovery?.sameNodeId === true &&
+      evidence.processBoundary?.reenrollmentRecovery?.pendingCleared === true &&
+      evidence.processBoundary?.longDowntime?.lostAfterRestart === true &&
+      evidence.processBoundary?.longDowntime?.contactLostAlert === true &&
+      evidence.processBoundary?.longDowntime?.reportDidNotHealContact === true &&
+      evidence.processBoundary?.longDowntime?.authenticatedHeartbeatRestoredFresh === true &&
+      evidence.processBoundary?.longDowntime?.identityPreserved === true,
+    cleanup: evidence.cleanup?.removed === true || evidence.cleanup?.isolatedRoot !== undefined,
+  };
+  const failed = Object.entries(predicates).filter(([, value]) => value !== true).map(([name]) => name);
+  return { predicates, failed };
 }
 
 function scrub(value, key = "") {
@@ -72,14 +135,47 @@ function migrationDatabase(path, version) {
   db.close();
 }
 
+async function createPageCorruption(path) {
+  const db = openRegistryDatabase(path);
+  seedNode(db, "node_cccccccccccccccccccccccccccccccc", "c");
+  const pageSize = Number(db.prepare("PRAGMA page_size").get().page_size);
+  const rootPage = Number(db.prepare("SELECT rootpage FROM sqlite_master WHERE name = 'reports'").get().rootpage);
+  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  db.close();
+  const bytes = await readFile(path);
+  const pageOffset = (rootPage - 1) * pageSize;
+  if (bytes[pageOffset] !== 0x0d || bytes.readUInt16BE(pageOffset + 3) < 1) {
+    throw new Error("unable to construct a reports business-page corruption fixture");
+  }
+  bytes[pageOffset + 8] = 0;
+  bytes[pageOffset + 9] = 1;
+  await writeFile(path, bytes);
+}
+
+async function createForeignKeyViolation(path) {
+  const db = openRegistryDatabase(path);
+  seedNode(db, "node_dddddddddddddddddddddddddddddddd", "d");
+  db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  db.close();
+  const raw = new DatabaseSync(path);
+  try {
+    raw.exec("PRAGMA foreign_keys = OFF");
+    raw.prepare("INSERT INTO node_keys (node_id, key_id, public_key, state, created_at) VALUES ('node_missing', 'orphan', ?, 'active', '2026-08-31T00:00:00.000Z')").run("d".repeat(64));
+    raw.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  } finally {
+    raw.close();
+  }
+}
+
 async function run() {
-  const root = await mkdtemp(join(tmpdir(), "orbit-stage7-") );
+  requireCleanCandidateWorktree();
+  const root = await mkdtemp(join(tmpdir(), "orbit-stage7-"));
   const evidence = {
     stage: "7",
     runId,
     testedCommit: git(["rev-parse", "HEAD"]),
     branch: git(["branch", "--show-current"]),
-    cleanWorktreeBefore: git(["status", "--porcelain"]) === "",
+    cleanWorktreeBefore: true,
     nodeVersion: process.version,
     schemaVersion: SCHEMA_VERSION,
     thresholds: { heartbeatCadenceSeconds: 60, staleMissedBeats: 3, lostAfterHours: 24, reportRetentionDays: 90, eventRetentionDays: 90, auditRetentionDays: 365 },
@@ -87,6 +183,7 @@ async function run() {
     backupRestore: {},
     freshInstall: {},
     cleanup: {},
+    processBoundary: {},
   };
   try {
     const migrationRoot = join(root, "migrations");
@@ -115,9 +212,11 @@ async function run() {
       evidence.migration[`v${version}`] = {
         before,
         after,
-        idempotent,
+        integrityCheck: after.integrityCheck,
+        idempotentInspection: idempotent,
         preservedState: after.rowCounts.nodes === 1 && after.rowCounts.node_keys === 1,
-        noOpCurrent: version === 3,
+        idempotent: idempotent.stateDigest === after.stateDigest && idempotent.rowCounts.nodes === after.rowCounts.nodes,
+        noOpCurrent: version === 3 && idempotent.stateDigest === after.stateDigest,
         healthSemantics: "registryContact=fresh, reachable=unknown, capabilities derived from stored evidence",
       };
     }
@@ -147,12 +246,40 @@ async function run() {
       corruptRejected = error.code === "corrupt-database" || error.code === "database-open-failed";
     }
     const corruptAfterBytes = await readFile(corruptPath);
+    const pagePath = join(failureRoot, "business-page-corrupt.db");
+    await createPageCorruption(pagePath);
+    const pageBeforeBytes = await readFile(pagePath);
+    let pageRejected = false;
+    try {
+      openRegistryDatabase(pagePath);
+    } catch (error) {
+      pageRejected = error.code === "integrity-failed";
+    }
+    const pageAfterBytes = await readFile(pagePath);
+    const fkPath = join(failureRoot, "foreign-key-violation.db");
+    await createForeignKeyViolation(fkPath);
+    const fkBeforeBytes = await readFile(fkPath);
+    let fkRejected = false;
+    try {
+      openRegistryDatabase(fkPath);
+    } catch (error) {
+      fkRejected = error.code === "integrity-failed";
+    }
+    const fkAfterBytes = await readFile(fkPath);
     evidence.failureModes = {
       futureSchemaRejected: futureRejected,
       corruptDatabaseRejected: corruptRejected,
+      businessPageCorruptionRejected: pageRejected,
+      foreignKeyViolationRejected: fkRejected,
       futureDatabaseUnchanged: Buffer.compare(futureBeforeBytes, futureAfterBytes) === 0,
       corruptDatabaseUnchanged: Buffer.compare(corruptAfterBytes, corruptBytes) === 0,
-      noRebuildOrOverwrite: futureRejected && corruptRejected && Buffer.compare(corruptAfterBytes, corruptBytes) === 0,
+      businessPageDatabaseUnchanged: Buffer.compare(pageAfterBytes, pageBeforeBytes) === 0,
+      foreignKeyDatabaseUnchanged: Buffer.compare(fkAfterBytes, fkBeforeBytes) === 0,
+      noRebuildOrOverwrite: futureRejected && corruptRejected && pageRejected && fkRejected &&
+        Buffer.compare(futureBeforeBytes, futureAfterBytes) === 0 &&
+        Buffer.compare(corruptAfterBytes, corruptBytes) === 0 &&
+        Buffer.compare(pageAfterBytes, pageBeforeBytes) === 0 &&
+        Buffer.compare(fkAfterBytes, fkBeforeBytes) === 0,
     };
 
     const freshPath = join(root, "fresh", "registry.db");
@@ -240,16 +367,29 @@ async function run() {
       walSidecarsNotCopied: backup.backupWalPresent === false && backup.backupShmPresent === false,
     };
     db.close();
+    evidence.processBoundary = await runStage7ProcessDrill(join(root, "process-boundary"));
     evidence.cleanup = { isolatedRoot: keepRoot ? root : "removed", removed: !keepRoot };
   } finally {
     if (!keepRoot) await rm(root, { recursive: true, force: true });
   }
+  const gate = collectRequiredPredicates(evidence);
+  evidence.gate = {
+    requiredPredicates: gate.predicates,
+    failedPredicates: gate.failed,
+  };
+  evidence.success = gate.failed.length === 0;
   await mkdir(join(REPO_ROOT, "data"), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(scrub(evidence), null, 2)}\n`, "utf8");
+  if (!evidence.success) {
+    console.error(`STAGE7 DRILL FAILED: ${gate.failed.join(", ")}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log("STAGE7 DRILL SUCCESS");
   console.log(JSON.stringify(scrub(evidence), null, 2));
 }
 
-run().catch((error) => {
+run().catch(async (error) => {
   console.error(`Stage 7 drill failed: ${error.stack ?? error}`);
   process.exitCode = 1;
 });

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -64,6 +65,56 @@ test("Hub refuses unsupported or malformed persistent databases before serving",
   assert.equal(corruptResult.code, 1);
   assert.match(corruptResult.stderr, /database startup failed/);
   assert.doesNotMatch(corruptResult.stdout, /registry listening/);
+});
+
+async function makeCorruptHubDatabase(path, kind) {
+  const db = openRegistryDatabase(path);
+  const nodeId = "node_" + "a".repeat(32);
+  db.prepare("INSERT INTO nodes (node_id, state, minted_at, authenticated) VALUES (?, 'active', 't', 'ok')").run(nodeId);
+  db.prepare("INSERT INTO reports (node_id, uploaded_at, orbit_version, dsh_version, compatibility, identity_json, checks_json, report_json) VALUES (?, 't', '0.3.0', 'd', 'pass', '{}', '{}', '{}')").run(nodeId);
+  if (kind === "legacy") {
+    db.exec("ALTER TABLE nodes DROP COLUMN alert_flags");
+    db.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
+    db.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
+    db.exec("PRAGMA user_version = 1");
+  }
+  if (kind === "fk") {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare("INSERT INTO node_keys (node_id, key_id, public_key, state, created_at) VALUES ('node_missing', 'orphan', ?, 'active', 't')").run("a".repeat(64));
+  }
+  db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+  db.close();
+  if (kind === "page") {
+    const raw = await readFile(path);
+    const probe = new DatabaseSync(path);
+    const pageSize = Number(probe.prepare("PRAGMA page_size").get().page_size);
+    const rootPage = Number(probe.prepare("SELECT rootpage FROM sqlite_master WHERE name = 'reports'").get().rootpage);
+    probe.close();
+    const offset = (rootPage - 1) * pageSize;
+    raw[offset + 8] = 0;
+    raw[offset + 9] = 1;
+    await writeFile(path, raw);
+  }
+}
+
+test("Hub rejects valid-header page corruption and existing FK violations before listening", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-hub-integrity-failures-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const base = {
+    DSH_ORBIT_HUB_PORT: "0",
+    DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
+    DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+  };
+  for (const kind of ["page", "fk"]) {
+    const path = join(dir, `${kind}.db`);
+    await makeCorruptHubDatabase(path, kind);
+    const before = await readFile(path);
+    const result = await runHub({ ...base, DSH_ORBIT_HUB_DB: path });
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /database startup failed \(integrity-failed\)/);
+    assert.doesNotMatch(result.stdout, /registry listening/);
+    assert.deepEqual(await readFile(path), before);
+  }
 });
 
 test("Hub drill aging flags fail closed unless both controls are present", async (t) => {

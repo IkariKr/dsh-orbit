@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { SCHEMA_VERSION, openRegistryDatabase, withTransaction } from "../src/registry/sqlite.mjs";
 
 test("in-memory registry has the fixed v0.3 table set", () => {
@@ -50,6 +51,72 @@ test("node_keys foreign key rejects orphan rows", () => {
   const db = openRegistryDatabase(":memory:");
   assert.throws(() => db.prepare("INSERT INTO node_keys (node_id, key_id, public_key, state, created_at) VALUES (?, ?, ?, 'active', ?)").run("node_missing", "k1", "a".repeat(64), "now"));
   db.close();
+});
+
+async function makeLegacyPath(path, version) {
+  const db = openRegistryDatabase(path);
+  const nodeId = "node_" + "a".repeat(32);
+  db.prepare("INSERT INTO nodes (node_id, state, minted_at, authenticated) VALUES (?, 'active', 't', 'ok')").run(nodeId);
+  db.prepare("INSERT INTO reports (node_id, uploaded_at, orbit_version, dsh_version, compatibility, identity_json, checks_json, report_json) VALUES (?, 't', '0.3.0', 'd', 'pass', '{}', '{}', '{}')").run(nodeId);
+  if (version === 1) {
+    db.exec("ALTER TABLE nodes DROP COLUMN alert_flags");
+    db.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
+    db.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
+  } else if (version === 2) {
+    db.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
+    db.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
+  }
+  db.exec(`PRAGMA user_version = ${version}`);
+  db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+  db.close();
+  return { nodeId };
+}
+
+async function corruptReportsLeafPage(path) {
+  const db = new DatabaseSync(path);
+  const pageSize = Number(db.prepare("PRAGMA page_size").get().page_size);
+  const rootPage = Number(db.prepare("SELECT rootpage FROM sqlite_master WHERE name = 'reports'").get().rootpage);
+  db.close();
+  const bytes = await readFile(path);
+  const pageOffset = (rootPage - 1) * pageSize;
+  assert.equal(bytes[pageOffset], 0x0d, "reports root must be a table leaf page");
+  assert.ok(bytes.readUInt16BE(pageOffset + 3) > 0, "reports leaf must contain a cell");
+  bytes[pageOffset + 8] = 0;
+  bytes[pageOffset + 9] = 1;
+  await writeFile(path, bytes);
+}
+
+test("startup rejects valid-header business-page corruption before migration and preserves bytes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-registry-page-corrupt-"));
+  try {
+    const path = join(dir, "registry.db");
+    await makeLegacyPath(path, 1);
+    await corruptReportsLeafPage(path);
+    const before = await readFile(path);
+    assert.throws(() => openRegistryDatabase(path), (error) => error.code === "integrity-failed" && /pre-migration integrity_check/.test(error.message));
+    assert.deepEqual(await readFile(path), before);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("startup rejects an existing foreign-key violation before migration and preserves bytes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-registry-fk-corrupt-"));
+  try {
+    const path = join(dir, "registry.db");
+    const { nodeId } = await makeLegacyPath(path, 1);
+    const db = new DatabaseSync(path);
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare("INSERT INTO node_keys (node_id, key_id, public_key, state, created_at) VALUES (?, 'orphan', ?, 'active', 't')").run("node_missing", "a".repeat(64));
+    db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    db.close();
+    const before = await readFile(path);
+    assert.equal(nodeId.length, 37);
+    assert.throws(() => openRegistryDatabase(path), (error) => error.code === "integrity-failed" && /foreign_key_check/.test(error.message));
+    assert.deepEqual(await readFile(path), before);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("withTransaction rolls back on failure and keeps the committed work", () => {

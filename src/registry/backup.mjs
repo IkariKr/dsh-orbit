@@ -3,13 +3,13 @@
 // A live registry is snapshotted with SQLite's VACUUM INTO, never by copying
 // the database file while its WAL may contain committed state.
 
-import { copyFile, mkdir, rename, rm, access } from "node:fs/promises";
+import { chmod, copyFile, mkdir, rename, rm, access } from "node:fs/promises";
 import { constants, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { DatabaseSync } from "node:sqlite";
 import { sha256Hex } from "./crypto.mjs";
-import { SCHEMA_VERSION, registrySchemaShape, validateRegistrySchema } from "./sqlite.mjs";
+import { checkRegistryIntegrity, SCHEMA_VERSION, registrySchemaShape, validateRegistrySchema } from "./sqlite.mjs";
 
 export class RegistryBackupError extends Error {
   constructor(code, message, { cause = null } = {}) {
@@ -84,15 +84,17 @@ function countRows(db) {
 }
 
 function integrity(db) {
-  const result = db.prepare("PRAGMA integrity_check").get()?.integrity_check;
-  if (result !== "ok") {
-    throw new RegistryBackupError("integrity-failed", `registry database integrity_check returned ${JSON.stringify(result)}`);
+  try {
+    return checkRegistryIntegrity(db, "inspection");
+  } catch (error) {
+    throw new RegistryBackupError("integrity-failed", error.message, { cause: error });
   }
-  const foreignKeys = db.prepare("PRAGMA foreign_key_check").all();
-  if (foreignKeys.length > 0) {
-    throw new RegistryBackupError("integrity-failed", "registry database foreign_key_check returned violations");
+}
+
+async function enforceRegistryFileMode(path) {
+  if (process.platform !== "win32") {
+    await chmod(path, 0o600);
   }
-  return { integrityCheck: result, foreignKeyViolations: 0 };
 }
 
 // Inspection does not run migrations or write application data. A normal
@@ -170,8 +172,10 @@ export async function backupRegistryDatabase({ db, sourcePath, destinationPath }
     // the source digest is recorded before and after rather than treating a
     // concurrent write as evidence that the SQLite snapshot is invalid.
     db.prepare("VACUUM INTO ?").run(temporary);
+    await enforceRegistryFileMode(temporary);
     inspectRegistryDatabase(temporary);
     await rename(temporary, destination);
+    await enforceRegistryFileMode(destination);
     const sourceAfter = inspectRegistryDatabase(source);
     const backup = inspectRegistryDatabase(destination);
     return {
@@ -219,6 +223,7 @@ export async function restoreRegistryDatabase({ backupPath, targetPath, writersQ
   try {
     await ensureAbsent(stage, "restore staging path");
     await copyFile(backup, stage);
+    await enforceRegistryFileMode(stage);
     staged = true;
     const stagedInspection = inspectRegistryDatabase(stage);
     if (stagedInspection.stateDigest !== backupInspection.stateDigest) {
@@ -241,6 +246,7 @@ export async function restoreRegistryDatabase({ backupPath, targetPath, writersQ
       quarantined.push([quarantinedSidecar, sidecar]);
     }
     await rename(stage, target);
+    await enforceRegistryFileMode(target);
     staged = false;
     const restored = inspectRegistryDatabase(target);
     if (restored.stateDigest !== backupInspection.stateDigest) {
