@@ -42,6 +42,29 @@ function gitObjectExists(object) {
   }
 }
 
+function gitCommitParent(commit) {
+  try {
+    return execFileSync("git", ["rev-parse", `${commit}^`], {
+      cwd: new URL("../", import.meta.url),
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function gitIsAncestor(ancestor, descendant) {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+      cwd: new URL("../", import.meta.url),
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 test("Stage 8 release candidate artifact set exists", async () => {
   for (const path of requiredDocs) await access(new URL(`../${path}`, import.meta.url));
   const changelog = await text("CHANGELOG.md");
@@ -127,12 +150,54 @@ test("Operator readiness and release status wording match the implementation", a
 
 test("RC attestation has valid release provenance and final-review disposition", async () => {
   const source = await text("docs/release-attestations/v0.3.0-rc.1.md");
-  const testedCommit = /^testedCommit:\s*([0-9a-f]{40})$/m.exec(source)?.[1];
-  const attestationCommit = /^attestationCommit:\s*([0-9a-f]{40})$/m.exec(source)?.[1];
-  assert.ok(testedCommit, "attestation must record a full tested commit SHA");
-  assert.ok(attestationCommit, "attestation must record a full attestation commit SHA");
-  assert.ok(gitObjectExists(testedCommit), `tested commit ${testedCommit} must exist`);
-  assert.ok(gitObjectExists(attestationCommit), `attestation commit ${attestationCommit} must exist`);
+  assert.doesNotMatch(source, /^attestationCommit:/m);
+
+  const fields = Object.fromEntries(
+    [
+      "testedCommit",
+      "initialEvidenceCommit",
+      "executableLiveSmokeCommit",
+      "releaseClosureParent",
+      "releaseClosureCommit",
+    ].map((field) => [
+      field,
+      new RegExp(`^${field}:\\s*([0-9a-f]{40})$`, "m").exec(source)?.[1],
+    ]),
+  );
+  for (const [field, value] of Object.entries(fields)) {
+    assert.ok(value, `attestation must record a full ${field} SHA`);
+    assert.ok(gitObjectExists(value), `${field} ${value} must exist`);
+  }
+
+  assert.equal(
+    fields.testedCommit,
+    fields.releaseClosureCommit,
+    "tested commit must be the release closure commit",
+  );
+  assert.equal(
+    gitCommitParent(fields.releaseClosureCommit),
+    fields.releaseClosureParent,
+    "release closure parent must be the direct parent of the release closure commit",
+  );
+  assert.ok(
+    gitIsAncestor(fields.initialEvidenceCommit, fields.releaseClosureCommit),
+    "initial evidence commit must be an ancestor of the release closure commit",
+  );
+  assert.ok(
+    gitIsAncestor(fields.executableLiveSmokeCommit, fields.releaseClosureCommit),
+    "executable live smoke commit must be an ancestor of the release closure commit",
+  );
+  assert.equal(
+    /^releaseClosureRange:\s*([^\n]+)$/m.exec(source)?.[1],
+    `${fields.executableLiveSmokeCommit}..${fields.releaseClosureCommit}`,
+    "release closure range must identify the executable smoke and closure commits",
+  );
+  assert.equal(
+    /^orbitRevision:\s*([0-9a-f]{40})$/m.exec(source)?.[1],
+    fields.testedCommit,
+    "orbit revision must match the tested commit",
+  );
+
   assert.match(source, /stage7Gate\.success: true/);
   assert.match(source, /stage7Gate\.failedPredicates: \[\]/);
   assert.match(source, /tag:\s*`?not-created/i);
