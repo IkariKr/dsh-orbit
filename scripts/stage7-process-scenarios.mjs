@@ -117,6 +117,26 @@ function dbKeyState(path, nodeId) {
   }
 }
 
+function persistedStateCounts(path, nodeId) {
+  const db = new DatabaseSync(path);
+  try {
+    const count = (table, where = "", value = undefined) => Number(
+      db.prepare(`SELECT COUNT(*) AS count FROM ${table}${where}`).get(value).count,
+    );
+    return {
+      nodes: count("nodes"),
+      nodeKeys: count("node_keys", " WHERE node_id = ?", nodeId),
+      reports: count("reports", " WHERE node_id = ?", nodeId),
+      events: count("events", " WHERE node_id = ?", nodeId),
+      audit: count("audit"),
+      browserSessions: count("browser_sessions"),
+      enrollmentResults: count("enrollment_results"),
+    };
+  } finally {
+    db.close();
+  }
+}
+
 export async function runStage7ProcessDrill(root) {
   const dbPath = join(root, "process", "registry.db");
   const statePath = join(root, "process", "node.json");
@@ -163,11 +183,14 @@ export async function runStage7ProcessDrill(root) {
     await stopProcess(heartbeatBeforeRestart);
     const beforeRestart = await nodeDetails(proxy.baseUrl, session, nodeId);
     const beforeRestartStatus = JSON.parse((await track(spawnNode(["status"], common)).closed).stdout);
+    const beforeRestartDb = dbKeyState(dbPath, nodeId);
+    const beforeRestartCounts = persistedStateCounts(dbPath, nodeId);
     const hubA = hub;
     await stopProcess(hubA);
     hub = await startHubProcess({ dbPath, agingClockPath: clockPath });
     proxy.setTarget({ port: hub.port });
     const afterRestart = await nodeDetails(proxy.baseUrl, session, nodeId);
+    const afterRestartCounts = persistedStateCounts(dbPath, nodeId);
     const restartedStatus = JSON.parse((await track(spawnNode(["status"], common)).closed).stdout);
     const heartbeatAfterRestart = track(spawnNode(["run"], common));
     await heartbeatAfterRestart.waitFor(/running against/);
@@ -180,7 +203,13 @@ export async function runStage7ProcessDrill(root) {
       sameKeyId: restartedStatus.keyId === beforeRestartStatus.keyId,
       reportPreserved: afterRestart.latestReport !== null,
       healthPreserved: afterRestart.health.registryContact === "fresh" && afterRestart.health.orbitCompatible === "pass",
-      browserSessionPreserved: (await listNodes(proxy.baseUrl, session)).some((node) => node.nodeId === nodeId),
+      auditPreserved: afterRestartCounts.audit === beforeRestartCounts.audit,
+      browserSessionPreserved: afterRestartCounts.browserSessions === beforeRestartCounts.browserSessions && afterRestartCounts.browserSessions > 0,
+      persistedCountsPreserved: JSON.stringify(afterRestartCounts) === JSON.stringify(beforeRestartCounts),
+      dbPath,
+      statePath,
+      hubAProcessId: hubA.child.pid,
+      hubBProcessId: hub.child.pid,
     };
 
     const rotationCommit = proxy.arm("/api/v1/credential-rotate");
@@ -207,6 +236,9 @@ export async function runStage7ProcessDrill(root) {
       noThirdKey: afterRotationKeys.keys.length === 2 && beforeKillKeys.keys.length === 2,
       noOrphanNode: afterRotationKeys.nodes === 1 && afterRotationKeys.orphanNodes === 0,
       heartbeatFresh: (await nodeDetails(proxy.baseUrl, session, nodeId)).health.registryContact === "fresh",
+      processId: rotating.child.pid,
+      dbPath,
+      statePath,
     };
 
     const deleteResult = await browserRequest(proxy.baseUrl, `/hub/nodes/${nodeId}/delete`, {
@@ -239,6 +271,9 @@ export async function runStage7ProcessDrill(root) {
       pendingCleared: replayState.pendingReenrollment === null,
       pendingKeyReused: reenrollPendingKeyId !== null,
       noOrphanNode: dbKeyState(dbPath, nodeId).nodes === 1 && dbKeyState(dbPath, nodeId).orphanNodes === 0,
+      processId: reenrolling.child.pid,
+      dbPath,
+      statePath,
     };
 
     const lostClock = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString();
@@ -263,6 +298,9 @@ export async function runStage7ProcessDrill(root) {
       identityPreserved: fresh.nodeId === nodeId,
       thresholdsUnchanged: true,
       clockIsolated: true,
+      dbPath,
+      statePath,
+      clockPath,
     };
     result.cleanup = true;
     return result;

@@ -63,6 +63,8 @@ function collectRequiredPredicates(evidence) {
       evidence.processBoundary?.hubRestart?.sameNodeId === true &&
       evidence.processBoundary?.hubRestart?.sameKeyId === true &&
       evidence.processBoundary?.hubRestart?.reportPreserved === true &&
+      evidence.processBoundary?.hubRestart?.auditPreserved === true &&
+      evidence.processBoundary?.hubRestart?.persistedCountsPreserved === true &&
       evidence.processBoundary?.hubRestart?.healthPreserved === true &&
       evidence.processBoundary?.rotationRecovery?.upstreamCommitted === true &&
       evidence.processBoundary?.rotationRecovery?.pendingPersistedBeforeKill === true &&

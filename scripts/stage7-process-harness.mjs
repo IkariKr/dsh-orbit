@@ -129,7 +129,7 @@ export function createSwitchingProxy() {
       },
       (response) => {
         const gate = armed !== null && incoming.method === "POST" && incoming.url === armed.path ? armed : null;
-        if (gate === null) {
+        if (gate === null || (response.statusCode ?? 0) !== 200) {
           outgoing.writeHead(response.statusCode ?? 502, response.headers);
           response.pipe(outgoing);
           return;
