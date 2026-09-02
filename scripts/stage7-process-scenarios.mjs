@@ -120,9 +120,11 @@ function dbKeyState(path, nodeId) {
 function persistedStateCounts(path, nodeId) {
   const db = new DatabaseSync(path);
   try {
-    const count = (table, where = "", value = undefined) => Number(
-      db.prepare(`SELECT COUNT(*) AS count FROM ${table}${where}`).get(value).count,
-    );
+    const count = (table, where = "", value = null) => {
+      const statement = db.prepare(`SELECT COUNT(*) AS count FROM ${table}${where}`);
+      const row = where === "" ? statement.get() : statement.get(value);
+      return Number(row.count);
+    };
     return {
       nodes: count("nodes"),
       nodeKeys: count("node_keys", " WHERE node_id = ?", nodeId),
