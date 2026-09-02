@@ -129,24 +129,30 @@ async function run() {
     futureDb.exec("PRAGMA user_version = 99");
     futureDb.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     futureDb.close();
+    const futureBeforeBytes = await readFile(futurePath);
     let futureRejected = false;
     try {
       openRegistryDatabase(futurePath);
     } catch (error) {
       futureRejected = error.code === "unsupported-schema";
     }
+    const futureAfterBytes = await readFile(futurePath);
     const corruptPath = join(failureRoot, "corrupt.db");
-    await writeFile(corruptPath, "not sqlite\n", "utf8");
+    const corruptBytes = Buffer.from("not sqlite\n", "utf8");
+    await writeFile(corruptPath, corruptBytes);
     let corruptRejected = false;
     try {
       openRegistryDatabase(corruptPath);
     } catch (error) {
       corruptRejected = error.code === "corrupt-database" || error.code === "database-open-failed";
     }
+    const corruptAfterBytes = await readFile(corruptPath);
     evidence.failureModes = {
       futureSchemaRejected: futureRejected,
       corruptDatabaseRejected: corruptRejected,
-      noRebuildOrOverwrite: true,
+      futureDatabaseUnchanged: Buffer.compare(futureBeforeBytes, futureAfterBytes) === 0,
+      corruptDatabaseUnchanged: Buffer.compare(corruptAfterBytes, corruptBytes) === 0,
+      noRebuildOrOverwrite: futureRejected && corruptRejected && Buffer.compare(corruptAfterBytes, corruptBytes) === 0,
     };
 
     const freshPath = join(root, "fresh", "registry.db");
@@ -156,13 +162,22 @@ async function run() {
     let db = openRegistryDatabase(freshPath);
     const registry = new Registry({ db });
     const emptyState = inspectRegistryDatabase(freshPath);
+    const beforeMaintenanceAuditCount = emptyState.rowCounts.audit;
+    registry.maintenance();
+    const afterMaintenance = inspectRegistryDatabase(freshPath);
     const enrollmentResult = registry.mintEnrollmentToken({ actor: "operator", purpose: "enroll" });
     evidence.freshInstall = {
       emptyBeforeStartup: Object.values(emptyState.rowCounts).every((count) => count === 0),
       emptyState,
+      maintenance: {
+        invoked: true,
+        integrityCheck: afterMaintenance.integrityCheck,
+        stateDigest: afterMaintenance.stateDigest,
+        auditRowsBefore: beforeMaintenanceAuditCount,
+        auditRowsAfter: afterMaintenance.rowCounts.audit,
+      },
       schemaAfterToken: inspectRegistryDatabase(freshPath),
-      maintenanceRan: true,
-      plaintextTokenReturnedOnce: typeof enrollmentResult.token === "string",
+      plaintextTokenReturnedOnce: typeof enrollmentResult.token === "string" && enrollmentResult.token.length === 32,
     };
     seedNode(db, "node_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "a");
     db.exec("PRAGMA wal_checkpoint(PASSIVE)");
@@ -171,24 +186,43 @@ async function run() {
     db.prepare("INSERT INTO audit (at, actor, action, detail_json) VALUES ('2026-08-31T01:00:00.000Z', 'operator', 'stage7.mutation', '{}')").run();
     const mutated = inspectRegistryDatabase(freshPath);
     db.close();
-    const restore = await restoreRegistryDatabase({ backupPath, targetPath: freshPath });
+    const restore = await restoreRegistryDatabase({ backupPath, targetPath: freshPath, writersQuiesced: true });
     db = openRegistryDatabase(freshPath);
     const restoredState = inspectRegistryDatabase(freshPath);
-    const retentionDb = openRegistryDatabase(join(root, "retention.db"));
+    const retentionPath = join(root, "retention.db");
+    const retentionDb = openRegistryDatabase(retentionPath);
     const retentionRegistry = new Registry({ db: retentionDb, now: () => new Date("2026-12-01T00:00:00.000Z") });
     const retentionNode = "node_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     seedNode(retentionDb, retentionNode, "b");
     retentionDb.prepare("UPDATE reports SET uploaded_at = '2026-08-01T00:00:00.000Z' WHERE node_id = ?").run(retentionNode);
     retentionDb.prepare("UPDATE events SET at = '2026-08-01T00:00:00.000Z' WHERE node_id = ?").run(retentionNode);
     retentionDb.prepare("UPDATE audit SET at = '2025-01-01T00:00:00.000Z'").run();
+    retentionDb
+      .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, '2026-11-21T12:00:00.000Z', 'registry_contact', 'fresh', 'stale', 'maintenance')")
+      .run(retentionNode);
+    retentionDb
+      .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, '2026-08-01T12:00:00.000Z', 'registry_contact', 'stale', 'lost', 'maintenance')")
+      .run(retentionNode);
+    const retentionBefore = inspectRegistryDatabase(retentionPath);
     retentionRegistry.maintenance();
-    const retentionOnce = inspectRegistryDatabase(join(root, "retention.db"));
+    const retentionOnce = inspectRegistryDatabase(retentionPath);
+    const rollupRows = retentionDb
+      .prepare("SELECT COUNT(*) AS count FROM events WHERE node_id = ? AND dimension = 'rollup' AND at = '2026-11-21T23:59:59.999Z'")
+      .get(retentionNode).count;
+    const oldRawRows = retentionDb
+      .prepare("SELECT COUNT(*) AS count FROM events WHERE node_id = ? AND dimension = 'registry_contact' AND at >= '2026-08-01T00:00:00.000Z' AND at < '2026-08-02T00:00:00.000Z'")
+      .get(retentionNode).count;
     retentionRegistry.maintenance();
-    const retentionTwice = inspectRegistryDatabase(join(root, "retention.db"));
+    const retentionTwice = inspectRegistryDatabase(retentionPath);
     evidence.retention = {
-      reportPurgedAfter90Days: retentionOnce.rowCounts.reports === 0,
-      eventsRetainedOrRolled: retentionOnce.rowCounts.events >= 0,
-      auditPurgedAfter365Days: retentionOnce.rowCounts.audit === 0,
+      before: retentionBefore,
+      afterFirstMaintenance: retentionOnce,
+      afterSecondMaintenance: retentionTwice,
+      reportPurgedAfter90Days: retentionBefore.rowCounts.reports > retentionOnce.rowCounts.reports && retentionOnce.rowCounts.reports === 0,
+      tenDayEventRolledUp: Number(rollupRows) === 1,
+      oldEventPurgedAfter90Days: Number(oldRawRows) === 0,
+      rawEventAndRollupBoundariesObserved: Number(rollupRows) === 1 && Number(oldRawRows) === 0,
+      auditPurgedAfter365Days: retentionBefore.rowCounts.audit > retentionOnce.rowCounts.audit && retentionOnce.rowCounts.audit === 0,
       repeatedMaintenanceStable: retentionOnce.stateDigest === retentionTwice.stateDigest,
     };
     retentionRegistry.close();

@@ -68,6 +68,20 @@ test("SQLite backup uses a consistent standalone image and preserves WAL state",
   db.close();
 });
 
+test("restore refuses to run while Registry writers may still be active", async (t) => {
+  const dir = await fixtureDir(t, "orbit-registry-restore-quiescence-");
+  const sourcePath = join(dir, "registry.db");
+  const backupPath = join(dir, "registry-backup.db");
+  const db = openRegistryDatabase(sourcePath);
+  insertMeaningfulState(db);
+  await backupRegistryDatabase({ db, sourcePath, destinationPath: backupPath });
+  db.close();
+  await assert.rejects(
+    () => restoreRegistryDatabase({ backupPath, targetPath: sourcePath }),
+    (error) => error instanceof RegistryBackupError && error.code === "writers-active",
+  );
+});
+
 test("backup rejects overwrite and restores after mutations with WAL sidecars quarantined", async (t) => {
   const dir = await fixtureDir(t);
   const sourcePath = join(dir, "registry.db");
@@ -92,7 +106,7 @@ test("backup rejects overwrite and restores after mutations with WAL sidecars qu
   await writeFile(`${sourcePath}-wal`, "stale-wal");
   await writeFile(`${sourcePath}-shm`, "stale-shm");
 
-  const restored = await restoreRegistryDatabase({ backupPath, targetPath: sourcePath });
+  const restored = await restoreRegistryDatabase({ backupPath, targetPath: sourcePath, writersQuiesced: true });
   assert.equal(restored.method, "sqlite-standalone-atomic-restore");
   assert.equal(restored.backup.stateDigest, restored.restored.stateDigest);
   assert.equal(restored.quarantinedSidecars, 2);
@@ -135,6 +149,7 @@ test("future, malformed, and corrupt databases fail closed without rebuilding th
   const malformedPath = join(dir, "malformed.db");
   const malformed = openRegistryDatabase(malformedPath);
   malformed.exec("DROP INDEX idx_audit_at");
+  malformed.exec("CREATE INDEX idx_audit_at ON audit (actor)");
   malformed.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   malformed.close();
   const malformedBytes = await readFile(malformedPath);

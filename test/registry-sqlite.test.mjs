@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -101,6 +101,27 @@ test("a v1 database migrates in place to the current schema", async () => {
     assert.deepEqual(JSON.parse(upgraded.prepare("SELECT alert_flags FROM nodes WHERE node_id = 'node_v1'").get().alert_flags), []);
     upgraded.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
     upgraded.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("malformed legacy schema fails closed before migration mutates the file", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-registry-malformed-v1-"));
+  try {
+    const path = join(dir, "registry.db");
+    const db = openRegistryDatabase(path);
+    db.exec("ALTER TABLE nodes DROP COLUMN alert_flags");
+    db.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
+    db.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
+    db.exec("DROP TABLE reports");
+    db.exec("PRAGMA user_version = 1");
+    db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    db.close();
+    const before = await readFile(path);
+    assert.throws(() => openRegistryDatabase(path), (error) => error.code === "malformed-schema");
+    const after = await readFile(path);
+    assert.deepEqual(after, before);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

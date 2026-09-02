@@ -330,6 +330,13 @@ test("daily event rollups: events older than 7 days collapse into per-day summar
   assert.equal(JSON.parse(summaries[0].to_value).count, 3);
   assert.equal(JSON.parse(summaries[0].to_value).final, "stale");
   assert.equal(summaries[0].source, "retention-rollup");
+  registry.db
+    .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, ?, 'registry_contact', 'stale', 'lost', 'maintenance')")
+    .run(node.nodeId, "2026-08-03T23:59:59.999Z");
+  clock.now = new Date("2026-08-31T00:00:00.000Z");
+  registry.maintenance();
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS n FROM events WHERE node_id = ? AND dimension = 'registry_contact'").get(node.nodeId).n, 0);
+
   // Under 7 days events stay raw.
   clock.now = new Date();
   const recent = await signedMachineRequest(server.baseUrl, {

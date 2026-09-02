@@ -165,19 +165,23 @@ export async function backupRegistryDatabase({ db, sourcePath, destinationPath }
   const temporary = `${destination}.partial-${process.pid}-${Date.now()}`;
   try {
     // VACUUM INTO creates a standalone consistent image including committed
-    // WAL state. It must run outside an application transaction.
+    // WAL state. It must run outside an application transaction. The source
+    // may legitimately advance while this snapshot is being produced, so
+    // the source digest is recorded before and after rather than treating a
+    // concurrent write as evidence that the SQLite snapshot is invalid.
     db.prepare("VACUUM INTO ?").run(temporary);
-    const backupInspection = inspectRegistryDatabase(temporary);
-    if (backupInspection.stateDigest !== sourceInspection.stateDigest) {
-      throw new RegistryBackupError("backup-mismatch", "SQLite backup state digest differs from the live source");
-    }
+    inspectRegistryDatabase(temporary);
     await rename(temporary, destination);
+    const sourceAfter = inspectRegistryDatabase(source);
+    const backup = inspectRegistryDatabase(destination);
     return {
       method: "sqlite-vacuum-into",
       sourcePath: source,
       backupPath: destination,
       source: sourceInspection,
-      backup: inspectRegistryDatabase(destination),
+      sourceAfter,
+      sourceChangedDuringBackup: sourceAfter.stateDigest !== sourceInspection.stateDigest,
+      backup,
       sourceWalPresent: await exists(`${source}-wal`),
       sourceShmPresent: await exists(`${source}-shm`),
       backupWalPresent: await exists(`${destination}-wal`),
@@ -193,7 +197,13 @@ export async function backupRegistryDatabase({ db, sourcePath, destinationPath }
   }
 }
 
-export async function restoreRegistryDatabase({ backupPath, targetPath }) {
+export async function restoreRegistryDatabase({ backupPath, targetPath, writersQuiesced = false }) {
+  if (writersQuiesced !== true) {
+    throw new RegistryBackupError(
+      "writers-active",
+      "restore requires the Hub and every Registry writer to be stopped",
+    );
+  }
   const backup = requirePath(backupPath, "backup path");
   const target = requirePath(targetPath, "restore target path");
   if (backup === target) {

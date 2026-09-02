@@ -951,7 +951,7 @@ export class Registry {
         if (exists) continue;
         this.db
           .prepare("DELETE FROM events WHERE node_id = ? AND dimension = ? AND at >= ? AND at < ?")
-          .run(group.node_id, group.dimension, `${group.day}T00:00:00.000Z`, summaryAt);
+          .run(group.node_id, group.dimension, `${group.day}T00:00:00.000Z`, new Date(Date.parse(`${group.day}T00:00:00.000Z`) + 24 * 60 * 60 * 1000).toISOString());
         this.db
           .prepare("INSERT INTO events (node_id, at, dimension, from_value, to_value, source) VALUES (?, ?, 'rollup', ?, ?, 'retention-rollup')")
           .run(group.node_id, summaryAt, group.dimension, JSON.stringify({ count: group.count, final: group.final_value }));

@@ -96,13 +96,6 @@ const EXPECTED_TABLE_COLUMNS = {
   ],
 };
 
-const EXPECTED_INDEXES = [
-  "idx_seen_nonces_created_at",
-  "idx_reports_node_uploaded",
-  "idx_events_node_at",
-  "idx_audit_at",
-];
-
 function databaseErrorCode(error) {
   const message = String(error?.message ?? error);
   if (/not a database|file is encrypted|malformed/i.test(message)) return "corrupt-database";
@@ -120,27 +113,141 @@ function readUserVersion(db) {
   return version;
 }
 
-function tableColumns(db, table) {
+function normalizeSql(sql) {
+  return String(sql ?? "").replace(/\s+/g, " ").trim();
+}
+
+function pragmaIdentifier(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function tableInfo(db, table) {
   return db
-    .prepare(`PRAGMA table_info(${table})`)
+    .prepare(`PRAGMA table_info(${pragmaIdentifier(table)})`)
     .all()
-    .map((row) => row.name);
+    .map(({ name, type, notnull, dflt_value, pk }) => ({ name, type, notnull, dflt_value, pk }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function foreignKeys(db, table) {
+  return db
+    .prepare(`PRAGMA foreign_key_list(${pragmaIdentifier(table)})`)
+    .all()
+    .map(({ id, seq, table: target, from, to, on_update, on_delete, match }) => ({
+      id,
+      seq,
+      table: target,
+      from,
+      to,
+      on_update,
+      on_delete,
+      match,
+    }))
+    .sort((a, b) => `${a.id}:${a.seq}`.localeCompare(`${b.id}:${b.seq}`));
+}
+
+function extractChecks(sql) {
+  const source = String(sql ?? "");
+  const checks = [];
+  let cursor = 0;
+  while (true) {
+    const match = /\bcheck\s*\(/gi.exec(source.slice(cursor));
+    if (!match) break;
+    const start = cursor + match.index + match[0].length - 1;
+    let depth = 0;
+    let end = start;
+    for (; end < source.length; end += 1) {
+      if (source[end] === "(") depth += 1;
+      else if (source[end] === ")") {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    if (depth !== 0) break;
+    checks.push(normalizeSql(source.slice(start + 1, end)));
+    cursor = end + 1;
+  }
+  return checks.sort();
+}
+
+const EXPECTED_INDEX_DEFINITIONS = {
+  idx_seen_nonces_created_at: { table: "seen_nonces", unique: 0, partial: 0, columns: [{ name: "created_at", desc: 0 }] },
+  idx_reports_node_uploaded: {
+    table: "reports",
+    unique: 0,
+    partial: 0,
+    columns: [{ name: "node_id", desc: 0 }, { name: "uploaded_at", desc: 1 }],
+  },
+  idx_events_node_at: { table: "events", unique: 0, partial: 0, columns: [{ name: "node_id", desc: 0 }, { name: "at", desc: 0 }] },
+  idx_audit_at: { table: "audit", unique: 0, partial: 0, columns: [{ name: "at", desc: 0 }] },
+};
+
+function indexDefinitions(db) {
+  const definitions = {};
+  const indexes = db
+    .prepare("SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all();
+  for (const { name, tbl_name: table } of indexes) {
+    const list = db.prepare(`PRAGMA index_list(${pragmaIdentifier(table)})`).all().find((row) => row.name === name);
+    const columns = db
+      .prepare(`PRAGMA index_xinfo(${pragmaIdentifier(name)})`)
+      .all()
+      .filter((row) => row.key === 1)
+      .sort((a, b) => a.seqno - b.seqno)
+      .map(({ name: columnName, desc }) => ({ name: columnName, desc }));
+    definitions[name] = {
+      table: table ?? null,
+      unique: Number(list?.unique ?? -1),
+      partial: Number(list?.partial ?? -1),
+      columns,
+    };
+  }
+  return definitions;
+}
+
+function schemaMetadata(db) {
+  const tables = {};
+  for (const table of Object.keys(EXPECTED_TABLE_COLUMNS)) {
+    const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)?.sql;
+    tables[table] = {
+      columns: tableInfo(db, table),
+      foreignKeys: foreignKeys(db, table),
+      checks: extractChecks(sql),
+    };
+  }
+  return { tables, indexes: indexDefinitions(db) };
 }
 
 export function registrySchemaShape(db) {
+  const metadata = schemaMetadata(db);
   const tables = {};
-  for (const table of Object.keys(EXPECTED_TABLE_COLUMNS)) {
-    tables[table] = tableColumns(db, table).sort();
+  for (const [table, shape] of Object.entries(metadata.tables)) {
+    tables[table] = shape.columns.map((column) => column.name);
   }
-  const indexes = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-    .all()
-    .map((row) => row.name)
-    .sort();
-  return { tables, indexes };
+  return { tables, indexes: Object.keys(metadata.indexes).sort() };
 }
 
-export function validateRegistrySchema(db) {
+function canonicalSchemaMetadata(version = SCHEMA_VERSION) {
+  const canonical = new DatabaseSync(":memory:");
+  try {
+    for (const statement of schemaStatements) canonical.exec(statement);
+    if (version === 1) {
+      canonical.exec("ALTER TABLE nodes DROP COLUMN alert_flags");
+      canonical.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
+      canonical.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
+    } else if (version === 2) {
+      canonical.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
+      canonical.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
+    } else if (version !== SCHEMA_VERSION) {
+      throw new RegistryDatabaseError("malformed-schema", `no canonical schema is defined for version ${version}`);
+    }
+    return schemaMetadata(canonical);
+  } finally {
+    canonical.close();
+  }
+}
+
+function validateSchemaVersion(db, version) {
   const expectedTables = Object.keys(EXPECTED_TABLE_COLUMNS).sort();
   const actualTables = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -149,27 +256,33 @@ export function validateRegistrySchema(db) {
   if (JSON.stringify(actualTables) !== JSON.stringify(expectedTables)) {
     throw new RegistryDatabaseError(
       "malformed-schema",
-      `registry database tables do not match the supported schema (expected ${expectedTables.join(",")})`,
+      `registry database tables do not match the supported schema for version ${version}`,
     );
   }
-  for (const [table, expectedColumns] of Object.entries(EXPECTED_TABLE_COLUMNS)) {
-    const actualColumns = tableColumns(db, table);
-    if (JSON.stringify([...actualColumns].sort()) !== JSON.stringify([...expectedColumns].sort())) {
+  const expected = canonicalSchemaMetadata(version);
+  const actual = schemaMetadata(db);
+  for (const table of expectedTables) {
+    if (JSON.stringify(actual.tables[table]) !== JSON.stringify(expected.tables[table])) {
       throw new RegistryDatabaseError(
         "malformed-schema",
-        `registry database table ${table} does not match the supported schema`,
+        `registry database table ${table} does not match the supported column, constraint, or foreign-key definition for version ${version}`,
       );
     }
   }
-  const actualIndexes = registrySchemaShape(db).indexes;
-  const expectedIndexes = [...EXPECTED_INDEXES].sort();
-  if (JSON.stringify(actualIndexes) !== JSON.stringify(expectedIndexes)) {
+  const expectedIndexes = Object.fromEntries(
+    Object.entries(EXPECTED_INDEX_DEFINITIONS).sort(([a], [b]) => a.localeCompare(b)),
+  );
+  if (JSON.stringify(actual.indexes) !== JSON.stringify(expectedIndexes)) {
     throw new RegistryDatabaseError(
       "malformed-schema",
-      `registry database indexes do not match the supported schema (expected ${expectedIndexes.join(",")})`,
+      `registry database indexes do not match the supported definitions for version ${version}`,
     );
   }
   return true;
+}
+
+export function validateRegistrySchema(db) {
+  return validateSchemaVersion(db, SCHEMA_VERSION);
 }
 
 function wrapDatabaseError(error, path, phase) {
@@ -330,6 +443,7 @@ export function openRegistryDatabase(path) {
         `registry database schema ${version} is newer than supported ${SCHEMA_VERSION}`,
       );
     }
+    if (version >= 1 && version < SCHEMA_VERSION) validateSchemaVersion(db, version);
     if (version === SCHEMA_VERSION) validateRegistrySchema(db);
     if (version === 0) {
       const existingTables = db

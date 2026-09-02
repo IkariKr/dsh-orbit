@@ -131,6 +131,7 @@ function shutdown(signal) {
   shuttingDown = true;
   console.log(`dsh-orbit-hub: ${signal}, shutting down`);
   maintenanceScheduler.stop();
+  server.closeAllConnections?.();
   server.close(() => {
     registry.close();
     process.exit(0);
