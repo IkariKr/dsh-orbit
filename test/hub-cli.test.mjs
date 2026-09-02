@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const HUB = join(REPO_ROOT, "bin", "dsh-orbit-hub.mjs");
@@ -36,6 +37,34 @@ function runHub(env, { stopWhenReady = false } = {}) {
     });
   });
 }
+
+test("Hub refuses unsupported or malformed persistent databases before serving", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-hub-cli-db-failure-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const base = {
+    DSH_ORBIT_HUB_PORT: "0",
+    DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
+    DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+  };
+
+  const futurePath = join(dir, "future.db");
+  const future = openRegistryDatabase(futurePath);
+  future.exec("PRAGMA user_version = 99");
+  future.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  future.close();
+  const futureResult = await runHub({ ...base, DSH_ORBIT_HUB_DB: futurePath });
+  assert.equal(futureResult.code, 1);
+  assert.match(futureResult.stderr, /database startup failed \(unsupported-schema\)/);
+  assert.doesNotMatch(futureResult.stdout, /registry listening/);
+
+  const corruptPath = join(dir, "corrupt.db");
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(corruptPath, "not sqlite", "utf8");
+  const corruptResult = await runHub({ ...base, DSH_ORBIT_HUB_DB: corruptPath });
+  assert.equal(corruptResult.code, 1);
+  assert.match(corruptResult.stderr, /database startup failed/);
+  assert.doesNotMatch(corruptResult.stdout, /registry listening/);
+});
 
 test("Hub drill aging flags fail closed unless both controls are present", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "orbit-hub-cli-"));

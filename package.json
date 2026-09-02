@@ -12,6 +12,7 @@
     "smoke:session": "node scripts/smoke-session-resume.mjs",
     "smoke:terminal": "node scripts/smoke-terminal.mjs",
     "smoke:auth": "node scripts/smoke-auth.mjs",
+    "stage7:drill": "node scripts/registry-stage7-drill.mjs",
     "report:compatibility": "node scripts/report-compatibility.mjs",
     "upgrade": "node bin/dsh-orbit-upgrade.mjs"
   },

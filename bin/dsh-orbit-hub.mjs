@@ -21,7 +21,7 @@ import { existsSync, readFileSync } from "node:fs";
 import process from "node:process";
 import { createMaintenanceScheduler } from "../src/registry/scheduler.mjs";
 import { validateHubConfig } from "../src/registry/config.mjs";
-import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
+import { openRegistryDatabase, RegistryDatabaseError } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
 import { createHubServer } from "../src/registry/server.mjs";
 
@@ -91,8 +91,17 @@ if (gatewaySecret === null && !lanBoundaryOnly) {
   process.exit(1);
 }
 
+let db;
+try {
+  db = openRegistryDatabase(dbPath);
+} catch (error) {
+  const code = error instanceof RegistryDatabaseError ? error.code : "database-open-failed";
+  console.error(`dsh-orbit-hub: database startup failed (${code}): ${error.message}`);
+  process.exit(1);
+}
+
 const registry = new Registry({
-  db: openRegistryDatabase(dbPath),
+  db,
   rotationOverlapHours,
   ...(drillContactNow ? { registryContactNow: drillContactNow } : {}),
 });
@@ -106,7 +115,9 @@ if (singlePrincipal !== null) {
 
 const { server } = createHubServer({ registry, options });
 server.listen(port, listen, () => {
-  console.log(`dsh-orbit-hub: registry listening on http://${listen}:${port} (db ${dbPath})`);
+  const address = server.address();
+  const actualPort = typeof address === "object" && address !== null ? address.port : port;
+  console.log(`dsh-orbit-hub: registry listening on http://${listen}:${actualPort} (db ${dbPath})`);
 });
 
 // 30s maintenance tick with an immediate pass at startup (round-2 P1):
