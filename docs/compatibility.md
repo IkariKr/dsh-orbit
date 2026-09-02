@@ -6,6 +6,8 @@ DSH Orbit only claims compatibility with DeepSeek Harness versions that have bee
 | --- | --- | --- | --- | --- |
 | `0.1.1-rc.2` | `0.3.0` | Supported | Required and verified | Tested |
 
+`0.1.2-alpha.5` was reviewed on 2026-09-02 as a reconnaissance target and remains **unsupported**. Its published `dsh-client-connection` no longer matches Orbit's current server patch, adds mandatory browser-session authentication after the Host/Origin trust fence, and makes Orbit's old public-host-as-loopback client patch too broad to carry forward safely. No compatibility profile was added. See [the reconnaissance report](dsh-0.1.2-alpha.5-compatibility-reconnaissance-2026-09-02.md).
+
 ## Compatibility policy
 
 An upstream version is not supported merely because it builds.
