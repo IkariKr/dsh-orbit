@@ -44,6 +44,10 @@ runbook at [`docs/sop/v0.3-node-enrollment-sop.md`](sop/v0.3-node-enrollment-sop
 
 ## Gateway and deployment
 
+| Variable | Required | Default | Meaning and constraints |
+| --- | --- | --- | --- |
+| `DSH_ORBIT_REGISTRY_TAG` | yes | none | Registry deployment image tag. It must be explicitly bound to an RC or release image tag, such as `v0.3.0-rc.1`; if unset, deployment must fail closed. The Stage 6 construction tag `v0.3.0-s6` is not permitted. |
+
 - Terminate TLS at the authenticated gateway.
 - Inject the Hub assertion and operator principal only after authentication.
 - Preserve browser `Cookie`, `Origin`, and `Sec-Fetch-Site` headers.

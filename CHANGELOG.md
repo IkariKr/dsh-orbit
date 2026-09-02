@@ -4,7 +4,9 @@ All notable changes to DSH Orbit are documented here.
 
 The project follows Semantic Versioning once the public API and deployment contract stabilize. Early `0.x` releases may change as DeepSeek Harness evolves.
 
-## 0.3.0-rc.1 - 2026-08-31
+## Unreleased
+
+### 0.3.0-rc.1 candidate - 2026-09-02
 
 ### Added
 

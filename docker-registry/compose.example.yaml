@@ -19,7 +19,10 @@ services:
     build:
       context: ..
       dockerfile: docker-registry/Dockerfile
-    image: dsh-orbit-registry:${DSH_ORBIT_REGISTRY_TAG:-v0.3.0-s6}
+    # Bind this explicitly to an RC or release image tag (for example,
+    # v0.3.0-rc.1). The Stage 6 construction tag v0.3.0-s6 is never a
+    # default and must not be used for deployment.
+    image: dsh-orbit-registry:${DSH_ORBIT_REGISTRY_TAG:?set DSH_ORBIT_REGISTRY_TAG}
     environment:
       DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:?set in .env}
       DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: ${DSH_ORBIT_HUB_OPERATOR_PRINCIPAL:-operator}

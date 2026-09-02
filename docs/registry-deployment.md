@@ -101,10 +101,10 @@ for real container/browser evidence.
 
 ## Gate B and Stage 7 status
 
-Review Gate B was approved after the remediation evidence package. Stage 7
-operational hardening is complete and its attestation is awaiting review. The
-Stage 8 release candidate is documentation-only and is awaiting final review;
-no tag, publication, or production promotion has occurred.
+Review Gate B was approved after the remediation evidence package. Stage 7 is
+complete and accepted. The Stage 8 release candidate is documentation-only and
+is awaiting final review; no tag, publication, or production promotion has
+occurred.
 
 The remediation mounted run from clean commit
 `2f713e8bbd023ac49080bd2da44023c4a31323db` completed the trusted-browser,
@@ -122,7 +122,7 @@ raw request-target matching and rejects query, encoded, dot-segment, browser,
 and unknown variants before upstream. Image identities were captured from the
 running containers after compose build/start.
 
-Review Gate B is **approved**. Stage 7 is complete; see
+Review Gate B is **approved**. Stage 7 is complete and accepted; see
 `docs/release-attestations/v0.3-stage7-operational-hardening.md` for the
 operator-grade evidence. Stage 8 remains at its final-review stop point; see
 `docs/release-attestations/v0.3.0-rc.1.md`.
