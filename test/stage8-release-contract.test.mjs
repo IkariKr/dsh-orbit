@@ -52,11 +52,13 @@ test("Stage 8 release candidate artifact set exists", async () => {
 
 test("Registry Compose requires an explicit release image tag", async () => {
   const compose = await text("docker-registry/compose.example.yaml");
+  const imageLine = /^\s*image:\s+[^\n]+$/m.exec(compose)?.[0] ?? "";
   assert.match(
-    compose,
+    imageLine,
     /image:\s+dsh-orbit-registry:\$\{DSH_ORBIT_REGISTRY_TAG:\?set DSH_ORBIT_REGISTRY_TAG\}/,
   );
-  assert.doesNotMatch(compose, /image:\s+[^\n]*:-v0\.3\.0-s6/);
+  assert.doesNotMatch(imageLine, /v0\.3\.0-s6/);
+  assert.doesNotMatch(imageLine, /:-/);
 
   const config = await text("docs/configuration-reference.md");
   assert.match(config, /`DSH_ORBIT_REGISTRY_TAG`/);
@@ -91,6 +93,9 @@ test("Registry backup and restore SOP contains runnable primitive procedures", a
   assert.match(source, /There is no production backup or restore CLI/);
   assert.match(source, /npm run\s+stage7:drill[\s\S]*not a[\s\S]*production backup\/restore/);
   assert.match(source, /node --input-type=module/);
+  assert.match(source, /DSH_ORBIT_REGISTRY_SOURCE=\/data\/orbit\/registry\.db/);
+  assert.match(source, /DSH_ORBIT_REGISTRY_BACKUP=\/backups\/registry-\d+T\d+Z\.db/);
+  assert.match(source, /DSH_ORBIT_REGISTRY_TARGET=\/data\/orbit\/registry\.db/);
   assert.match(source, /import \{ openRegistryDatabase \}/);
   assert.match(source, /backupRegistryDatabase/);
   assert.match(source, /restoreRegistryDatabase/);
