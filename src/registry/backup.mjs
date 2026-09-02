@@ -3,7 +3,7 @@
 // A live registry is snapshotted with SQLite's VACUUM INTO, never by copying
 // the database file while its WAL may contain committed state.
 
-import { chmod, copyFile, mkdir, rename, rm, access } from "node:fs/promises";
+import { chmod, copyFile, mkdir, open, rename, rm, access } from "node:fs/promises";
 import { constants, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
@@ -97,6 +97,16 @@ async function enforceRegistryFileMode(path) {
   }
 }
 
+async function reserveTemporaryBackup(path) {
+  if (process.platform === "win32") {
+    const handle = await open(path, "wx");
+    await handle.close();
+    return;
+  }
+  const handle = await open(path, "wx", 0o600);
+  await handle.close();
+}
+
 // Inspection does not run migrations or write application data. A normal
 // SQLite handle is used so WAL-backed sources report their actual journal
 // mode; the helper never changes that mode or copies its sidecars. The digest
@@ -152,7 +162,7 @@ async function ensureAbsent(path, label) {
   }
 }
 
-export async function backupRegistryDatabase({ db, sourcePath, destinationPath }) {
+export async function backupRegistryDatabase({ db, sourcePath, destinationPath, _testHooks = null }) {
   if (!db || typeof db.prepare !== "function") {
     throw new RegistryBackupError("invalid-source", "backup requires an open Registry SQLite connection");
   }
@@ -166,12 +176,17 @@ export async function backupRegistryDatabase({ db, sourcePath, destinationPath }
   const sourceInspection = inspectRegistryDatabase(source);
   const temporary = `${destination}.partial-${process.pid}-${Date.now()}`;
   try {
+    // Reserve the path before SQLite opens it. On POSIX this makes the
+    // temporary image private from its first byte; the later chmod calls
+    // remain defense-in-depth after SQLite finishes writing and publication.
+    await reserveTemporaryBackup(temporary);
     // VACUUM INTO creates a standalone consistent image including committed
     // WAL state. It must run outside an application transaction. The source
     // may legitimately advance while this snapshot is being produced, so
     // the source digest is recorded before and after rather than treating a
     // concurrent write as evidence that the SQLite snapshot is invalid.
     db.prepare("VACUUM INTO ?").run(temporary);
+    await _testHooks?.afterVacuumBeforeChmod?.(temporary);
     await enforceRegistryFileMode(temporary);
     inspectRegistryDatabase(temporary);
     await rename(temporary, destination);

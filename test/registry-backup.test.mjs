@@ -46,6 +46,35 @@ function insertMeaningfulState(db, suffix = "a") {
   ).run("2026-08-31T00:00:00.000Z");
 }
 
+test("VACUUM temporary backup is private before Orbit applies final chmod on POSIX", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX permission bits are not applicable on Windows");
+    return;
+  }
+  const dir = await fixtureDir(t, "orbit-registry-backup-temp-private-");
+  const sourcePath = join(dir, "registry.db");
+  const backupPath = join(dir, "backups", "registry.db");
+  const db = openRegistryDatabase(sourcePath);
+  insertMeaningfulState(db);
+  let observed = null;
+  await backupRegistryDatabase({
+    db,
+    sourcePath,
+    destinationPath: backupPath,
+    _testHooks: {
+      async afterVacuumBeforeChmod(temporaryPath) {
+        const entry = await stat(temporaryPath);
+        observed = {
+          mode: entry.mode & 0o777,
+          populated: entry.size > 100,
+        };
+      },
+    },
+  });
+  db.close();
+  assert.deepEqual(observed, { mode: 0o600, populated: true });
+});
+
 test("SQLite backup uses a consistent standalone image and preserves WAL state", async (t) => {
   const dir = await fixtureDir(t);
   const sourcePath = join(dir, "registry.db");
