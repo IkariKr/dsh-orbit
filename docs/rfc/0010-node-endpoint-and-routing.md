@@ -84,7 +84,15 @@ v0.4 intentionally does **not** build an SSRF sandbox around operator-selected p
 
 RFC-0009 keeps `registryContact` and `reachable` separate. v0.4 activates `reachable` using the operator-approved route target only.
 
-A route probe checks an Orbit-owned route-ingress readiness surface, not a DSH-private API. The probe proves:
+A route probe checks one exact Orbit-owned route-ingress readiness surface, not a DSH-private API:
+
+```text
+GET /_orbit/route-ready
+```
+
+The request carries the normal `ORBIT-ROUTE-V1` proof for that exact method/raw target and the selected node authority. Stage 2 reserves this exact path at the route ingress; it is never forwarded to DSH. A successful response is HTTP 200 with a small Orbit-owned body containing the expected `nodeId` and `ready: true`. If the ingress is authenticated and alive but its configured downstream transport to DSH is unavailable, it returns HTTP 503 with the expected `nodeId` and `ready: false`. Authentication, TLS, node-ID, authority, timestamp, nonce, or signature failures fail before readiness is trusted.
+
+The probe therefore proves:
 
 1. the target is reachable over the configured transport;
 2. the node route ingress identifies the expected `nodeId`;
@@ -92,7 +100,7 @@ A route probe checks an Orbit-owned route-ingress readiness surface, not a DSH-p
 4. the Orbit route-ingress service is ready to accept routed traffic;
 5. the node-local compatibility adapter can currently establish its configured downstream transport to the DSH web runtime.
 
-Item 5 is deliberately transport-level only. It may prove that the configured local DSH listener/process is connectable, but it must not parse a DSH private RPC, cookie, launch token, or frontend contract. Semantic DSH health remains report-derived.
+Item 5 is deliberately transport-level only. It may prove that the configured local DSH listener/process is connectable, but it must not parse a DSH private RPC, cookie, launch token, or frontend contract. Semantic DSH health remains report-derived. Stage 2 must not proxy any other browser/DSH path; ordinary HTTP routing starts only in Stage 3.
 
 Default probe cadence is 60 seconds. Three consecutive failures move `reachable` to `unreachable`; one authenticated success restores `ok`. No target or no completed probe is `unknown`. A DSH process death behind a still-running Orbit ingress therefore becomes `unreachable` through this same probe path rather than waiting for the seven-day report-staleness window. An already-routed request whose downstream connection fails still fails immediately; the health transition follows the normal probe threshold rather than being driven by browser traffic.
 
