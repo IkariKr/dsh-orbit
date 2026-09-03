@@ -45,7 +45,7 @@ Stage 3 may begin under a separate, explicit construction order.
 
 - `src/node/client.mjs` implements `callFetch` and `defaultNodeMachineFetch` with `redirect: "manual"`, failing closed on any HTTP 3xx (`redirect-denied`).
 - The response URL origin is verified to match `hubBaseUrl` (`authority-mismatch`).
-- `NodeClient` combines `caCertificates` with `tls.rootCertificates` to form an additive trust bundle for private-CA HTTPS Hub endpoints.
+- `NodeClient` uses the shared additive trust helper so operator-managed private CAs extend the runtime default trust set rather than replacing it.
 - Tests in `test/stage2-hub-route-identity.test.mjs` prove that redirects fail closed, wrong SAN fails closed, and private CA HTTPS is accepted only when configured.
 
 ### P1-3: Deleted-era Hub route keys surviving reenrollment
@@ -74,8 +74,8 @@ Stage 3 may begin under a separate, explicit construction order.
 
 **CLOSED.**
 
-- `src/registry/route-probe.mjs` configures TLS `ca` as `[...tls.rootCertificates, ...extraCas]`.
-- System/platform root certificates remain trusted when an optional operator private CA bundle is configured.
+- `src/registry/route-probe.mjs` uses the shared additive trust helper for route probes.
+- The runtime default trust set remains trusted when an optional operator private CA bundle is configured.
 
 ### P3-1: Loopback trust definition consistency
 
@@ -94,7 +94,7 @@ Stage 3 may begin under a separate, explicit construction order.
 ## Final Verification Gates
 
 1. **Repository Check**:
-   - `npm run check`: 334 tests passed, 0 failed, 4 skipped.
+   - `npm run check`: 334 tests total, 330 passed, 0 failed, 4 skipped.
    - `node scripts/check-public-tree.mjs`: PASS.
    - `git diff --check`: PASS.
 
