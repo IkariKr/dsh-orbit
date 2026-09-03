@@ -129,7 +129,7 @@ ORBIT-REENROLL-V1
 
 ### Proposed v0.4 heartbeat extension: Hub route public-key sync
 
-RFC-0008 rev. 4 reuses the authenticated heartbeat exchange to synchronize **public** Hub route identity material without creating a general command channel.
+RFC-0008 rev. 5 reuses the authenticated heartbeat exchange to synchronize **public** Hub route identity material without creating a general command channel.
 
 The v0.4 heartbeat request may add:
 
@@ -156,7 +156,22 @@ The heartbeat response may add:
 }
 ```
 
-The Hub returns only public material bound to the authenticated `nodeId`. The node persists the complete returned set before reporting those key IDs in a later heartbeat. Absence of these optional fields preserves the v0.3 heartbeat behavior. Arbitrary commands, settings, execution requests, and capability claims are forbidden in this extension.
+The Hub returns only public material bound to the authenticated `nodeId`. Hub route `keyId` uses the same deterministic derivation as node keys: the first 16 bytes of SHA-256(raw Ed25519 public-key bytes), lowercase hex (32 characters). The public-key encoding is 32 raw bytes as 64 lowercase hex characters.
+
+`hubRouteKeys` is an **authoritative complete desired trust set**, not an incremental patch. If the field is present for an active/non-revoked node, it must be non-empty and match exactly one of these forms:
+
+1. initial provisioning: one `provisioned` key, `overlapUntil = null`;
+2. steady state: one `active` key, `overlapUntil = null`;
+3. rotation before next-key acknowledgment: one `active` key plus one `provisioned` key, both `overlapUntil = null`;
+4. rotation after acknowledgment: one new `active` key with `overlapUntil = null` plus one old `rotating` key whose `overlapUntil` is a valid future timestamp within the configured overlap policy.
+
+Duplicate key IDs, a keyId/publicKey derivation mismatch, duplicate public keys, more than two entries, an explicit empty array, any other state/cardinality combination, a non-null overlap on the wrong state, or a malformed/past overlap timestamp makes the entire returned set invalid. The node then keeps its previous durable trust set unchanged and does not acknowledge any newly returned key ID. A valid set is atomically **replaced**, not merged, and only its durably persisted IDs may appear in `acceptedHubRouteKeyIds` later.
+
+Absence of the optional `hubRouteKeys` field preserves v0.3 heartbeat behavior and does not clear an existing v0.4 trust set. Revocation is represented by the existing authenticated `401 revoked` lifecycle, not by an empty trust set.
+
+The node may accept this trust material only from the exact canonical persisted `hubBaseUrl` over the verified transport fixed by RFC-0008 rev. 5: no redirects; non-loopback production HTTPS with hostname/SAN validation against platform roots plus any operator-managed Orbit private-CA bundle; loopback HTTP only when Node and Hub share the local host trust boundary. A response from a different authority, invalid certificate, or other non-loopback plaintext transport cannot mutate or acknowledge Hub-route trust.
+
+Arbitrary commands, settings, execution requests, and capability claims are forbidden in this extension.
 
 There is **no** `update-capabilities` endpoint: capabilities are derived deterministically from the latest uploaded report at the Hub (single source of truth; RFC-0009). All machine routes are fixed paths **without query strings**; any request carrying a query string is denied (400) before authentication (see wire contract).
 
@@ -173,6 +188,9 @@ There is **no** `update-capabilities` endpoint: capabilities are derived determi
 | reenroll with an `enroll`-purpose token | denied (purpose mismatch) |
 | enroll with non-hex / wrong-length public key | denied (400, wire contract) |
 | heartbeat with valid signature, fresh ts, fresh nonce, known keyId | accepted |
+| v0.4 heartbeat returns a valid complete Hub route key set over the exact verified enrolled Hub transport | persist atomically, then acknowledge only after durable write |
+| v0.4 heartbeat returns an explicit empty, contradictory, duplicate, malformed, or keyId-mismatched Hub route key set | reject the whole set; preserve prior durable trust; do not acknowledge new IDs |
+| v0.4 Hub route key response arrives via redirect, wrong `hubBaseUrl`, invalid/wrong-SAN certificate, or other non-loopback plaintext transport | do not persist or acknowledge Hub route keys |
 | missing signature | denied |
 | malformed signature encoding (wrong length, non-hex) | denied (400) |
 | wrong signature (tampered body, wrong key, swapped nodeId) | denied |
@@ -188,7 +206,7 @@ There is **no** `update-capabilities` endpoint: capabilities are derived determi
 | non-empty query string on a machine route | denied (400; the protocol has no query strings) |
 | report-upload oversized body | denied (413) |
 | rate limit exceeded | denied (429, Retry-After) |
-| reenroll with valid token + ORBIT-REENROLL-V1 proof signed by the original private key | success; nodeId restored with the new public key; historical key stays revoked |
+| reenroll with valid token + ORBIT-REENROLL-V1 proof signed by the original private key | success; nodeId restored with the new node public key; historical node key stays revoked; any deleted-era Hub route identities remain revoked and a fresh Hub route identity is provisioned through later heartbeat sync |
 | reenroll with malformed `reenrollmentRequestId` (not 32 lowercase hex) | denied (400, wire contract) |
 | reenroll with an idempotency-key exact replay | same result (idempotent replay) |
 | reenroll with consumed token, different idempotency content | denied |

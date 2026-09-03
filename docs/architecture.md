@@ -95,7 +95,7 @@ v0.4 is intentionally a thin routing layer over the accepted Registry rather tha
 
 The selector lives at one familiar authority such as `dsh.example.com`. Selecting a node navigates to a deterministic authority such as `n-<node-id-hex>.dsh.example.com`; wildcard DNS/TLS terminates at the same Orbit deployment. Host-based selection keeps DSH at `/`, keeps browser authorities isolated per node, and avoids a mutable global active-node session.
 
-The Hub stores one operator-approved server-reachable route target per node. It authenticates to a small node-side Orbit route ingress with that node's RFC-0008 Hub identity, then forwards HTTP/WebSocket traffic opaquely to the node-local DSH compatibility adapter. The Hub router does not understand DSH cookies, launch tokens, private RPC names, plugin routes, or frontend components. A DSH version is routable only while fresh compatibility evidence provides `web.routes`.
+The Hub stores one operator-approved server-reachable route target per node. It authenticates to a small node-side Orbit route ingress with that node's RFC-0008 Hub identity, then forwards HTTP/WebSocket traffic opaquely to the node-local DSH compatibility adapter. The Hub router does not understand DSH cookie names/values, launch tokens, private RPC names, plugin routes, or frontend components; it may enforce generic HTTP isolation such as stripping parent-domain `Set-Cookie` scope and Orbit/gateway credentials. A DSH version is routable only while fresh compatibility evidence provides the v0.4 `web.routes` contract, including WebSocket transport evidence.
 
 A failed node route never fails over to another node. Reverse-connected nodes, NAT traversal, multi-node sessions, and fleet execution remain later milestones.
 

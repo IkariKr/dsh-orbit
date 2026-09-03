@@ -64,14 +64,16 @@ The `Open` action is enabled only when RFC-0010 route eligibility passes. Inelig
 Examples of reasons:
 
 - no route target configured;
-- route target unreachable;
+- route target/route ingress/DSH downstream transport unreachable;
 - Hub route identity not active;
 - `web.routes` unavailable or stale;
 - node deleted/tombstoned.
 
 ## D4: Authentication layers remain separate
 
-Orbit edge authentication protects the selector and node route authorities. The gateway must continue to strip client-supplied identity/proof headers and inject only gateway-controlled operator identity, following RFC-0007.
+Orbit edge authentication protects the selector and node route authorities. The gateway must continue to strip client-supplied identity/proof headers and inject only gateway-controlled operator identity, following RFC-0007. Credentials used by that gateway, including its own authentication cookies/headers, are consumed at the gateway and must not be forwarded into a node route.
+
+The selector/Hub management session remains host-only to the selector authority; the node router strips it defensively if presented. RFC-0010 additionally removes any downstream `Set-Cookie Domain=` attribute so DSH cookies become host-only to the selected deterministic node authority. This is generic cookie isolation: Orbit does not inspect DSH cookie names or values.
 
 DSH may also require its own browser session/authentication for the selected authority. That behavior belongs to the node-local DSH compatibility adapter and the supported DSH profile, not to the selector.
 
@@ -106,7 +108,7 @@ The selector remains the primary discovery and switching UI; bookmarks are a con
 
 Deleting a node makes its route authority unroutable immediately.
 
-Reenrollment that restores the same RFC-0005 node ID restores the same deterministic route authority. The operator must still have a valid route target and active Hub route identity before Open becomes available again.
+Reenrollment that restores the same RFC-0005 node ID restores the same deterministic route authority. It does **not** reactivate the deleted-era Hub route identity: RFC-0008 provisions a fresh per-node Hub route identity after reenrollment, while old Hub route keys remain revoked. The operator must still have a valid route target, newly active Hub route identity, `reachable = ok`, and fresh `web.routes` before Open becomes available again.
 
 Ordinary enrollment of a replacement installation receives a new node ID and therefore a different route authority.
 
@@ -173,8 +175,11 @@ A real browser test with two routable nodes must prove:
 2. clicking A navigates to A's deterministic authority and reaches A only;
 3. clicking B in another tab navigates to B and does not retarget the A tab;
 4. DSH root/assets/API/WebSocket behavior works on both authorities for the supported compatibility profile;
-5. disabling A makes A visibly unavailable while B remains openable;
-6. no A request is served by B during failure;
-7. returning to the selector and choosing B is an explicit user action;
-8. deleting A disables direct bookmarks to A immediately;
-9. an unsupported DSH update can disable `web.routes`/Open without a selector code change.
+5. stopping A's DSH process while its Orbit ingress remains alive makes A become visibly unavailable after the route-probe threshold rather than remaining openable until report expiry;
+6. a downstream parent-domain cookie attempt from A cannot leak that cookie to the selector or B, and gateway/Orbit management credentials never reach either node;
+7. disabling A makes A visibly unavailable while B remains openable;
+8. no A request is served by B during failure;
+9. returning to the selector and choosing B is an explicit user action;
+10. deleting A disables direct bookmarks to A immediately;
+11. reenrolling A keeps its deterministic route authority but requires a fresh Hub route identity before Open returns;
+12. an unsupported DSH update can disable `web.routes`/Open without a selector code change.

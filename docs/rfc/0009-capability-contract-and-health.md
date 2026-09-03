@@ -15,7 +15,7 @@ A capability is `{ name, version: 1 }` derived **deterministically by the Hub fr
 | --- | --- |
 | `sessions.resume` | `sessionResume` |
 | `settings.remote` | `settingsRead` + `settingsNoopWrite` + `authorizationSmoke` |
-| `web.routes` | `runtimeReadiness` + `webPluginRoutes` |
+| `web.routes` | v0.3 accepted mapping: `runtimeReadiness` + `webPluginRoutes`; **proposed v0.4 routing mapping:** `runtimeReadiness` + `webPluginRoutes` + `webSocketTransport` |
 | `terminal.pty` | **not claimable in v0.3** |
 | `agents.run` | **not claimable in v0.3** |
 
@@ -37,7 +37,7 @@ Per-node composite record. **`reachable` is never modified by Node→Hub heartbe
 
 **Heartbeat runtime identity (non-authoritative, 1:1 with report fields)**: the heartbeat carries `orbitVersion`, `orbitRevision`, `dshVersion`, `compatibilityProfile` (RFC-0006), mapped 1:1 to the v0.2 compatibility report fields: `orbitVersion` ↔ `report.orbit.version`; `orbitRevision` ↔ `report.orbit.revision`; `dshVersion` ↔ `report.candidate.dshVersion`; `compatibilityProfile` ↔ `report.candidate.profile`. (No `orbitCommit` — there is no such report field.) The Hub compares these to the identity tuple recorded with the latest report; on mismatch the report is treated as stale → `orbitCompatible: stale` and capabilities withheld (stale marker) until a fresh report arrives. The heartbeat itself never declares or updates capabilities.
 
-For the proposed v0.4 endpoint selector, RFC-0010 activates `reachable` without changing the other dimensions: route probes never move `registryContact`, and heartbeats never move `reachable`. This extension is not active in the v0.3 implementation until the v0.4 architecture review passes.
+For the proposed v0.4 endpoint selector, RFC-0010 activates `reachable` without changing the other dimensions: route probes never move `registryContact`, and heartbeats never move `reachable`. The same v0.4 compatibility profile also strengthens `web.routes` with a generic `webSocketTransport` report check that proves one real WebSocket/long-lived browser transport path for the supported DSH profile. This prevents a DSH build with working HTTP routes but broken WebSocket transport from remaining selectable. Neither extension is active in the v0.3 implementation until the v0.4 architecture review passes.
 
 - `unknown` is explicit and default; never "compatible by default".
 - A failed dimension never hides others; partial health recorded.
