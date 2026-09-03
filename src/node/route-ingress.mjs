@@ -7,7 +7,7 @@ import https from "node:https";
 import net from "node:net";
 import { URL } from "node:url";
 import { RouteNonceCache, verifyRouteRequest } from "../registry/route-auth.mjs";
-import { computeRouteAuthority } from "../registry/protocol.mjs";
+import { computeRouteAuthority, validateRouteDomain } from "../registry/protocol.mjs";
 
 export class RouteIngress {
   constructor({
@@ -15,7 +15,7 @@ export class RouteIngress {
     routeDomain = "localhost",
     getTrustKeys = () => [],
     getNodeState = () => "active",
-    dshTarget = "http://127.0.0.1:5000",
+    dshTarget = "http://127.0.0.1:3080",
     tls = null,
     nonceCache = new RouteNonceCache(),
     now = () => Date.now(),
@@ -23,7 +23,7 @@ export class RouteIngress {
   }) {
     if (!nodeId) throw new Error("nodeId is required for RouteIngress");
     this.nodeId = nodeId;
-    this.routeDomain = routeDomain;
+    this.routeDomain = validateRouteDomain(routeDomain);
     this.getTrustKeys = getTrustKeys;
     this.getNodeState = getNodeState;
     this.dshTarget = dshTarget;
@@ -86,7 +86,7 @@ export class RouteIngress {
 
     return new Promise((resolve) => {
       let host = "127.0.0.1";
-      let port = 5000;
+      let port = 3080;
       if (typeof this.dshTarget === "string") {
         const parts = this.dshTarget.split(":");
         if (parts.length === 2) {

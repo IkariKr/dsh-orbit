@@ -2,6 +2,9 @@
 // Reachability state machine, Secret isolation, and Backup protection.
 
 import assert from "node:assert/strict";
+import http from "node:http";
+import https from "node:https";
+import tls from "node:tls";
 import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,8 +24,10 @@ import { RouteNonceCache, signRouteRequest, verifyRouteRequest } from "../src/re
 import { RouteIngress } from "../src/node/route-ingress.mjs";
 import { backupRegistryDatabase, inspectRegistryDatabase } from "../src/registry/backup.mjs";
 import { NodeClient, isTrustedTransport } from "../src/node/client.mjs";
-import { writeNodeStore } from "../src/node/store.mjs";
+import { loadNodeStoreAsync, writeNodeStore } from "../src/node/store.mjs";
 import { defaultRouteTransport } from "../src/registry/route-probe.mjs";
+import { extendDefaultCaCertificates } from "../src/tls-trust.mjs";
+import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
 
 function enrollTestNode(registry) {
   const minted = registry.mintEnrollmentToken({ actor: "operator", purpose: "enroll" });
@@ -116,8 +121,13 @@ test("Hub Route Key Complete-Set Validation: enforces RFC-0006 4 valid forms and
   assert.equal(validateHubRouteKeySet(badProvisioned).valid, false);
 });
 
-test("Hub Route Key Lifecycle: Heartbeat ACK progression (provisioned -> active -> rotating -> revoked)", () => {
-  const registry = createTestRegistry({ routeDomain: "dsh.example.com" });
+test("Hub Route Key Lifecycle: Heartbeat ACK progression honors configured overlap and revokes on schedule", () => {
+  const start = new Date("2026-09-03T00:00:00.000Z");
+  const registry = createTestRegistry({
+    routeDomain: "dsh.example.com",
+    hubRouteOverlapDays: 7,
+    now: () => start,
+  });
   const { nodeId, keyPair, keyId } = enrollTestNode(registry);
 
   // Helper for heartbeat calls in test
@@ -146,7 +156,7 @@ test("Hub Route Key Lifecycle: Heartbeat ACK progression (provisioned -> active 
   assert.equal(hb2.hubRouteKeys[0].state, "active");
 
   // 3. Trigger rotation
-  const rotateRes = registry.rotateHubRouteKey({ actor: "operator", nodeId, overlapDays: 7 });
+  const rotateRes = registry.rotateHubRouteKey({ actor: "operator", nodeId });
   const key2Id = rotateRes.newKeyId;
   assert.equal(rotateRes.state, "provisioned");
 
@@ -165,10 +175,11 @@ test("Hub Route Key Lifecycle: Heartbeat ACK progression (provisioned -> active 
   const key1Rotating = hb4.hubRouteKeys.find((k) => k.keyId === key1Id);
   assert.equal(key2Active.state, "active");
   assert.equal(key1Rotating.state, "rotating");
-  assert.ok(key1Rotating.overlapUntil);
+  assert.equal(key1Rotating.overlapUntil, "2026-09-10T00:00:00.000Z");
+  assert.equal(registry.getActiveHubRouteKey(nodeId).key_id, key2Id, "the new active key must be preferred over the rotating old key");
 
   // 6. Maintenance after overlap ends revokes key1
-  registry.now = () => new Date(Date.now() + 15 * 86400000);
+  registry.now = () => new Date("2026-09-11T00:00:00.000Z");
   registry.maintenance();
 
   const hb5 = sendHb([key2Id]);
@@ -177,6 +188,19 @@ test("Hub Route Key Lifecycle: Heartbeat ACK progression (provisioned -> active 
   assert.equal(hb5.hubRouteKeys[0].state, "active");
 
   registry.close();
+});
+
+test("Hub route-key overlap configuration is integer-only and bounded to 1-30 days", () => {
+  for (const value of [0, 31, 1.5, Number.NaN]) {
+    assert.throws(
+      () => createTestRegistry({ routeDomain: "dsh.example.com", hubRouteOverlapDays: value }),
+      /hub route overlap must be an integer within 1-30 days/,
+    );
+  }
+  const min = createTestRegistry({ routeDomain: "dsh.example.com", hubRouteOverlapDays: 1 });
+  min.close();
+  const max = createTestRegistry({ routeDomain: "dsh.example.com", hubRouteOverlapDays: 30 });
+  max.close();
 });
 
 test("Hub Route Key Lifecycle: tombstone immediately revokes all Hub route keys", () => {
@@ -339,6 +363,55 @@ test("ORBIT-ROUTE-V1 negative matrix: missing/malformed headers, timestamp skew,
   });
   assert.equal(forgedCheck.ok, false);
   assert.equal(forgedCheck.code, "signature-invalid");
+
+  // 9. Invalid signatures must not reserve nonce-cache entries. The same
+  // nonce remains usable by the first valid authenticated request, then
+  // becomes a replay only after that success.
+  const cacheAfterAuth = new RouteNonceCache();
+  const authNonce = randomHex(16);
+  const signedAfterAuth = signRouteRequest({
+    privateKeyHex: activeKey.private_key,
+    keyId: activeKey.key_id,
+    nodeId,
+    routeAuthority: authority,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    nowMs,
+    nonce: authNonce,
+  });
+  const invalidFirst = verifyRouteRequest({
+    headers: { ...signedAfterAuth.headers, "x-orbit-route-signature": "f".repeat(128) },
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    expectedNodeId: nodeId,
+    expectedRouteAuthority: authority,
+    getPublicKey,
+    nonceCache: cacheAfterAuth,
+    nowMs,
+  });
+  assert.equal(invalidFirst.code, "signature-invalid");
+  const firstValid = verifyRouteRequest({
+    headers: signedAfterAuth.headers,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    expectedNodeId: nodeId,
+    expectedRouteAuthority: authority,
+    getPublicKey,
+    nonceCache: cacheAfterAuth,
+    nowMs,
+  });
+  assert.equal(firstValid.ok, true);
+  const replayAfterValid = verifyRouteRequest({
+    headers: signedAfterAuth.headers,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    expectedNodeId: nodeId,
+    expectedRouteAuthority: authority,
+    getPublicKey,
+    nonceCache: cacheAfterAuth,
+    nowMs,
+  });
+  assert.equal(replayAfterValid.code, "replay");
 
   registry.close();
 });
@@ -512,6 +585,34 @@ test("Reachability State Machine: 3 probe failures -> unreachable; 1 success -> 
   registry.close();
 });
 
+test("Reachability ignores an in-flight probe result after route target or route identity changes", async () => {
+  const registry = createTestRegistry({ routeDomain: "dsh.example.com" });
+  const { nodeId } = enrollTestNode(registry);
+  registry.setRouteTarget({ actor: "operator", nodeId, routeTarget: "http://127.0.0.1:8080" });
+  const firstHubKey = registry.ensureHubRouteKey(nodeId);
+  registry.acknowledgeHubRouteKeys(nodeId, [firstHubKey.key_id]);
+
+  let releaseProbe;
+  const deferredTransport = async () =>
+    new Promise((resolve) => {
+      releaseProbe = () => resolve({ status: 200, body: JSON.stringify({ nodeId, ready: true }) });
+    });
+
+  const oldProbe = registry.probeNode(nodeId, { requestTransport: deferredTransport });
+  while (!releaseProbe) await new Promise((resolve) => setTimeout(resolve, 1));
+
+  registry.setRouteTarget({ actor: "operator", nodeId, routeTarget: "http://127.0.0.1:8081" });
+  assert.equal(registry.getNode(nodeId).health.reachable, "unknown");
+
+  releaseProbe();
+  const oldResult = await oldProbe;
+  assert.equal(oldResult.ignored, true);
+  assert.equal(oldResult.reason, "probe-context-changed");
+  assert.equal(registry.getNode(nodeId).health.reachable, "unknown");
+
+  registry.close();
+});
+
 // ---------------------------------------------------------------------------
 // 5. Backup and Secret Protection
 // ---------------------------------------------------------------------------
@@ -620,6 +721,114 @@ test("P1-2 & P3-1: Heartbeat redirect fails closed and loopback trust is consist
   }
 });
 
+test("P1-2: production machine transport refuses real redirects and accepts a private-CA HTTPS Hub only with the configured CA", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-machine-transport-test-"));
+  let redirectServer = null;
+  let redirectedServer = null;
+  let httpsServer = null;
+  try {
+    const nodeKeys = generateNodeKeyPair();
+    const hubRouteKey = generateNodeKeyPair();
+    const hubRouteKeyId = deriveKeyId(hubRouteKey.publicKeyHex);
+    const makeStore = (hubBaseUrl, suffix) => ({
+      schema: 1,
+      nodeId: `node_${suffix.repeat(32)}`,
+      publicKeyHex: nodeKeys.publicKeyHex,
+      privateKeyHex: nodeKeys.privateKeyHex,
+      hubBaseUrl,
+      hubRouteKeys: null,
+      state: "active",
+      rotation: null,
+      pendingEnrollment: null,
+      pendingReenrollment: null,
+      updatedAt: new Date().toISOString(),
+    });
+    const heartbeatBody = JSON.stringify({
+      registryContact: "fresh",
+      hubRouteKeys: [
+        { keyId: hubRouteKeyId, publicKey: hubRouteKey.publicKeyHex, state: "provisioned", overlapUntil: null },
+      ],
+    });
+
+    // Real redirect path: the default production transport must not follow it.
+    let redirectedHit = false;
+    redirectedServer = http.createServer((req, res) => {
+      redirectedHit = true;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(heartbeatBody);
+    });
+    await new Promise((resolve) => redirectedServer.listen(0, "127.0.0.1", resolve));
+    const redirectedPort = redirectedServer.address().port;
+
+    redirectServer = http.createServer((req, res) => {
+      res.writeHead(302, { location: `http://127.0.0.1:${redirectedPort}/api/v1/heartbeat` });
+      res.end();
+    });
+    await new Promise((resolve) => redirectServer.listen(0, "127.0.0.1", resolve));
+    const redirectPort = redirectServer.address().port;
+    const redirectBaseUrl = `http://127.0.0.1:${redirectPort}/`;
+    const redirectStatePath = join(dir, "redirect-node.json");
+    const redirectStore = makeStore(redirectBaseUrl, "5");
+    await writeNodeStore(redirectStatePath, redirectStore);
+    const redirectClient = new NodeClient({
+      store: redirectStore,
+      storePath: redirectStatePath,
+      hubBaseUrl: redirectBaseUrl,
+      runtimeIdentity: () => ({ orbitVersion: "0.4.0", dshVersion: "1.0.0" }),
+    });
+    const redirectResult = await redirectClient.heartbeat();
+    assert.equal(redirectResult.ok, false);
+    assert.equal(redirectResult.error.code, "redirect-denied");
+    assert.equal(redirectedHit, false, "production machine transport must not follow a Hub redirect");
+    assert.deepEqual(redirectClient.getHubRouteKeys(), []);
+
+    // Real HTTPS path with a self-signed private CA leaf. The same connection
+    // must fail without the configured CA and succeed with it; hostname/SAN
+    // verification remains enabled by Node TLS.
+    httpsServer = https.createServer({ key: GATEWAY_KEY_PEM, cert: GATEWAY_CERT_PEM }, (req, res) => {
+      req.resume();
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(heartbeatBody);
+    });
+    await new Promise((resolve) => httpsServer.listen(0, "127.0.0.1", resolve));
+    const httpsPort = httpsServer.address().port;
+    const httpsBaseUrl = `https://127.0.0.1:${httpsPort}/`;
+
+    const noCaStatePath = join(dir, "https-no-ca.json");
+    const noCaStore = makeStore(httpsBaseUrl, "6");
+    await writeNodeStore(noCaStatePath, noCaStore);
+    const noCaClient = new NodeClient({
+      store: noCaStore,
+      storePath: noCaStatePath,
+      hubBaseUrl: httpsBaseUrl,
+      runtimeIdentity: () => ({ orbitVersion: "0.4.0", dshVersion: "1.0.0" }),
+    });
+    const noCaResult = await noCaClient.heartbeat();
+    assert.equal(noCaResult.ok, false);
+    assert.equal(noCaResult.error.code, "network");
+    assert.deepEqual(noCaClient.getHubRouteKeys(), []);
+
+    const caStatePath = join(dir, "https-with-ca.json");
+    const caStore = makeStore(httpsBaseUrl, "7");
+    await writeNodeStore(caStatePath, caStore);
+    const caClient = new NodeClient({
+      store: caStore,
+      storePath: caStatePath,
+      hubBaseUrl: httpsBaseUrl,
+      caCertificates: [GATEWAY_CERT_PEM],
+      runtimeIdentity: () => ({ orbitVersion: "0.4.0", dshVersion: "1.0.0" }),
+    });
+    const caResult = await caClient.heartbeat();
+    assert.equal(caResult.ok, true);
+    assert.equal(caClient.getHubRouteKeys()[0].keyId, hubRouteKeyId);
+  } finally {
+    if (redirectServer) await new Promise((resolve) => redirectServer.close(resolve));
+    if (redirectedServer) await new Promise((resolve) => redirectedServer.close(resolve));
+    if (httpsServer) await new Promise((resolve) => httpsServer.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("P1-3: Reenrollment atomically clears deleted-era Hub route keys", async () => {
   const dir = await mkdtemp(join(tmpdir(), "orbit-reenroll-test-"));
   try {
@@ -700,6 +909,20 @@ test("P1-3: Reenrollment atomically clears deleted-era Hub route keys", async ()
     });
     assert.equal(checkOld.ok, false);
     assert.equal(checkOld.code, "unknown-key");
+
+    // A crash/restart before the first post-reenrollment heartbeat must not
+    // revive deleted-era Hub trust from disk.
+    const reloaded = await loadNodeStoreAsync(statePath);
+    assert.equal(reloaded.state, "active");
+    assert.equal(reloaded.hubRouteKeys, null);
+    const restarted = new NodeClient({
+      store: reloaded,
+      storePath: statePath,
+      hubBaseUrl: reloaded.hubBaseUrl,
+      fetchImpl: async () => ({ status: 503, json: async () => ({}) }),
+      runtimeIdentity: () => ({ orbitVersion: "0.4.0", dshVersion: "1.0.0" }),
+    });
+    assert.deepEqual(restarted.getHubRouteKeys(), []);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -718,9 +941,12 @@ test("P3-2: Node tombstoning resets reachable to unknown", () => {
   registry.close();
 });
 
-test("P2-3: Hub caCertificates is additive to platform root certificates", async () => {
-  const { GATEWAY_CERT_PEM } = await import("./fixtures/gateway-identity.mjs");
-  const transport = defaultRouteTransport;
-  assert.equal(typeof transport, "function");
-  // Probing an HTTPS endpoint with caCertificates appends to tls.rootCertificates
+test("P2-3: configured private CAs extend, rather than replace, the runtime default trust set", () => {
+  const defaults = typeof tls.getCACertificates === "function" ? tls.getCACertificates("default") : tls.rootCertificates;
+  const effective = extendDefaultCaCertificates([GATEWAY_CERT_PEM]);
+  assert.ok(Array.isArray(effective));
+  assert.equal(effective.length, defaults.length + 1);
+  assert.deepEqual(effective.slice(0, defaults.length), defaults);
+  assert.equal(effective.at(-1), GATEWAY_CERT_PEM);
+  assert.equal(extendDefaultCaCertificates(null), undefined);
 });

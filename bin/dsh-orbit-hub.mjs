@@ -13,6 +13,10 @@
 //   DSH_ORBIT_HUB_OPERATOR_PRINCIPAL fixed single operator principal
 //   DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY  accept browser requests from loopback only
 //   DSH_ORBIT_HUB_ROTATION_OVERLAP_H rotation overlap in hours (1-168, default 24)
+//   DSH_ORBIT_HUB_ROUTE_DOMAIN       deterministic v0.4 route domain (default localhost)
+//   DSH_ORBIT_HUB_CA_CERT            optional private-CA PEM or PEM file for Node route targets
+//   DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS route probe cadence (default 60)
+//   DSH_ORBIT_HUB_ROUTE_ROTATION_OVERLAP_DAYS Hub route-key overlap (1-30, default 14)
 //   DSH_ORBIT_HUB_DRILL_AGING / DSH_ORBIT_HUB_DRILL_AGING_CLOCK
 //                                    isolated mounted-drill contact-aging clock;
 //                                    rejected unless drill mode is explicit
@@ -34,7 +38,8 @@ const lanBoundaryOnly = process.env.DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY === "1";
 const trustedExternalScheme = process.env.DSH_ORBIT_HUB_TRUSTED_SCHEME ?? "http";
 const rotationOverlapHours = Number.parseInt(process.env.DSH_ORBIT_HUB_ROTATION_OVERLAP_H ?? "24", 10);
 const routeDomain = process.env.DSH_ORBIT_HUB_ROUTE_DOMAIN ?? "localhost";
-const probeCadenceSeconds = Number.parseInt(process.env.DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS ?? "60", 10);
+const probeCadenceSeconds = Number(process.env.DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS ?? "60");
+const hubRouteOverlapDays = Number(process.env.DSH_ORBIT_HUB_ROUTE_ROTATION_OVERLAP_DAYS ?? "14");
 
 let caCertificates = null;
 if (process.env.DSH_ORBIT_HUB_CA_CERT) {
@@ -115,6 +120,7 @@ try {
 const registry = new Registry({
   db,
   rotationOverlapHours,
+  hubRouteOverlapDays,
   routeDomain,
   caCertificates,
   ...(drillContactNow ? { registryContactNow: drillContactNow } : {}),

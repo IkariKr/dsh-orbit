@@ -20,6 +20,13 @@
 //   DSH_ORBIT_NODE_ORBIT_REVISION     orbit revision reported to the hub
 //   DSH_ORBIT_NODE_DSH_VERSION        DSH version reported to the hub
 //   DSH_ORBIT_NODE_DSH_PROFILE        DSH compatibility profile
+//   DSH_ORBIT_NODE_CA_CERT            optional private-CA PEM or PEM file for Hub HTTPS
+//   DSH_ORBIT_NODE_ROUTE_INGRESS_DISABLED set 1 to suppress the Stage 2 route ingress
+//   DSH_ORBIT_NODE_ROUTE_INGRESS_PORT route-ingress listen port (default 0; use a fixed port for persistent route targets)
+//   DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN route-ingress listen address (default 127.0.0.1)
+//   DSH_ORBIT_NODE_ROUTE_DOMAIN       deterministic v0.4 route domain (default localhost)
+//   DSH_ORBIT_NODE_DSH_TARGET         node-local DSH transport target (default http://127.0.0.1:3080)
+//   DSH_ORBIT_NODE_ROUTE_TLS_KEY/CERT optional TLS PEM values or file paths; both are required together
 
 import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -42,7 +49,7 @@ function buildClient({ storePath, forbidEnrollmentBinding = false }) {
   const availability = {
     orbitVersion: process.env.DSH_ORBIT_NODE_ORBIT_VERSION ?? "0.3.0",
     orbitRevision: process.env.DSH_ORBIT_NODE_ORBIT_REVISION ?? null,
-    dshVersion: process.env.DSH_ORBIT_NODE_DSH_VERSION ?? "0.1.1",
+    dshVersion: process.env.DSH_ORBIT_NODE_DSH_VERSION ?? "",
     compatibilityProfile: process.env.DSH_ORBIT_NODE_DSH_PROFILE ?? null,
   };
   const store = loadNodeStore(storePath);
@@ -165,18 +172,34 @@ switch (command) {
     const cadenceMs = client.heartbeatCadenceSeconds * 1000;
 
     const routeIngressDisabled = process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_DISABLED === "1";
-    const ingressPort = Number.parseInt(process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_PORT ?? "0", 10);
+    const ingressPort = Number(process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_PORT ?? "0");
     const ingressListen = process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN ?? "127.0.0.1";
     const routeDomain = process.env.DSH_ORBIT_NODE_ROUTE_DOMAIN ?? "localhost";
-    const dshTarget = process.env.DSH_ORBIT_NODE_DSH_TARGET ?? "http://127.0.0.1:5000";
+    const dshTarget = process.env.DSH_ORBIT_NODE_DSH_TARGET ?? "http://127.0.0.1:3080";
+    if (!Number.isInteger(ingressPort) || ingressPort < 0 || ingressPort > 65535) {
+      console.error("dsh-orbit-node: DSH_ORBIT_NODE_ROUTE_INGRESS_PORT must be an integer from 0 to 65535");
+      process.exit(2);
+    }
+
+    const tlsKeyConfigured = Boolean(process.env.DSH_ORBIT_NODE_ROUTE_TLS_KEY);
+    const tlsCertConfigured = Boolean(process.env.DSH_ORBIT_NODE_ROUTE_TLS_CERT);
+    if (tlsKeyConfigured !== tlsCertConfigured) {
+      console.error("dsh-orbit-node: DSH_ORBIT_NODE_ROUTE_TLS_KEY and DSH_ORBIT_NODE_ROUTE_TLS_CERT must be configured together");
+      process.exit(2);
+    }
 
     let tls = null;
-    if (process.env.DSH_ORBIT_NODE_ROUTE_TLS_KEY && process.env.DSH_ORBIT_NODE_ROUTE_TLS_CERT) {
+    if (tlsKeyConfigured && tlsCertConfigured) {
       const keyVal = process.env.DSH_ORBIT_NODE_ROUTE_TLS_KEY;
       const certVal = process.env.DSH_ORBIT_NODE_ROUTE_TLS_CERT;
       const key = existsSync(keyVal) ? readFileSync(keyVal, "utf8") : keyVal;
       const cert = existsSync(certVal) ? readFileSync(certVal, "utf8") : certVal;
       tls = { key, cert };
+    }
+    const loopbackIngress = ingressListen === "127.0.0.1" || ingressListen === "::1" || ingressListen === "[::1]";
+    if (!routeIngressDisabled && !tls && !loopbackIngress) {
+      console.error("dsh-orbit-node: non-loopback route ingress requires TLS; bind plaintext ingress to explicit loopback only");
+      process.exit(2);
     }
 
     loadNodeStoreAsync(storePath)

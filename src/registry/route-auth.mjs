@@ -140,10 +140,6 @@ export function verifyRouteRequest({
     return { ok: false, status: 401, code: "node-mismatch", message: "nodeId does not match expected node" };
   }
 
-  if (nonceCache && !nonceCache.checkAndReserve(nonce)) {
-    return { ok: false, status: 401, code: "replay", message: "nonce already used" };
-  }
-
   const key = getPublicKey(keyId);
   if (!key) {
     return { ok: false, status: 401, code: "unknown-key", message: `unknown Hub route keyId ${keyId}` };
@@ -180,6 +176,12 @@ export function verifyRouteRequest({
   const verified = verifySigningString(key.publicKey, signingString, signature);
   if (!verified) {
     return { ok: false, status: 401, code: "signature-invalid", message: "signature does not verify over ORBIT-ROUTE-V1 signing string" };
+  }
+
+  // Reserve replay state only after the request has authenticated. Invalid
+  // public input must not be able to fill the in-memory nonce cache.
+  if (nonceCache && !nonceCache.checkAndReserve(nonce)) {
+    return { ok: false, status: 401, code: "replay", message: "nonce already used" };
   }
 
   return { ok: true, nodeId, keyId, key };

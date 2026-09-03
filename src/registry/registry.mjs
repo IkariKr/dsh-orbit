@@ -115,8 +115,12 @@ export class Registry {
       throw new Error(`rotation overlap must be within ${ROTATION_OVERLAP_HOURS_MIN}-${ROTATION_OVERLAP_HOURS_MAX} hours`);
     }
     this.rotationOverlapHours = rotationOverlapHours;
-    if (hubRouteOverlapDays < HUB_ROUTE_ROTATION_OVERLAP_DAYS_MIN || hubRouteOverlapDays > HUB_ROUTE_ROTATION_OVERLAP_DAYS_MAX) {
-      throw new Error(`hub route overlap must be within ${HUB_ROUTE_ROTATION_OVERLAP_DAYS_MIN}-${HUB_ROUTE_ROTATION_OVERLAP_DAYS_MAX} days`);
+    if (
+      !Number.isInteger(hubRouteOverlapDays) ||
+      hubRouteOverlapDays < HUB_ROUTE_ROTATION_OVERLAP_DAYS_MIN ||
+      hubRouteOverlapDays > HUB_ROUTE_ROTATION_OVERLAP_DAYS_MAX
+    ) {
+      throw new Error(`hub route overlap must be an integer within ${HUB_ROUTE_ROTATION_OVERLAP_DAYS_MIN}-${HUB_ROUTE_ROTATION_OVERLAP_DAYS_MAX} days`);
     }
     this.hubRouteOverlapDays = hubRouteOverlapDays;
     this.routeDomain = validateRouteDomain(routeDomain);
@@ -930,7 +934,7 @@ export class Registry {
   getActiveHubRouteKey(nodeId) {
     return this.db
       .prepare(
-        "SELECT * FROM hub_route_keys WHERE node_id = ? AND state IN ('active', 'rotating') ORDER BY created_at DESC LIMIT 1",
+        "SELECT * FROM hub_route_keys WHERE node_id = ? AND state IN ('active', 'rotating') ORDER BY CASE state WHEN 'active' THEN 0 ELSE 1 END, created_at DESC LIMIT 1",
       )
       .get(nodeId);
   }
@@ -1068,7 +1072,10 @@ export class Registry {
         timeoutMs: 5000,
       });
     } catch (error) {
-      return this.recordProbeResult(nodeId, false, error.message);
+      return this.recordProbeResult(nodeId, false, error.message, {
+        routeTargetOrigin: routeTarget.origin,
+        keyId: activeKey.key_id,
+      });
     }
 
     if (response.status === 200) {
@@ -1076,21 +1083,52 @@ export class Registry {
       try {
         body = JSON.parse(response.body);
       } catch {
-        return this.recordProbeResult(nodeId, false, "malformed-json");
+        return this.recordProbeResult(nodeId, false, "malformed-json", {
+          routeTargetOrigin: routeTarget.origin,
+          keyId: activeKey.key_id,
+        });
       }
       if (body && body.nodeId === nodeId && body.ready === true) {
-        return this.recordProbeResult(nodeId, true);
+        return this.recordProbeResult(nodeId, true, null, {
+          routeTargetOrigin: routeTarget.origin,
+          keyId: activeKey.key_id,
+        });
       }
-      return this.recordProbeResult(nodeId, false, `ready-false-or-mismatch: ${JSON.stringify(body)}`);
+      return this.recordProbeResult(nodeId, false, `ready-false-or-mismatch: ${JSON.stringify(body)}`, {
+        routeTargetOrigin: routeTarget.origin,
+        keyId: activeKey.key_id,
+      });
     }
 
-    return this.recordProbeResult(nodeId, false, `http-${response.status}`);
+    return this.recordProbeResult(nodeId, false, `http-${response.status}`, {
+      routeTargetOrigin: routeTarget.origin,
+      keyId: activeKey.key_id,
+    });
   }
 
-  recordProbeResult(nodeId, success, reason = null) {
+  recordProbeResult(nodeId, success, reason = null, expectedContext = null) {
     const current = this.getNodeRow(nodeId);
     if (!current || current.state !== "active") {
       return { reachable: "unknown", probed: true, ok: false };
+    }
+    if (expectedContext) {
+      const currentTarget = this.getRouteTarget(nodeId);
+      const currentKey = this.getActiveHubRouteKey(nodeId);
+      if (
+        !currentTarget ||
+        currentTarget.origin !== expectedContext.routeTargetOrigin ||
+        !currentKey ||
+        currentKey.key_id !== expectedContext.keyId
+      ) {
+        this.routeProbeFailures.delete(nodeId);
+        return {
+          reachable: current.reachable,
+          probed: true,
+          ok: false,
+          ignored: true,
+          reason: "probe-context-changed",
+        };
+      }
     }
     if (success) {
       this.routeProbeFailures.delete(nodeId);

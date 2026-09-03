@@ -9,11 +9,11 @@
 
 import http from "node:http";
 import https from "node:https";
-import tls from "node:tls";
 import { HeartbeatBackoff } from "./backoff.mjs";
 import { deriveKeyId, generateNodeKeyPair, randomHex, sha256Hex, signSigningString } from "../registry/crypto.mjs";
 import { buildSigningString, MACHINE_V1_LABEL, REENROLL_V1_LABEL } from "../registry/protocol.mjs";
 import { validateHubRouteKeySet } from "../registry/hub-route-keys.mjs";
+import { extendDefaultCaCertificates } from "../tls-trust.mjs";
 import {
   assertStateFilePermissions,
   canonicalHubBaseUrl,
@@ -77,8 +77,7 @@ export function defaultNodeMachineFetch(
       timeout: timeoutMs,
     };
     if (isHttps && caCertificates) {
-      const extraCas = Array.isArray(caCertificates) ? caCertificates : [caCertificates];
-      reqOptions.ca = [...tls.rootCertificates, ...extraCas];
+      reqOptions.ca = extendDefaultCaCertificates(caCertificates);
     }
     const req = client.request(url, reqOptions, (res) => {
       const chunks = [];

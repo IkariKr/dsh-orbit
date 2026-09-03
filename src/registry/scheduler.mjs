@@ -28,6 +28,9 @@ export function createRouteProbeScheduler(
   if (typeof registry.probeAllNodes !== "function") {
     throw new Error("route probe scheduler requires a registry with probeAllNodes()");
   }
+  if (!Number.isFinite(cadenceSeconds) || cadenceSeconds <= 0) {
+    throw new Error("route probe cadenceSeconds must be a finite number greater than zero");
+  }
   let probing = false;
   const tick = async () => {
     if (probing) return;

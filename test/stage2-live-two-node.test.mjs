@@ -125,7 +125,7 @@ function startNodeDaemon({
       DSH_ORBIT_NODE_STATE: statePath,
       DSH_ORBIT_HUB_URL: hubUrl,
       DSH_ORBIT_NODE_HEARTBEAT_SECONDS: String(cadence),
-      DSH_ORBIT_NODE_DSH_VERSION: "0.1.1",
+      DSH_ORBIT_NODE_DSH_VERSION: "0.1.1-rc.2",
       DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: String(ingressPort),
       DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "127.0.0.1",
       DSH_ORBIT_NODE_DSH_TARGET: dshTarget,
@@ -162,25 +162,18 @@ function startNodeDaemon({
   });
 }
 
-function startDshServer() {
-  let alive = true;
+function startDshServer({ port = 0 } = {}) {
   const server = http.createServer((req, res) => {
-    if (alive) {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ dsh: "ok" }));
-    } else {
-      res.writeHead(503, { "content-type": "application/json" });
-      res.end(JSON.stringify({ dsh: "unavailable" }));
-    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ dsh: "ok" }));
   });
   return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      const port = server.address().port;
+    server.listen(port, "127.0.0.1", () => {
+      const actualPort = server.address().port;
       resolve({
         server,
-        port,
-        target: `http://127.0.0.1:${port}`,
-        setAlive: (v) => (alive = v),
+        port: actualPort,
+        target: `http://127.0.0.1:${actualPort}`,
         close: () => new Promise((r) => server.close(r)),
       });
     });
@@ -362,22 +355,25 @@ test("Live Two-Node Integration Evidence (True Child Processes): Topology, Heart
   assert.equal(summaryB_iso.health.reachable, "ok");
   console.log(`[Evidence] Node B isolation verified: reachable remains ok`);
 
-  console.log("\n=== STEP 6: Fault Injection 2 - Node A Restarts with Downstream DSH Down ===");
-  dshA.setAlive(false);
+  console.log("\n=== STEP 6: Fault Injection 2 - Node A Restarts with Downstream DSH Listener Stopped ===");
+  const dshAPort = dshA.port;
+  const dshATarget = dshA.target;
+  await dshA.close();
+  dshA = null;
   const nodeAPort = nodeA.port;
   nodeA = await startNodeDaemon({
     statePath: statePathA,
     hubUrl: hub.baseUrl,
     ingressPort: nodeAPort,
-    dshTarget: dshA.target,
+    dshTarget: dshATarget,
     tlsKeyPath: keyPath,
     tlsCertPath: certPath,
     caCertPath: certPath,
     cadence: 30,
   });
-  console.log(`[Evidence] Node A daemon restarted on same port ${nodeA.ingressOrigin}, but downstream DSH is down`);
+  console.log(`[Evidence] Node A daemon restarted on same port ${nodeA.ingressOrigin}, but downstream DSH listener is stopped`);
 
-  // Hub probes -> receives 503 -> Node A remains unreachable
+  // Hub probes -> route ingress cannot connect to DSH -> Node A remains unreachable
   await sleep(2500);
   const summaryA_dshDown = await operatorGetNode(hub.baseUrl, opSession, enrollResA.nodeId);
   assert.equal(summaryA_dshDown.health.reachable, "unreachable");
@@ -385,9 +381,10 @@ test("Live Two-Node Integration Evidence (True Child Processes): Topology, Heart
   assert.equal(summaryB_iso2.health.reachable, "ok");
   console.log(`[Evidence] Node A remains unreachable (503), Node B remains ok`);
 
-  console.log("\n=== STEP 7: Recovery - Downstream DSH Restored ===");
-  dshA.setAlive(true);
-  console.log("[Evidence] Downstream DSH A restored");
+  console.log("\n=== STEP 7: Recovery - Downstream DSH Listener Restored ===");
+  dshA = await startDshServer({ port: dshAPort });
+  assert.equal(dshA.target, dshATarget);
+  console.log("[Evidence] Downstream DSH A listener restored on the same target");
   const summaryA_recovered = await waitForNodeReachable(hub.baseUrl, opSession, enrollResA.nodeId, "ok", 15000);
   assert.equal(summaryA_recovered.health.reachable, "ok");
   console.log(`[Evidence] Node A recovered: reachable = ok`);

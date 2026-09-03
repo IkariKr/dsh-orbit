@@ -3,7 +3,7 @@
 
 import http from "node:http";
 import https from "node:https";
-import tls from "node:tls";
+import { extendDefaultCaCertificates } from "../tls-trust.mjs";
 
 export function defaultRouteTransport(urlStr, { method = "GET", headers = {}, caCertificates = null, timeoutMs = 5000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -21,8 +21,7 @@ export function defaultRouteTransport(urlStr, { method = "GET", headers = {}, ca
       timeout: timeoutMs,
     };
     if (isHttps && caCertificates) {
-      const extraCas = Array.isArray(caCertificates) ? caCertificates : [caCertificates];
-      reqOptions.ca = [...tls.rootCertificates, ...extraCas];
+      reqOptions.ca = extendDefaultCaCertificates(caCertificates);
     }
     const req = client.request(url, reqOptions, (res) => {
       const chunks = [];

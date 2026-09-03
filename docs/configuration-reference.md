@@ -1,9 +1,11 @@
-# DSH Orbit v0.3 configuration reference
+# DSH Orbit configuration reference
 
-This reference consolidates the configuration already defined by the v0.3
-Registry MVP and the deployment examples. It does not add configuration or
-change any RFC contract. See [`docs/sop/v0.3-operator-sop.md`](sop/v0.3-operator-sop.md)
-for procedures and [`docs/registry-mvp.md`](registry-mvp.md) for the authoritative
+This reference consolidates the accepted v0.3 Registry configuration and the
+v0.4 construction-stage additions that have already passed their architecture
+contract. v0.4 settings remain subject to the multistage construction gates in
+[`docs/sop/v0.4-endpoint-selector-multistage-sop.md`](sop/v0.4-endpoint-selector-multistage-sop.md).
+See [`docs/sop/v0.3-operator-sop.md`](sop/v0.3-operator-sop.md) for the stable
+v0.3 procedures and [`docs/registry-mvp.md`](registry-mvp.md) for the v0.3
 Registry semantics.
 
 ## Hub
@@ -17,7 +19,11 @@ Registry semantics.
 | `DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY` | one of two | `0` | Set to `1` only for the strict loopback boundary alternative. |
 | `DSH_ORBIT_HUB_OPERATOR_PRINCIPAL` | no | unset | Fixed principal. If absent, the gateway must inject `X-DSH-Operator-Id`. |
 | `DSH_ORBIT_HUB_TRUSTED_SCHEME` | no | `http` | Trusted browser scheme, `http` or `https`; `X-Forwarded-Proto` is not trusted. |
-| `DSH_ORBIT_HUB_ROTATION_OVERLAP_H` | no | `24` | Credential overlap in hours, bounded by the frozen Registry contract. |
+| `DSH_ORBIT_HUB_ROTATION_OVERLAP_H` | no | `24` | Node credential overlap in hours, bounded by the frozen Registry contract. |
+| `DSH_ORBIT_HUB_ROUTE_DOMAIN` | no | `localhost` | v0.4 deterministic route domain used to derive `n-<nodeId-hex>.<domain>`. Stage 2 uses it only as protocol data; Stage 3 publishes the wildcard route. Must match the Node route-domain setting. |
+| `DSH_ORBIT_HUB_CA_CERT` | no | unset | Additional operator-managed private-CA PEM or PEM file for HTTPS Node route targets. It extends the runtime default trust set; hostname/SAN validation stays enabled. |
+| `DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS` | no | `60` | Positive route-readiness probe cadence in seconds. Invalid/zero values fail startup. |
+| `DSH_ORBIT_HUB_ROUTE_ROTATION_OVERLAP_DAYS` | no | `14` | Per-node Hub route-key overlap policy, integer 1–30 days. The timer starts only after the Node durably acknowledges the next public key. |
 
 The Hub owns the machine and browser APIs. `/api/v1/*` is a private machine
 surface and must not be routed through the browser gateway. See
@@ -36,6 +42,13 @@ surface and must not be routed through the browser gateway. See
 | `DSH_ORBIT_NODE_ORBIT_REVISION` | no | unset | Orbit revision reported to the Hub. |
 | `DSH_ORBIT_NODE_DSH_VERSION` | no | empty | DSH version reported to the Hub. |
 | `DSH_ORBIT_NODE_DSH_PROFILE` | no | unset | Compatibility profile reported to the Hub. |
+| `DSH_ORBIT_NODE_CA_CERT` | no | unset | Additional private-CA PEM or PEM file for HTTPS `DSH_ORBIT_HUB_URL`. It extends normal runtime trust; redirects and hostname/SAN failures remain denied. |
+| `DSH_ORBIT_NODE_ROUTE_INGRESS_DISABLED` | no | `0` | Set to `1` to suppress the Stage 2 route ingress. A routable v0.4 Node normally leaves it enabled. |
+| `DSH_ORBIT_NODE_ROUTE_INGRESS_PORT` | no | `0` | Route-ingress listen port. `0` requests an ephemeral port for development/tests; production route targets should use an explicit stable port. |
+| `DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN` | no | `127.0.0.1` | Route-ingress listen address. Non-loopback production exposure must be protected by verified TLS according to RFC-0010. |
+| `DSH_ORBIT_NODE_ROUTE_DOMAIN` | no | `localhost` | Route domain used to verify `ORBIT-ROUTE-V1`; must exactly match the Hub route-domain configuration. |
+| `DSH_ORBIT_NODE_DSH_TARGET` | no | `http://127.0.0.1:3080` | Node-local DSH transport checked by `GET /_orbit/route-ready`. This is liveness only and does not parse DSH APIs. |
+| `DSH_ORBIT_NODE_ROUTE_TLS_KEY` / `DSH_ORBIT_NODE_ROUTE_TLS_CERT` | together | unset | Route-ingress TLS private key and certificate, as PEM values or file paths. Configuring only one fails startup. |
 | `DSH_ORBIT_REPORT_FILE` | for `upload-report` | none | Path to a validated compatibility report. |
 
 Commands and state semantics are documented in
@@ -74,8 +87,11 @@ production health thresholds:
 ## Data and secrets
 
 Keep database, Node state, backups, certificates, and credentials outside the
-public repository. Never place private keys, plaintext tokens, CSRF values,
-proxy secrets, or storage credentials in release evidence. The generic DSH
+public repository. From v0.4 Stage 2 onward the Registry DB/WAL/SHM, backup,
+restore staging, and quarantine copies are explicitly **secret-bearing** because
+they contain per-node Hub route private keys. Never place private keys,
+plaintext tokens, CSRF values, proxy secrets, storage credentials, or digests
+derived only from private-key bytes in release evidence. The generic DSH
 snapshot contract in [`docs/snapshot-rollback.md`](snapshot-rollback.md) is
 separate from Registry SQLite backup/restore; use the dedicated Registry
 runbook for Registry files.

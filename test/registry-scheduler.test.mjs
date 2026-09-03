@@ -66,3 +66,13 @@ test("the route probe scheduler runs probeAllNodes immediately and avoids overla
 test("the route probe scheduler requires a registry with probeAllNodes()", () => {
   assert.throws(() => createRouteProbeScheduler({}), /probeAllNodes\(\)/);
 });
+
+test("the route probe scheduler rejects zero, negative, NaN, and infinite cadence", () => {
+  const registry = { probeAllNodes: async () => [] };
+  for (const cadenceSeconds of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(
+      () => createRouteProbeScheduler(registry, { cadenceSeconds, runImmediately: false }),
+      /cadenceSeconds/,
+    );
+  }
+});
