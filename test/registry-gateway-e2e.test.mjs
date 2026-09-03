@@ -48,6 +48,7 @@ function validReport() {
       authorizationSmoke: pass,
       sessionResume: pass,
       webPluginRoutes: pass,
+      webSocketTransport: pass,
       longLivedTransport: { status: "not_run", detail: "" },
       terminalFence: { status: "not_run", detail: "" },
       terminalPtty: { status: "not_run", detail: "" },

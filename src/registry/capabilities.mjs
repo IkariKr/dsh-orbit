@@ -10,7 +10,7 @@ export const CAPABILITY_CONTRACT_VERSION = 1;
 export const CAPABILITY_EVIDENCE = Object.freeze({
   "sessions.resume": ["sessionResume"],
   "settings.remote": ["settingsRead", "settingsNoopWrite", "authorizationSmoke"],
-  "web.routes": ["runtimeReadiness", "webPluginRoutes"],
+  "web.routes": ["runtimeReadiness", "webPluginRoutes", "webSocketTransport"],
 });
 
 // terminal.pty and agents.run are NOT claimable in v0.3 (RFC-0009):

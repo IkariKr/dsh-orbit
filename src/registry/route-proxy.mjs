@@ -5,6 +5,7 @@
 
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 import tls from "node:tls";
 import { URL } from "node:url";
 import { randomHex } from "./crypto.mjs";
@@ -322,7 +323,13 @@ export function proxyHttpRequest({
   };
 
   if (isHttps) {
-    reqOptions.servername = originUrl.hostname;
+    if (!net.isIP(originUrl.hostname)) {
+      reqOptions.servername = originUrl.hostname;
+    }
+    // Verify server identity against the target origin rather than the public route authority
+    reqOptions.checkServerIdentity = (servername, cert) => {
+      return tls.checkServerIdentity(originUrl.hostname, cert);
+    };
     if (caCertificates) {
       reqOptions.ca = extendDefaultCaCertificates(caCertificates);
     }
@@ -359,4 +366,315 @@ export function proxyHttpRequest({
 
   // Stream request body directly to upstream without buffering
   req.pipe(upstreamReq);
+}
+
+export const DEFAULT_HUB_WS_GLOBAL_LIMIT = 200;
+export const DEFAULT_HUB_WS_PER_NODE_LIMIT = 50;
+export const DEFAULT_WS_HANDSHAKE_TIMEOUT_MS = 10000;
+
+export function sendSocketHttpError(socket, statusCode, statusText, headers = {}, bodyObj = null) {
+  if (!socket || socket.destroyed || !socket.writable) return;
+  const payload = bodyObj ? JSON.stringify(bodyObj) : "";
+  const lines = [
+    `HTTP/1.1 ${statusCode} ${statusText}`,
+    "connection: close",
+    "content-type: application/json",
+    `content-length: ${Buffer.byteLength(payload)}`,
+  ];
+  for (const [k, v] of Object.entries(headers)) {
+    lines.push(`${k}: ${v}`);
+  }
+  lines.push("", payload);
+  try {
+    socket.write(lines.join("\r\n"));
+  } catch {}
+  try {
+    socket.end();
+  } catch {}
+}
+
+export function formatHttpResponse(statusCode, statusText, headers) {
+  const lines = [`HTTP/1.1 ${statusCode} ${statusText}`];
+  for (const [key, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        lines.push(`${key}: ${v}`);
+      }
+    } else {
+      lines.push(`${key}: ${value}`);
+    }
+  }
+  lines.push("", "");
+  return lines.join("\r\n");
+}
+
+export class HubWebSocketTracker {
+  constructor({
+    maxGlobal = DEFAULT_HUB_WS_GLOBAL_LIMIT,
+    maxPerNode = DEFAULT_HUB_WS_PER_NODE_LIMIT,
+  } = {}) {
+    if (typeof maxGlobal !== "number" || maxGlobal <= 0 || !Number.isInteger(maxGlobal)) {
+      throw new Error(`invalid maxGlobal limit: ${maxGlobal}`);
+    }
+    if (typeof maxPerNode !== "number" || maxPerNode <= 0 || !Number.isInteger(maxPerNode)) {
+      throw new Error(`invalid maxPerNode limit: ${maxPerNode}`);
+    }
+    this.maxGlobal = maxGlobal;
+    this.maxPerNode = maxPerNode;
+    this.globalCount = 0;
+    this.nodeCounts = new Map();
+    this.activeSockets = new Set();
+  }
+
+  canAccept(nodeId) {
+    if (this.globalCount >= this.maxGlobal) {
+      return { allowed: false, reason: "global-limit-exceeded" };
+    }
+    const current = this.nodeCounts.get(nodeId) || 0;
+    if (current >= this.maxPerNode) {
+      return { allowed: false, reason: "per-node-limit-exceeded" };
+    }
+    return { allowed: true };
+  }
+
+  track(nodeId, clientSocket, upstreamSocket = null) {
+    this.globalCount++;
+    this.nodeCounts.set(nodeId, (this.nodeCounts.get(nodeId) || 0) + 1);
+    this.activeSockets.add(clientSocket);
+    if (upstreamSocket) {
+      this.activeSockets.add(upstreamSocket);
+    }
+
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      this.globalCount = Math.max(0, this.globalCount - 1);
+      const cur = this.nodeCounts.get(nodeId) || 0;
+      if (cur <= 1) {
+        this.nodeCounts.delete(nodeId);
+      } else {
+        this.nodeCounts.set(nodeId, cur - 1);
+      }
+      this.activeSockets.delete(clientSocket);
+      if (upstreamSocket) {
+        this.activeSockets.delete(upstreamSocket);
+      }
+    };
+
+    clientSocket.once("close", release);
+    clientSocket.once("error", release);
+    if (upstreamSocket) {
+      upstreamSocket.once("close", release);
+      upstreamSocket.once("error", release);
+    }
+    return release;
+  }
+
+  destroyAll() {
+    for (const socket of this.activeSockets) {
+      try {
+        socket.destroy();
+      } catch {}
+    }
+    this.activeSockets.clear();
+    this.nodeCounts.clear();
+    this.globalCount = 0;
+  }
+}
+
+// Transparently proxy WebSocket Upgrade to Node RouteIngress (RFC-0010, Stage 4)
+export function proxyWebSocketUpgrade({
+  req,
+  socket,
+  head,
+  snapshot,
+  routeAuthority,
+  tracker = null,
+  configuredRouteDomain = null,
+  trustedScheme = "https",
+  caCertificates = null,
+  handshakeTimeoutMs = DEFAULT_WS_HANDSHAKE_TIMEOUT_MS,
+  nowMs = Date.now(),
+}) {
+  const { nodeId, routeTargetOrigin, activeKey } = snapshot;
+
+  // Track client socket immediately
+  let releaseTracker = null;
+  if (tracker) {
+    releaseTracker = tracker.track(nodeId, socket);
+  }
+
+  const rawTarget = req.url;
+  if (!isValidOriginFormTarget(rawTarget)) {
+    sendSocketHttpError(socket, 400, "Bad Request", {}, {
+      error: { code: "invalid-target", message: "only origin-form request-target is supported" },
+    });
+    return;
+  }
+
+  const method = req.method || "GET";
+  const nonce = randomHex(16);
+  const { headers: routeHeaders } = signRouteRequest({
+    privateKeyHex: activeKey.private_key,
+    keyId: activeKey.key_id,
+    nodeId,
+    routeAuthority,
+    method,
+    rawTarget,
+    nowMs,
+    nonce,
+  });
+
+  const sanitizedHeaders = sanitizeClientHeaders(req.headers);
+
+  let originUrl;
+  try {
+    originUrl = new URL(routeTargetOrigin);
+  } catch {
+    const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
+    sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
+      error: { code: "invalid-route-target", message: "persisted route target origin is invalid", selectorUrl },
+    });
+    return;
+  }
+
+  const forwardHeaders = {
+    ...sanitizedHeaders,
+    ...routeHeaders,
+    host: routeAuthority,
+    "x-orbit-route-authority": routeAuthority,
+  };
+
+  const isHttps = originUrl.protocol === "https:";
+  const clientMod = isHttps ? https : http;
+
+  const reqOptions = {
+    protocol: originUrl.protocol,
+    hostname: originUrl.hostname,
+    port: originUrl.port || (isHttps ? 443 : 80),
+    path: rawTarget,
+    method,
+    headers: forwardHeaders,
+    timeout: handshakeTimeoutMs,
+  };
+
+  if (isHttps) {
+    if (!net.isIP(originUrl.hostname)) {
+      reqOptions.servername = originUrl.hostname;
+    }
+    // Verify server identity against the target origin rather than the public route authority
+    reqOptions.checkServerIdentity = (servername, cert) => {
+      return tls.checkServerIdentity(originUrl.hostname, cert);
+    };
+    if (caCertificates) {
+      reqOptions.ca = extendDefaultCaCertificates(caCertificates);
+    }
+  }
+
+  let upstreamReq;
+  try {
+    upstreamReq = clientMod.request(reqOptions);
+  } catch (err) {
+    const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
+    sendSocketHttpError(socket, 502, "Bad Gateway", {}, {
+      error: { code: "bad-gateway", message: `failed to initiate upstream request: ${err.message}`, selectorUrl },
+    });
+    try { socket.end(); } catch {}
+    return;
+  }
+
+  upstreamReq.on("error", (err) => {
+    const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
+    sendSocketHttpError(socket, 502, "Bad Gateway", {}, {
+      error: { code: "bad-gateway", message: `upstream route target unavailable: ${err.message}`, selectorUrl },
+    });
+    try {
+      socket.end();
+    } catch {}
+  });
+
+  upstreamReq.on("timeout", () => {
+    upstreamReq.destroy(new Error("handshake timeout"));
+  });
+
+  // Handle successful 101 Switching Protocols
+  upstreamReq.on("upgrade", (upstreamRes, upstreamSocket, upstreamHead) => {
+    // Handshake successful: clear timeout and prevent idle timeout on both sockets
+    upstreamReq.setTimeout(0);
+    upstreamSocket.setTimeout(0);
+    socket.setTimeout(0);
+
+    if (tracker) {
+      tracker.activeSockets.add(upstreamSocket);
+      upstreamSocket.once("close", () => tracker.activeSockets.delete(upstreamSocket));
+      upstreamSocket.once("error", () => tracker.activeSockets.delete(upstreamSocket));
+    }
+
+    // Sanitize response headers (Domain= stripped from Set-Cookie)
+    const responseHeaders = { ...upstreamRes.headers };
+    if (responseHeaders["set-cookie"]) {
+      responseHeaders["set-cookie"] = sanitizeSetCookieHeader(responseHeaders["set-cookie"]);
+    }
+
+    // Write 101 Switching Protocols response to client
+    const responseLineAndHeaders = formatHttpResponse(101, "Switching Protocols", responseHeaders);
+    socket.write(responseLineAndHeaders);
+
+    // Forward upstream head bytes if any
+    if (upstreamHead && upstreamHead.length > 0) {
+      socket.write(upstreamHead);
+    }
+    // Forward client head bytes if any
+    if (head && head.length > 0) {
+      upstreamSocket.write(head);
+    }
+
+    // Bidirectional byte streaming without inspection or buffering
+    socket.pipe(upstreamSocket);
+    upstreamSocket.pipe(socket);
+
+    const cleanup = () => {
+      try {
+        socket.destroy();
+      } catch {}
+      try {
+        upstreamSocket.destroy();
+      } catch {}
+    };
+
+    socket.on("error", cleanup);
+    upstreamSocket.on("error", cleanup);
+    socket.on("close", cleanup);
+    upstreamSocket.on("close", cleanup);
+    socket.on("end", () => {
+      socket.destroy();
+      upstreamSocket.destroy();
+    });
+    upstreamSocket.on("end", () => {
+      socket.destroy();
+      upstreamSocket.destroy();
+    });
+  });
+
+  // Transparently pass non-101 responses (e.g. 401, 403, 500)
+  upstreamReq.on("response", (upstreamRes) => {
+    upstreamReq.setTimeout(0);
+    const responseHeaders = { ...upstreamRes.headers };
+    delete responseHeaders["transfer-encoding"];
+    responseHeaders["connection"] = "close";
+    if (responseHeaders["set-cookie"]) {
+      responseHeaders["set-cookie"] = sanitizeSetCookieHeader(responseHeaders["set-cookie"]);
+    }
+    const responseLineAndHeaders = formatHttpResponse(
+      upstreamRes.statusCode,
+      upstreamRes.statusMessage || "Error",
+      responseHeaders,
+    );
+    socket.write(responseLineAndHeaders);
+    upstreamRes.pipe(socket);
+  });
+
+  upstreamReq.end();
 }

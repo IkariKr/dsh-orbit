@@ -180,6 +180,14 @@ function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessio
             : "session.models: resume failed for session ... refusing to compose an unscoped context",
       };
     }
+    if (script.includes("smoke-websocket")) {
+      events.push("command:websocket");
+      return {
+        code: 0,
+        stdout: "webSocketTransport: pass (WebSocket 101 upgrade handshake successful)\n",
+        stderr: "",
+      };
+    }
     if (script.includes("smoke-terminal")) {
       events.push("command:terminal");
       return {
@@ -301,6 +309,7 @@ test("candidate workflow binds the verified compose configuration before startin
       "settings",
       "auth",
       "session",
+      "websocket",
       "terminal",
     ]);
     assert.ok(events.includes("probe:gateway-identity:dsh.example.com:9443"));
@@ -331,6 +340,7 @@ test("candidate workflow binds the verified compose configuration before startin
       "sessionResume:pass",
       "webPluginRoutes:pass",
       "longLivedTransport:not_run",
+      "webSocketTransport:pass",
       "terminalFence:pass",
       "terminalPtty:not_run",
     ]);

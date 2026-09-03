@@ -408,20 +408,20 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
     const ingressSsrfBody = await ingressSsrfRes.json();
     assert.equal(ingressSsrfBody.error.code, "invalid-target");
 
-    // Test Case B: WebSocket upgrade fails closed with 400
+    // Test Case B: Unsupported upgrade protocol fails closed with 400
     const wsRes = await makeHttpRequest({
       port: hubPort,
       path: "/ws",
       method: "GET",
       headers: {
         host: authority,
-        upgrade: "websocket",
+        upgrade: "h2c",
         connection: "Upgrade",
       },
     });
     assert.equal(wsRes.status, 400);
     const wsBody = await wsRes.json();
-    assert.equal(wsBody.error.code, "websocket-upgrade-not-supported");
+    assert.equal(wsBody.error.code, "unsupported-upgrade-protocol");
 
     // Test Case C: Ineligible node returns 503 generic unavailable with selectorUrl and without leaking infrastructure
     registry.recordProbeResult(nodeId, false, "injected-failure");

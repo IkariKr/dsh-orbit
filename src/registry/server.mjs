@@ -9,7 +9,16 @@ import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
 import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
-import { classifyHostAuthority, evaluateRouteEligibility, getSelectorReturnUrl, isValidOriginFormTarget, proxyHttpRequest } from "./route-proxy.mjs";
+import {
+  classifyHostAuthority,
+  evaluateRouteEligibility,
+  getSelectorReturnUrl,
+  HubWebSocketTracker,
+  isValidOriginFormTarget,
+  proxyHttpRequest,
+  proxyWebSocketUpgrade,
+  sendSocketHttpError,
+} from "./route-proxy.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -184,20 +193,6 @@ export function createHubServer({ registry, options = {} }) {
         response.writeHead(400, { "content-type": "application/json" });
         response.end(JSON.stringify({
           error: { code: "invalid-target", message: "only origin-form request-target is supported" },
-        }));
-        return;
-      }
-
-      // Explicit Stage 3 restriction: WebSocket upgrades fail closed
-      const upgradeHeader = request.headers.upgrade;
-      const connectionHeader = request.headers.connection;
-      if (
-        (typeof upgradeHeader === "string" && upgradeHeader.toLowerCase() === "websocket") ||
-        (typeof connectionHeader === "string" && connectionHeader.toLowerCase().includes("upgrade"))
-      ) {
-        response.writeHead(400, { "content-type": "application/json" });
-        response.end(JSON.stringify({
-          error: { code: "websocket-upgrade-not-supported", message: "WebSocket proxying is not supported in Stage 3" },
         }));
         return;
       }
@@ -583,5 +578,109 @@ export function createHubServer({ registry, options = {} }) {
     return sendJson(response, 404, { error: { code: "not-found", message: "no such management route" } });
   }
 
-  return { server };
+  // Stage 4: WebSocket Connection Tracker & Resource Limits
+  const maxWsGlobal = options.maxWsGlobal ?? (process.env.DSH_ORBIT_HUB_WS_GLOBAL_LIMIT ? Number(process.env.DSH_ORBIT_HUB_WS_GLOBAL_LIMIT) : undefined);
+  const maxWsPerNode = options.maxWsPerNode ?? (process.env.DSH_ORBIT_HUB_WS_PER_NODE_LIMIT ? Number(process.env.DSH_ORBIT_HUB_WS_PER_NODE_LIMIT) : undefined);
+  const wsTracker = options.wsTracker ?? new HubWebSocketTracker({
+    ...(maxWsGlobal !== undefined ? { maxGlobal: maxWsGlobal } : {}),
+    ...(maxWsPerNode !== undefined ? { maxPerNode: maxWsPerNode } : {}),
+  });
+  const wsHandshakeTimeoutMs = options.wsHandshakeTimeoutMs ?? (process.env.DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS ? Number(process.env.DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS) : undefined);
+
+  // Stage 4: Server WebSocket Upgrade Pipeline (RFC-0010 D7)
+  server.on("upgrade", (request, socket, head) => {
+    const upgradeHeader = request.headers.upgrade;
+    if (typeof upgradeHeader !== "string" || upgradeHeader.toLowerCase() !== "websocket") {
+      sendSocketHttpError(socket, 400, "Bad Request", {}, {
+        error: { code: "unsupported-upgrade-protocol", message: "only WebSocket upgrade is supported" },
+      });
+      return;
+    }
+
+    const rawHost = request.headers.host;
+    const xfh = request.headers["x-forwarded-host"];
+    if (xfh && rawHost && xfh.trim().toLowerCase() !== rawHost.trim().toLowerCase()) {
+      sendSocketHttpError(socket, 400, "Bad Request", {}, {
+        error: { code: "conflicting-host-headers", message: "Host and X-Forwarded-Host mismatch" },
+      });
+      return;
+    }
+
+    const hostHeader = rawHost;
+    const hostClass = registry.routeDomain ? classifyHostAuthority(hostHeader, registry.routeDomain) : { type: "unrelated" };
+
+    if (hostClass.type === "node-route") {
+      // Validate origin-form request-target
+      if (!isValidOriginFormTarget(request.url)) {
+        sendSocketHttpError(socket, 400, "Bad Request", {}, {
+          error: { code: "invalid-target", message: "only origin-form request-target is supported" },
+        });
+        return;
+      }
+
+      // Check Hub WebSocket capacity limits
+      const capacityCheck = wsTracker.canAccept(hostClass.nodeId);
+      if (!capacityCheck.allowed) {
+        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, registry.trustedScheme || "https");
+        sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
+          error: { code: "capacity-exhausted", message: "Hub WebSocket capacity limit reached", selectorUrl },
+        });
+        return;
+      }
+
+      // Check 5-condition eligibility
+      const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
+      if (!eligibility.eligible) {
+        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, registry.trustedScheme || "https");
+        sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
+          error: {
+            code: "node-unavailable",
+            message: "Selected node is unavailable",
+            selectorUrl,
+          },
+        });
+        return;
+      }
+
+      // Proxy WebSocket upgrade to node route ingress
+      proxyWebSocketUpgrade({
+        req: request,
+        socket,
+        head,
+        snapshot: eligibility.snapshot,
+        routeAuthority: hostClass.routeAuthority,
+        tracker: wsTracker,
+        configuredRouteDomain: registry.routeDomain,
+        trustedScheme: registry.trustedScheme || "https",
+        caCertificates: registry.caCertificates,
+        ...(wsHandshakeTimeoutMs !== undefined ? { handshakeTimeoutMs: wsHandshakeTimeoutMs } : {}),
+        nowMs: registry.now().getTime(),
+      });
+      return;
+    }
+
+    if (hostClass.type === "selector-apex") {
+      sendSocketHttpError(socket, 404, "Not Found", {}, {
+        error: { code: "not-found", message: "WebSocket upgrades are not supported on selector authority" },
+      });
+      return;
+    }
+
+    if (hostClass.type === "invalid-route-domain") {
+      sendSocketHttpError(socket, 404, "Not Found", {}, {
+        error: { code: "route-not-found", message: "invalid or unrecognized node route authority" },
+      });
+      return;
+    }
+
+    sendSocketHttpError(socket, 404, "Not Found", {}, {
+      error: { code: "not-found", message: "WebSocket upgrades are not supported on this authority" },
+    });
+  });
+
+  server.on("close", () => {
+    wsTracker.destroyAll();
+  });
+
+  return { server, wsTracker };
 }

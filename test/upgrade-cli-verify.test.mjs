@@ -183,6 +183,35 @@ async function startGateway(config, fence, fenceSecret) {
       respond(res, body.rpcId, { ok: true, value: {} });
     },
   );
+  server.on("upgrade", (req, socket, head) => {
+    if (req.url?.startsWith("/api/dsh-ssh/terminal")) {
+      const expectedAuthorization = `Basic ${Buffer.from(`${config.basicUser}:${config.basicPassword}`).toString("base64")}`;
+      if (req.headers.authorization !== expectedAuthorization) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"error\":\"unauthorized\"}");
+        socket.destroy();
+        return;
+      }
+      const fenceRequest = {
+        headers: {
+          host: FENCE_PUBLIC_HOST,
+          "x-forwarded-proto": "https",
+          "x-dsh-orbit-authenticated-proxy": fenceSecret,
+          "sec-fetch-site": req.headers["sec-fetch-site"],
+          origin: req.headers.origin,
+        },
+      };
+      if (!fence.isDshOrbitAuthenticatedProxyRequest(fenceRequest)) {
+        socket.write("HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"error\":\"forbidden\"}");
+        socket.destroy();
+        return;
+      }
+    }
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n");
+    socket.on("data", (chunk) => {
+      // Echo frame
+      socket.write(chunk);
+    });
+  });
   server.listen(0, "127.0.0.1");
   return new Promise((resolve) => server.once("listening", () => resolve({ server, port: server.address().port })));
 }

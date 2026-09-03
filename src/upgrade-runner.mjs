@@ -1,7 +1,7 @@
 import { access, chmod, chown, mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
-import { randomUUID, X509Certificate } from "node:crypto";
+import { randomBytes, randomUUID, X509Certificate } from "node:crypto";
 import { isIP } from "node:net";
 import http from "node:http";
 import https from "node:https";
@@ -24,6 +24,7 @@ const SMOKE_SETTINGS = fileURLToPath(new URL("../scripts/smoke-settings.mjs", im
 const SMOKE_AUTH = fileURLToPath(new URL("../scripts/smoke-auth.mjs", import.meta.url));
 const SMOKE_SESSION = fileURLToPath(new URL("../scripts/smoke-session-resume.mjs", import.meta.url));
 const SMOKE_TERMINAL = fileURLToPath(new URL("../scripts/smoke-terminal.mjs", import.meta.url));
+const SMOKE_WEBSOCKET = fileURLToPath(new URL("../scripts/smoke-websocket.mjs", import.meta.url));
 const PATCHER = "/usr/local/lib/dsh-orbit/bin/dsh-orbit-patch.mjs";
 const CANDIDATE_TOKEN_ENV = "DSH_ORBIT_CANDIDATE_TOKEN";
 
@@ -37,6 +38,7 @@ export const UPGRADE_CHECK_ORDER = Object.freeze([
   "sessionResume",
   "webPluginRoutes",
   "longLivedTransport",
+  "webSocketTransport",
   "terminalFence",
   "terminalPtty",
 ]);
@@ -646,6 +648,20 @@ export async function runVerificationSequence({
           "longLivedTransport",
           "not_run",
           "automated check not implemented; long-lived transport manually verified during Stage 7 acceptance",
+        );
+      },
+    },
+    {
+      names: ["webSocketTransport"],
+      required: false,
+      run: async () => {
+        const wsSmoke = await runCommand(process.execPath, [SMOKE_WEBSOCKET], {
+          env: smokeEnv({ DSH_SMOKE_URL: config.candidateEndpoint }),
+        });
+        record(
+          "webSocketTransport",
+          wsSmoke.code === 0 ? "pass" : "fail",
+          wsSmoke.code === 0 ? "WebSocket 101 upgrade handshake successful" : failDetail(wsSmoke.stderr, `exit ${wsSmoke.code}`),
         );
       },
     },

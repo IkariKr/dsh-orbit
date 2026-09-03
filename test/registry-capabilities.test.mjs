@@ -47,6 +47,20 @@ test("not_run evidence never claims a capability", () => {
   assert.equal(names.includes("sessions.resume"), false);
 });
 
+test("web.routes requires webSocketTransport: missing, not_run, or fail withholds web.routes", () => {
+  // not_run withholds web.routes
+  const reportNotRun = reportWithChecks({ webSocketTransport: "not_run" });
+  assert.equal(deriveCapabilities(reportNotRun).some((c) => c.name === "web.routes"), false);
+
+  // fail withholds web.routes
+  const reportFail = reportWithChecks({ webSocketTransport: "fail" });
+  assert.equal(deriveCapabilities(reportFail).some((c) => c.name === "web.routes"), false);
+
+  // pass grants web.routes
+  const reportPass = reportWithChecks({ webSocketTransport: "pass" });
+  assert.equal(deriveCapabilities(reportPass).some((c) => c.name === "web.routes"), true);
+});
+
 test("terminal.pty and agents.run are never claimable in v0.3", () => {
   const report = reportWith();
   const names = deriveCapabilities(report).map((entry) => entry.name);
