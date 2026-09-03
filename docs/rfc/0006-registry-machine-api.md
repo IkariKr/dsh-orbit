@@ -1,6 +1,6 @@
 # RFC 0006: Registry machine API — security and acceptance matrix (decided, rev. 5)
 
-Status: Accepted (2026-08-30), rev. 5 after architecture review round 4: `reenrollmentRequestId` and fixed idempotency key, the revoked-key exception confined to `/api/v1/reenroll`, the re-enroll success transaction fixed (failures consume nothing), and token `purpose` enforcement at both endpoints. Independent of the browser management API (RFC-0007); the shared element is the fail-closed live smoke methodology, not browser header requirements. **The v0.4 heartbeat extension later in this document is Proposed only and is not part of the accepted v0.3 contract until the v0.4 architecture review passes.**
+Status: Accepted (2026-08-30), rev. 5 after architecture review round 4: `reenrollmentRequestId` and fixed idempotency key, the revoked-key exception confined to `/api/v1/reenroll`, the re-enroll success transaction fixed (failures consume nothing), and token `purpose` enforcement at both endpoints. Independent of the browser management API (RFC-0007); the shared element is the fail-closed live smoke methodology, not browser header requirements. **The v0.4 heartbeat extension later in this document is Accepted for v0.4 construction (2026-09-03) after architecture review/remediation at `7b3960f`; it does not retroactively change the v0.3 release contract.**
 
 ## Scope
 

@@ -1,6 +1,6 @@
 # RFC 0011: Browser node selection for v0.4
 
-Status: Proposed for v0.4 architecture review.
+Status: **Accepted for v0.4 construction (2026-09-03)** after architecture review and remediation at `7b3960f`.
 
 Depends on: RFC-0007 browser management API, RFC-0009 health/capability semantics, RFC-0010 node endpoint and routing model.
 

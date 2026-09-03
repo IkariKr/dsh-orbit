@@ -1,6 +1,6 @@
 # RFC 0009: Capability contract v1 and health semantics (decided, rev. 3)
 
-Status: Accepted (2026-08-30), rev. 3 after architecture review round 2: heartbeat runtime identity drives report-staleness detection; `authenticated.expired` removed (v0.3 defines no key expiry); deterministic `dshHealthy` mapping. **The v0.4 `reachable` activation note below is Proposed only and does not change the accepted v0.3 implementation until v0.4 architecture review passes.**
+Status: Accepted (2026-08-30), rev. 3 after architecture review round 2: heartbeat runtime identity drives report-staleness detection; `authenticated.expired` removed (v0.3 defines no key expiry); deterministic `dshHealthy` mapping. **The v0.4 `reachable` / `web.routes` extensions below are Accepted for v0.4 construction (2026-09-03) after architecture review/remediation at `7b3960f`; they do not retroactively change the v0.3 release contract.**
 
 ## Capability contract v1
 

@@ -1,6 +1,6 @@
 # RFC 0010: Node endpoint and routing model for v0.4
 
-Status: Proposed for v0.4 architecture review. This RFC freezes only Orbit-owned routing semantics. It deliberately does not freeze DSH-internal authentication, cookie, RPC, plugin, or frontend implementation details because DSH remains fast-moving.
+Status: **Accepted for v0.4 construction (2026-09-03)** after architecture review and remediation at `7b3960f`. This RFC freezes only Orbit-owned routing semantics. It deliberately does not freeze DSH-internal authentication, cookie, RPC, plugin, or frontend implementation details because DSH remains fast-moving.
 
 Depends on: RFC-0001 node identity, RFC-0003 node authentication, RFC-0008 Hub service identity lifecycle, RFC-0009 capability and health semantics.
 

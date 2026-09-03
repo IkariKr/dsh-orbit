@@ -1,6 +1,6 @@
 # RFC 0008: Per-node Hub service identity lifecycle (design, rev. 5)
 
-Status: Core identity direction/lifecycle accepted (2026-08-30). The v0.4 activation profile refined in rev. 5 is **Proposed for the v0.4 architecture review**. v0.3 still generates no Hub→Node key material of any kind.
+Status: Core identity direction/lifecycle accepted (2026-08-30). The v0.4 activation profile refined in rev. 5 is **Accepted for v0.4 construction (2026-09-03)** after architecture review and remediation at `7b3960f`. v0.3 still generates no Hub→Node key material of any kind.
 
 ## Key direction (fixed)
 
