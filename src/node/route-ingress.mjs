@@ -20,6 +20,7 @@ export class RouteIngress {
     nonceCache = new RouteNonceCache(),
     now = () => Date.now(),
     dshProbeTransport = null,
+    forwardHttpEnabled = true,
   }) {
     if (!nodeId) throw new Error("nodeId is required for RouteIngress");
     this.nodeId = nodeId;
@@ -31,6 +32,7 @@ export class RouteIngress {
     this.nonceCache = nonceCache;
     this.now = now;
     this.dshProbeTransport = dshProbeTransport;
+    this.forwardHttpEnabled = forwardHttpEnabled;
     this.enabled = true;
     this.port = null;
     this.host = null;
@@ -119,23 +121,22 @@ export class RouteIngress {
       return;
     }
 
+    // Explicit Stage 3 invariant: WebSocket upgrades MUST fail closed
+    const upgradeHeader = req.headers.upgrade;
+    const connectionHeader = req.headers.connection;
+    if (
+      (typeof upgradeHeader === "string" && upgradeHeader.toLowerCase() === "websocket") ||
+      (typeof connectionHeader === "string" && connectionHeader.toLowerCase().includes("upgrade"))
+    ) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "websocket-upgrade-not-supported", message: "WebSocket proxying is not supported in Stage 3" } }));
+      return;
+    }
+
     const activeNodeId = typeof this.nodeId === "function" ? this.nodeId() : this.nodeId;
     if (!activeNodeId) {
       res.writeHead(503, { "content-type": "application/json" });
       res.end(JSON.stringify({ ready: false, error: "node_not_enrolled" }));
-      return;
-    }
-
-    // Strict path gating: ONLY exact /_orbit/route-ready in Stage 2 (no query strings, no aliases)
-    if (req.url !== "/_orbit/route-ready") {
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: { code: "not-found", message: "only exact /_orbit/route-ready is allowed in stage 2" } }));
-      return;
-    }
-
-    if (req.method !== "GET") {
-      res.writeHead(405, { "content-type": "application/json", allow: "GET" });
-      res.end(JSON.stringify({ error: { code: "method-not-allowed", message: "only GET is supported" } }));
       return;
     }
 
@@ -146,6 +147,13 @@ export class RouteIngress {
     const nowVal = typeof this.now === "function" ? this.now() : Date.now();
     const nowMs = nowVal instanceof Date ? nowVal.getTime() : Number(nowVal);
 
+    if (!this.forwardHttpEnabled && req.url !== "/_orbit/route-ready") {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "not-found", message: "only exact /_orbit/route-ready is allowed" } }));
+      return;
+    }
+
+    // Every incoming request (both readiness and general HTTP) must verify ORBIT-ROUTE-V1
     const authResult = verifyRouteRequest({
       headers: req.headers,
       method: req.method,
@@ -163,19 +171,92 @@ export class RouteIngress {
       return;
     }
 
-    try {
-      const isAlive = await this.checkDshLiveness();
-      if (isAlive) {
-        res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ nodeId: activeNodeId, ready: true }));
-      } else {
+    // Branch A: Orbit readiness contract (exact /_orbit/route-ready path)
+    if (req.url === "/_orbit/route-ready") {
+      if (req.method !== "GET") {
+        res.writeHead(405, { "content-type": "application/json", allow: "GET" });
+        res.end(JSON.stringify({ error: { code: "method-not-allowed", message: "only GET is supported" } }));
+        return;
+      }
+      try {
+        const isAlive = await this.checkDshLiveness();
+        if (isAlive) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ nodeId: activeNodeId, ready: true }));
+        } else {
+          res.writeHead(503, { "content-type": "application/json" });
+          res.end(JSON.stringify({ nodeId: activeNodeId, ready: false, error: "dsh_unreachable" }));
+        }
+      } catch {
         res.writeHead(503, { "content-type": "application/json" });
         res.end(JSON.stringify({ nodeId: activeNodeId, ready: false, error: "dsh_unreachable" }));
       }
-    } catch {
-      res.writeHead(503, { "content-type": "application/json" });
-      res.end(JSON.stringify({ nodeId: activeNodeId, ready: false, error: "dsh_unreachable" }));
+      return;
     }
+
+    // Branch B: General HTTP traffic forwarded to node-local DSH adapter
+    if (!this.forwardHttpEnabled) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "not-found", message: "only exact /_orbit/route-ready is allowed" } }));
+      return;
+    }
+    this.forwardToDsh(req, res, expectedRouteAuthority);
+  }
+
+  forwardToDsh(req, res, routeAuthority) {
+    let dshUrl;
+    try {
+      dshUrl = new URL(req.url, this.dshTarget);
+    } catch {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "bad-request", message: "invalid target URL" } }));
+      return;
+    }
+
+    // Strip Orbit route authentication proofs before reaching downstream DSH
+    const forwardHeaders = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      const lower = k.toLowerCase();
+      if (lower.startsWith("x-orbit-route-")) continue;
+      // Strip management session and gateway assertion headers defensively
+      if (lower === "x-dsh-authenticated-proxy" || lower === "x-dsh-operator-id" || lower === "x-csrf-token") continue;
+      forwardHeaders[k] = v;
+    }
+
+    // Public authority presented to DSH adapter stays as deterministic route authority
+    forwardHeaders.host = routeAuthority;
+
+    const isHttps = dshUrl.protocol === "https:";
+    const clientMod = isHttps ? https : http;
+
+    const reqOptions = {
+      protocol: dshUrl.protocol,
+      hostname: dshUrl.hostname,
+      port: dshUrl.port || (isHttps ? 443 : 80),
+      path: req.url,
+      method: req.method,
+      headers: forwardHeaders,
+      timeout: 30000,
+    };
+
+    const upstreamReq = clientMod.request(reqOptions, (upstreamRes) => {
+      res.writeHead(upstreamRes.statusCode, upstreamRes.headers);
+      upstreamRes.pipe(res);
+    });
+
+    upstreamReq.on("error", (err) => {
+      if (!res.headersSent) {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "bad-gateway", message: "downstream DSH unavailable" } }));
+      }
+    });
+
+    upstreamReq.on("timeout", () => {
+      upstreamReq.destroy(new Error("DSH connection timeout"));
+    });
+
+    // Stream request body without buffering
+    req.pipe(upstreamReq);
   }
 
   listen(port, host = "127.0.0.1") {

@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
 import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
+import { evaluateRouteEligibility, parseRouteAuthority, proxyHttpRequest } from "./route-proxy.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -159,7 +160,50 @@ export function createHubServer({ registry, options = {} }) {
   ]);
 
   const server = createServer((request, response) => {
-    // Query strings are excluded from the v0.3 protocol by construction.
+    // Stage 3: Check if incoming request targets a deterministic node route authority
+    // e.g. n-<32hex>.<routeDomain>
+    // In production, the outer gateway passes Host (or x-forwarded-host)
+    const hostHeader = request.headers["x-forwarded-host"] || request.headers.host;
+    const routeTargetParsed = registry.routeDomain ? parseRouteAuthority(hostHeader, registry.routeDomain) : null;
+
+    if (routeTargetParsed) {
+      // Explicit Stage 3 restriction: WebSocket upgrades fail closed
+      const upgradeHeader = request.headers.upgrade;
+      const connectionHeader = request.headers.connection;
+      if (
+        (typeof upgradeHeader === "string" && upgradeHeader.toLowerCase() === "websocket") ||
+        (typeof connectionHeader === "string" && connectionHeader.toLowerCase().includes("upgrade"))
+      ) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          error: { code: "websocket-upgrade-not-supported", message: "WebSocket proxying is not supported in Stage 3" },
+        }));
+        return;
+      }
+
+      // Check 5-condition eligibility
+      const eligibility = evaluateRouteEligibility(registry, routeTargetParsed.nodeId);
+      if (!eligibility.eligible) {
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          error: { code: "node-unavailable", message: "Selected node is unavailable" },
+        }));
+        return;
+      }
+
+      // Proxy request to node route ingress
+      proxyHttpRequest({
+        req: request,
+        res: response,
+        snapshot: eligibility.snapshot,
+        routeAuthority: routeTargetParsed.routeAuthority,
+        caCertificates: registry.caCertificates,
+        nowMs: registry.now().getTime(),
+      });
+      return;
+    }
+
+    // Query strings are excluded from the v0.3 Hub/management protocol by construction.
     let url;
     try {
       url = new URL(request.url ?? "/", "http://registry.local");

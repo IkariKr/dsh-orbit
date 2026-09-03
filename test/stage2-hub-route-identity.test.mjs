@@ -523,6 +523,7 @@ test("Route Ingress: admits GET /_orbit/route-ready with DSH liveness; strictly 
     routeDomain,
     getTrustKeys: () => trustKeys,
     dshProbeTransport: async () => dshAlive,
+    forwardHttpEnabled: false,
   });
 
   await ingress.listen(0, "127.0.0.1");
