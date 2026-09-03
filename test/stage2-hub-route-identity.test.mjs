@@ -350,7 +350,22 @@ test("ORBIT-ROUTE-V1 negative matrix: missing/malformed headers, timestamp skew,
   assert.equal(badAuthCheck.ok, false);
   assert.equal(badAuthCheck.code, "authority-mismatch");
 
-  // 8. Forged signature -> 401 signature-invalid
+  // 8. A proof signed/bound for Node A cannot authenticate to Node B.
+  const nodeB = "node_" + "ab".repeat(16);
+  const crossNodeCheck = verifyRouteRequest({
+    headers: signed.headers,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    expectedNodeId: nodeB,
+    expectedRouteAuthority: computeRouteAuthority(nodeB, "dsh.example.com"),
+    getPublicKey: () => null,
+    nonceCache: new RouteNonceCache(),
+    nowMs,
+  });
+  assert.equal(crossNodeCheck.ok, false);
+  assert.equal(crossNodeCheck.code, "node-mismatch");
+
+  // 9. Forged signature -> 401 signature-invalid
   const forgedCheck = verifyRouteRequest({
     headers: { ...signed.headers, "x-orbit-route-signature": "f".repeat(128) },
     method: "GET",
@@ -364,7 +379,7 @@ test("ORBIT-ROUTE-V1 negative matrix: missing/malformed headers, timestamp skew,
   assert.equal(forgedCheck.ok, false);
   assert.equal(forgedCheck.code, "signature-invalid");
 
-  // 9. Invalid signatures must not reserve nonce-cache entries. The same
+  // 10. Invalid signatures must not reserve nonce-cache entries. The same
   // nonce remains usable by the first valid authenticated request, then
   // becomes a replay only after that success.
   const cacheAfterAuth = new RouteNonceCache();
@@ -412,6 +427,79 @@ test("ORBIT-ROUTE-V1 negative matrix: missing/malformed headers, timestamp skew,
     nowMs,
   });
   assert.equal(replayAfterValid.code, "replay");
+
+  // 11. During route-key rotation overlap both new active and old rotating
+  // keys authenticate; once overlap expires, only the new active key does.
+  const nextKey = generateNodeKeyPair();
+  const nextKeyId = deriveKeyId(nextKey.publicKeyHex);
+  const overlapUntil = new Date(nowMs + 1_000).toISOString();
+  const rotatingTrust = (kid) => {
+    if (kid === activeKey.key_id) {
+      return { keyId: activeKey.key_id, publicKey: activeKey.public_key, state: "rotating", overlapUntil };
+    }
+    if (kid === nextKeyId) {
+      return { keyId: nextKeyId, publicKey: nextKey.publicKeyHex, state: "active", overlapUntil: null };
+    }
+    return null;
+  };
+  const oldDuringOverlap = signRouteRequest({
+    privateKeyHex: activeKey.private_key,
+    keyId: activeKey.key_id,
+    nodeId,
+    routeAuthority: authority,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    nowMs,
+    nonce: randomHex(16),
+  });
+  const newDuringOverlap = signRouteRequest({
+    privateKeyHex: nextKey.privateKeyHex,
+    keyId: nextKeyId,
+    nodeId,
+    routeAuthority: authority,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    nowMs,
+    nonce: randomHex(16),
+  });
+  assert.equal(
+    verifyRouteRequest({
+      headers: oldDuringOverlap.headers,
+      method: "GET",
+      rawTarget: "/_orbit/route-ready",
+      expectedNodeId: nodeId,
+      expectedRouteAuthority: authority,
+      getPublicKey: rotatingTrust,
+      nonceCache: new RouteNonceCache(),
+      nowMs,
+    }).ok,
+    true,
+  );
+  assert.equal(
+    verifyRouteRequest({
+      headers: newDuringOverlap.headers,
+      method: "GET",
+      rawTarget: "/_orbit/route-ready",
+      expectedNodeId: nodeId,
+      expectedRouteAuthority: authority,
+      getPublicKey: rotatingTrust,
+      nonceCache: new RouteNonceCache(),
+      nowMs,
+    }).ok,
+    true,
+  );
+  const oldAfterOverlap = verifyRouteRequest({
+    headers: oldDuringOverlap.headers,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    expectedNodeId: nodeId,
+    expectedRouteAuthority: authority,
+    getPublicKey: rotatingTrust,
+    nonceCache: new RouteNonceCache(),
+    nowMs: nowMs + 2_000,
+  });
+  assert.equal(oldAfterOverlap.ok, false);
+  assert.equal(oldAfterOverlap.code, "key-revoked");
 
   registry.close();
 });
@@ -821,6 +909,24 @@ test("P1-2: production machine transport refuses real redirects and accepts a pr
     const caResult = await caClient.heartbeat();
     assert.equal(caResult.ok, true);
     assert.equal(caClient.getHubRouteKeys()[0].keyId, hubRouteKeyId);
+
+    // The same trusted certificate must still fail if the configured Hub
+    // hostname is not present in its SAN set.
+    const wrongSanBaseUrl = `https://localhost:${httpsPort}/`;
+    const wrongSanStatePath = join(dir, "https-wrong-san.json");
+    const wrongSanStore = makeStore(wrongSanBaseUrl, "8");
+    await writeNodeStore(wrongSanStatePath, wrongSanStore);
+    const wrongSanClient = new NodeClient({
+      store: wrongSanStore,
+      storePath: wrongSanStatePath,
+      hubBaseUrl: wrongSanBaseUrl,
+      caCertificates: [GATEWAY_CERT_PEM],
+      runtimeIdentity: () => ({ orbitVersion: "0.4.0", dshVersion: "1.0.0" }),
+    });
+    const wrongSanResult = await wrongSanClient.heartbeat();
+    assert.equal(wrongSanResult.ok, false);
+    assert.equal(wrongSanResult.error.code, "network");
+    assert.deepEqual(wrongSanClient.getHubRouteKeys(), []);
   } finally {
     if (redirectServer) await new Promise((resolve) => redirectServer.close(resolve));
     if (redirectedServer) await new Promise((resolve) => redirectedServer.close(resolve));
