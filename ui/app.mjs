@@ -225,12 +225,14 @@ export function createRegistryUi({ document, fetchImpl }) {
         <dl class="detail-grid">
           <dt>current target</dt><dd id="current-route-target">${escapeHtml(detail.routeTarget?.origin ?? "none")}</dd>
         </dl>
-        <div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+        ${detail.state === "tombstoned"
+          ? `<div class="banner empty" style="margin-top:12px">read-only (node is tombstoned)</div>`
+          : `<div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
           <input id="route-target-input" type="text" placeholder="https://nas.example" value="${escapeHtml(detail.routeTarget?.origin ?? "")}" style="flex:1; max-width:320px;">
           <button id="save-route-target" class="primary" type="button" data-node-id="${escapeHtml(detail.nodeId)}">save</button>
           ${detail.routeTarget ? `<button id="remove-route-target" class="danger" type="button" data-node-id="${escapeHtml(detail.nodeId)}">remove</button>` : ""}
         </div>
-        <div id="route-target-error" class="banner error" style="margin-top:8px; display:none;"></div>
+        <div id="route-target-error" class="banner error" style="margin-top:8px; display:none;"></div>`}
       </div>
       ${reportBlock}
       <div class="panel"><h3>Events</h3>${events}</div>`;

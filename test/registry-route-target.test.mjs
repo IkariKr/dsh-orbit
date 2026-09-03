@@ -368,6 +368,63 @@ test("authorization matrix: unauthenticated, no CSRF, cross-site, forged header 
   assert.equal(detailJson.health.reachable, "unknown");
 });
 
+test("fail-closed method and action matrix: unsupported combinations return 404/405 without mutating state or audit trail", async (t) => {
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const baseUrl = server.baseUrl;
+
+  // Set an initial target
+  registry.setRouteTarget({ actor: "operator", nodeId: node.nodeId, routeTarget: "https://initial.example" });
+
+  const { cookie, csrfToken } = await establishSession(baseUrl);
+  const authHeaders = {
+    ...gatewayHeaders(),
+    cookie: `${SESSION_COOKIE}=${cookie}`,
+    [CSRF_HEADER]: csrfToken,
+    origin: baseUrl,
+    "sec-fetch-site": "same-origin",
+    "content-type": "application/json",
+  };
+
+  const initialAuditCount = registry.db
+    .prepare("SELECT COUNT(*) AS c FROM audit WHERE action LIKE 'hub.route-targets.%'")
+    .get().c;
+
+  // Negative test cases: contradictory or unsupported method/path combinations
+  const negativeCases = [
+    { method: "PUT", path: `/hub/nodes/${node.nodeId}/route-target/remove`, body: { routeTarget: "https://bad.example" }, expectedStatus: 404 },
+    { method: "PUT", path: `/hub/nodes/${node.nodeId}/route-target/set`, body: { routeTarget: "https://bad.example" }, expectedStatus: 404 },
+    { method: "DELETE", path: `/hub/nodes/${node.nodeId}/route-target/set`, expectedStatus: 404 },
+    { method: "DELETE", path: `/hub/nodes/${node.nodeId}/route-target/remove`, expectedStatus: 404 },
+    { method: "POST", path: `/hub/nodes/${node.nodeId}/route-target`, body: { routeTarget: "https://bad.example" }, expectedStatus: 405 },
+    { method: "POST", path: `/hub/nodes/${node.nodeId}/route-target/set`, body: { routeTarget: "https://bad.example" }, expectedStatus: 404 },
+    { method: "POST", path: `/hub/nodes/${node.nodeId}/route-target/remove`, expectedStatus: 404 },
+    { method: "PATCH", path: `/hub/nodes/${node.nodeId}/route-target`, body: { routeTarget: "https://bad.example" }, expectedStatus: 405 },
+    { method: "GET", path: `/hub/nodes/${node.nodeId}/route-target/set`, expectedStatus: 404 },
+    { method: "GET", path: `/hub/nodes/${node.nodeId}/route-target/remove`, expectedStatus: 404 },
+    { method: "GET", path: `/hub/nodes/${node.nodeId}/route-target/extra`, expectedStatus: 404 },
+  ];
+
+  for (const tc of negativeCases) {
+    const res = await fetch(baseUrl + tc.path, {
+      method: tc.method,
+      headers: authHeaders,
+      body: tc.body ? JSON.stringify(tc.body) : undefined,
+    });
+    assert.equal(res.status, tc.expectedStatus, `${tc.method} ${tc.path} expected status ${tc.expectedStatus} but got ${res.status}`);
+
+    // Registry state MUST remain unchanged
+    const current = registry.getRouteTarget(node.nodeId);
+    assert.equal(current.origin, "https://initial.example");
+
+    // No new audit rows created
+    const currentAuditCount = registry.db
+      .prepare("SELECT COUNT(*) AS c FROM audit WHERE action LIKE 'hub.route-targets.%'")
+      .get().c;
+    assert.equal(currentAuditCount, initialAuditCount, `audit log mutated during ${tc.method} ${tc.path}`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 5. Node cannot self-route
 // ---------------------------------------------------------------------------

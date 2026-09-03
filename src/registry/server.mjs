@@ -412,18 +412,10 @@ export function createHubServer({ registry, options = {} }) {
 
     requireCsrf(request, session);
 
-    const routeTargetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target(?:\/(set|remove))?\/?$/);
+    const routeTargetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
     if (routeTargetMatch) {
       const nodeId = decodeURIComponent(routeTargetMatch[1]);
-      const action = routeTargetMatch[2];
-      if (request.method === "DELETE" || (request.method === "POST" && action === "remove")) {
-        const result = registry.removeRouteTarget({
-          actor: session.operatorPrincipal,
-          nodeId,
-        });
-        return sendJson(response, 200, result);
-      }
-      if (request.method === "PUT" || request.method === "POST") {
+      if (request.method === "PUT") {
         const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
         const target = body.routeTarget ?? body.routeTargetOrigin ?? body.origin;
         const result = registry.setRouteTarget({
@@ -433,7 +425,14 @@ export function createHubServer({ registry, options = {} }) {
         });
         return sendJson(response, 200, result);
       }
-      return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected PUT, POST, or DELETE" } });
+      if (request.method === "DELETE") {
+        const result = registry.removeRouteTarget({
+          actor: session.operatorPrincipal,
+          nodeId,
+        });
+        return sendJson(response, 200, result);
+      }
+      return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected PUT or DELETE" } });
     }
 
     if (path === "/hub/tokens" || path === "/hub/tokens/") {

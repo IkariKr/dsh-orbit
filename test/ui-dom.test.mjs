@@ -243,3 +243,30 @@ test("app-level: node detail can set, report validation error, and remove route 
   });
   assert.equal(registry.getRouteTarget(nodeId), null);
 });
+
+test("app-level: tombstoned node detail renders route target as read-only with mutation controls disabled", async (t) => {
+  const { registry, baseUrl } = await withHub(t);
+  const nodeId = await enrollRawNode(baseUrl, registry);
+  registry.setRouteTarget({ actor: "operator", nodeId, routeTarget: "https://nas.example:8443" });
+  registry.deleteNode({ actor: "operator", nodeId, requestId: "01".repeat(16), reason: "retired" });
+
+  const dom = new FakeDom();
+  const ui = createRegistryUi({ document: dom, fetchImpl: browserFetch(baseUrl) });
+  await ui.start();
+
+  await dom.getElementById("nodes-list").listeners.click({
+    target: {
+      dataset: {},
+      closest: (selector) => (selector === ".node-id" ? { textContent: nodeId } : null),
+    },
+  });
+
+  const detailHtml = dom.getElementById("node-detail-view").innerHTML;
+  assert.match(detailHtml, /Route Target/);
+  assert.match(detailHtml, /current target/);
+  assert.match(detailHtml, /https:\/\/nas\.example:8443/);
+  assert.match(detailHtml, /read-only \(node is tombstoned\)/);
+  assert.equal(dom.getElementById("route-target-input").value, "");
+  assert.equal(detailHtml.includes('id="save-route-target"'), false);
+  assert.equal(detailHtml.includes('id="remove-route-target"'), false);
+});
