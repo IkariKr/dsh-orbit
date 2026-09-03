@@ -33,6 +33,8 @@ const ELEMENT_IDS = [
   "confirm-reason",
   "confirm-cancel",
   "confirm-ok",
+  "route-target-input",
+  "route-target-error",
 ];
 
 class FakeElement {
@@ -45,6 +47,7 @@ class FakeElement {
     this.dataset = {};
     this.listeners = {};
     this.opened = false;
+    this.style = {};
     this.classList = {
       names: new Set(),
       add: (name) => this.classList.names.add(name),
@@ -199,4 +202,44 @@ test("app-level: delete confirmation flow and tombstoned-node reenroll token flo
   const reenrollHtml = dom.getElementById("reenroll-result").innerHTML;
   assert.match(reenrollHtml, /Re-enrollment token for/);
   assert.match(reenrollHtml, /data-plaintext-once>/);
+});
+
+test("app-level: node detail can set, report validation error, and remove route target through the UI", async (t) => {
+  const { registry, baseUrl } = await withHub(t);
+  const nodeId = await enrollRawNode(baseUrl, registry);
+  const dom = new FakeDom();
+  const ui = createRegistryUi({ document: dom, fetchImpl: browserFetch(baseUrl) });
+  await ui.start();
+
+  // Emulate clicking on the node row to view detail
+  await dom.getElementById("nodes-list").listeners.click({
+    target: {
+      dataset: {},
+      closest: (selector) => (selector === ".node-id" ? { textContent: nodeId } : null),
+    },
+  });
+
+  const detailHtml = dom.getElementById("node-detail-view").innerHTML;
+  assert.match(detailHtml, /Route Target/);
+  assert.match(detailHtml, /current target/);
+
+  // 1. Enter invalid target -> validation error displayed
+  dom.getElementById("route-target-input").value = "http://remote-insecure";
+  await dom.getElementById("node-detail-view").listeners.click({
+    target: { id: "save-route-target", dataset: { nodeId } },
+  });
+  assert.match(dom.getElementById("route-target-error").textContent, /validation error/);
+
+  // 2. Enter valid target -> saved and detail refreshed
+  dom.getElementById("route-target-input").value = "https://nas.example:8443";
+  await dom.getElementById("node-detail-view").listeners.click({
+    target: { id: "save-route-target", dataset: { nodeId } },
+  });
+  assert.equal(registry.getRouteTarget(nodeId).origin, "https://nas.example:8443");
+
+  // 3. Remove target -> removed
+  await dom.getElementById("node-detail-view").listeners.click({
+    target: { id: "remove-route-target", dataset: { nodeId } },
+  });
+  assert.equal(registry.getRouteTarget(nodeId), null);
 });

@@ -120,6 +120,11 @@ test("lost/stale/fail/degraded values map one-to-one without flattening", () => 
 test("node detail carries the latest report and the event history verbatim", () => {
   const detail = mapNodeDetail({
     ...sampleNode(),
+    routeTarget: {
+      origin: "https://nas.example:8443",
+      createdAt: "2026-09-03T10:00:00.000Z",
+      updatedAt: "2026-09-03T10:00:00.000Z",
+    },
     latestReport: {
       uploadedAt: "2026-08-31T01:00:00.000Z",
       orbit: { version: "0.3.0", revision: "abc123" },
@@ -135,6 +140,7 @@ test("node detail carries the latest report and the event history verbatim", () 
   assert.equal(detail.events.length, 2);
   assert.equal(detail.events[1].to, "stale");
   assert.equal(detail.latestReport.orbitRevision, "abc123");
+  assert.equal(detail.routeTarget?.origin, "https://nas.example:8443");
 });
 
 test("empty and malformed lists yield explicit empty states, never fake rows", () => {
