@@ -1,6 +1,6 @@
 # RFC 0006: Registry machine API — security and acceptance matrix (decided, rev. 5)
 
-Status: Accepted (2026-08-30), rev. 5 after architecture review round 4: `reenrollmentRequestId` and fixed idempotency key, the revoked-key exception confined to `/api/v1/reenroll`, the re-enroll success transaction fixed (failures consume nothing), and token `purpose` enforcement at both endpoints. Independent of the browser management API (RFC-0007); the shared element is the fail-closed live smoke methodology, not browser header requirements.
+Status: Accepted (2026-08-30), rev. 5 after architecture review round 4: `reenrollmentRequestId` and fixed idempotency key, the revoked-key exception confined to `/api/v1/reenroll`, the re-enroll success transaction fixed (failures consume nothing), and token `purpose` enforcement at both endpoints. Independent of the browser management API (RFC-0007); the shared element is the fail-closed live smoke methodology, not browser header requirements. **The v0.4 heartbeat extension later in this document is Proposed only and is not part of the accepted v0.3 contract until the v0.4 architecture review passes.**
 
 ## Scope
 
@@ -126,6 +126,37 @@ ORBIT-REENROLL-V1
 | `POST /api/v1/reenroll` | ORBIT-REENROLL-V1 (original node private key) + re-enrollment token | restore a tombstoned nodeId with a new public key (see re-enrollment protocol) |
 
 **Heartbeat runtime identity ↔ report fields (1:1, fixed)**: `orbitVersion` ↔ `report.orbit.version`; `orbitRevision` ↔ `report.orbit.revision`; `dshVersion` ↔ `report.candidate.dshVersion`; `compatibilityProfile` ↔ `report.candidate.profile`. There is no `orbitCommit` field (no corresponding report field).
+
+### Proposed v0.4 heartbeat extension: Hub route public-key sync
+
+RFC-0008 rev. 4 reuses the authenticated heartbeat exchange to synchronize **public** Hub route identity material without creating a general command channel.
+
+The v0.4 heartbeat request may add:
+
+```json
+{
+  "acceptedHubRouteKeyIds": ["<keyId>"]
+}
+```
+
+The list contains only Hub route key IDs already durably persisted by this node. It is an acknowledgment, not a capability advertisement.
+
+The heartbeat response may add:
+
+```json
+{
+  "hubRouteKeys": [
+    {
+      "keyId": "<keyId>",
+      "publicKey": "<64 lowercase hex>",
+      "state": "provisioned | active | rotating",
+      "overlapUntil": "<ISO timestamp or null>"
+    }
+  ]
+}
+```
+
+The Hub returns only public material bound to the authenticated `nodeId`. The node persists the complete returned set before reporting those key IDs in a later heartbeat. Absence of these optional fields preserves the v0.3 heartbeat behavior. Arbitrary commands, settings, execution requests, and capability claims are forbidden in this extension.
 
 There is **no** `update-capabilities` endpoint: capabilities are derived deterministically from the latest uploaded report at the Hub (single source of truth; RFC-0009). All machine routes are fixed paths **without query strings**; any request carrying a query string is denied (400) before authentication (see wire contract).
 

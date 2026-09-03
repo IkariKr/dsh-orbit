@@ -1,6 +1,6 @@
 # RFC 0009: Capability contract v1 and health semantics (decided, rev. 3)
 
-Status: Accepted (2026-08-30), rev. 3 after architecture review round 2: heartbeat runtime identity drives report-staleness detection; `authenticated.expired` removed (v0.3 defines no key expiry); deterministic `dshHealthy` mapping.
+Status: Accepted (2026-08-30), rev. 3 after architecture review round 2: heartbeat runtime identity drives report-staleness detection; `authenticated.expired` removed (v0.3 defines no key expiry); deterministic `dshHealthy` mapping. **The v0.4 `reachable` activation note below is Proposed only and does not change the accepted v0.3 implementation until v0.4 architecture review passes.**
 
 ## Capability contract v1
 
@@ -31,11 +31,13 @@ Per-node composite record. **`reachable` is never modified by Node→Hub heartbe
 | `orbitCompatible` | `pass` / `fail` / `stale` / `unknown` — from the latest report |
 | `capabilities` | active set; `stale` marker when evidence is stale |
 | `lastSeen` | ISO timestamp + source (heartbeat / report upload) |
-| `reachable` | `unknown` in v0.3 (no active probe); later milestone: `ok` / `unreachable` / `unknown` |
+| `reachable` | `unknown` in v0.3 (no active probe). **Proposed v0.4 extension:** `ok` / `unreachable` / `unknown` from the Hub→Node route probe defined by RFC-0010 only. |
 
 **Deterministic `dshHealthy` mapping** (Hub-side, never node-declared): `ok` iff the latest report has `runtimeReadiness = pass` AND `settingsRead = pass`; `degraded` iff either of those two checks `fail`; `unknown` iff there is no fresh report (none, or past the staleness window below). No other inputs, no heuristics.
 
 **Heartbeat runtime identity (non-authoritative, 1:1 with report fields)**: the heartbeat carries `orbitVersion`, `orbitRevision`, `dshVersion`, `compatibilityProfile` (RFC-0006), mapped 1:1 to the v0.2 compatibility report fields: `orbitVersion` ↔ `report.orbit.version`; `orbitRevision` ↔ `report.orbit.revision`; `dshVersion` ↔ `report.candidate.dshVersion`; `compatibilityProfile` ↔ `report.candidate.profile`. (No `orbitCommit` — there is no such report field.) The Hub compares these to the identity tuple recorded with the latest report; on mismatch the report is treated as stale → `orbitCompatible: stale` and capabilities withheld (stale marker) until a fresh report arrives. The heartbeat itself never declares or updates capabilities.
+
+For the proposed v0.4 endpoint selector, RFC-0010 activates `reachable` without changing the other dimensions: route probes never move `registryContact`, and heartbeats never move `reachable`. This extension is not active in the v0.3 implementation until the v0.4 architecture review passes.
 
 - `unknown` is explicit and default; never "compatible by default".
 - A failed dimension never hides others; partial health recorded.

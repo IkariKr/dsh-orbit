@@ -89,9 +89,20 @@ not advertise capabilities, and reports do not restore heartbeat contact. See
 `docs/registry-mvp.md`, `docs/registry-deployment.md`, and the frozen RFCs for
 the contract details.
 
-## Explicitly out of scope
+## Proposed v0.4 routing architecture
+
+v0.4 is intentionally a thin routing layer over the accepted Registry rather than a DSH-aware control plane. The proposal is documented in `docs/rfc/0010-node-endpoint-and-routing.md`, `docs/rfc/0011-browser-node-selection.md`, and `docs/sop/v0.4-endpoint-selector-multistage-sop.md`.
+
+The selector lives at one familiar authority such as `dsh.example.com`. Selecting a node navigates to a deterministic authority such as `n-<node-id-hex>.dsh.example.com`; wildcard DNS/TLS terminates at the same Orbit deployment. Host-based selection keeps DSH at `/`, keeps browser authorities isolated per node, and avoids a mutable global active-node session.
+
+The Hub stores one operator-approved server-reachable route target per node. It authenticates to a small node-side Orbit route ingress with that node's RFC-0008 Hub identity, then forwards HTTP/WebSocket traffic opaquely to the node-local DSH compatibility adapter. The Hub router does not understand DSH cookies, launch tokens, private RPC names, plugin routes, or frontend components. A DSH version is routable only while fresh compatibility evidence provides `web.routes`.
+
+A failed node route never fails over to another node. Reverse-connected nodes, NAT traversal, multi-node sessions, and fleet execution remain later milestones.
+
+## Explicitly out of scope for the implemented v0.3 release
 
 Endpoint routing, reverse connections, multi-node sessions, fleet execution,
-and third-party plugin compatibility remain outside the v0.3 MVP. The existing
-third-party compatibility debt is freeze-only and is not expanded by this
-release candidate. See `docs/roadmap.md` and `docs/third-party-debt.md`.
+and third-party plugin compatibility remain outside the implemented v0.3 MVP.
+The v0.4 documents above are design proposals only until architecture review
+passes. Existing third-party compatibility debt remains freeze-only. See
+`docs/roadmap.md` and `docs/third-party-debt.md`.
