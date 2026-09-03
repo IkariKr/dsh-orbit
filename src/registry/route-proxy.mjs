@@ -29,14 +29,7 @@ export function classifyHostAuthority(hostHeader, configuredRouteDomain) {
     return { type: "unrelated", authority: null };
   }
 
-  let cleanHost = hostHeader.trim().toLowerCase();
-  // Strip trailing dot if present before port (e.g. "foo.example.com.:8443" or "foo.example.com.")
-  cleanHost = cleanHost.replace(/\.(:\d+)?$/, "$1");
-
-  // Strict grammar check: no extra colons, no trailing garbage
-  if (!/^[a-z0-9.-]+(:[0-9]+)?$/.test(cleanHost)) {
-    return { type: "invalid-route-domain", reason: "malformed-authority-grammar" };
-  }
+  const cleanHost = hostHeader.trim().toLowerCase();
 
   if (!configuredRouteDomain) {
     return { type: "unrelated", authority: cleanHost };
@@ -49,21 +42,50 @@ export function classifyHostAuthority(hostHeader, configuredRouteDomain) {
     return { type: "unrelated", authority: cleanHost };
   }
 
-  const parts = cleanHost.split(":");
-  const hostHostname = parts[0];
-  const hostPort = parts.length === 2 ? parts[1] : null;
-
   const domainParts = cleanDomain.split(":");
   const domainHostname = domainParts[0];
   const domainPort = domainParts.length === 2 ? domainParts[1] : null;
 
-  // Check if host belongs to the configured routeDomain namespace
-  const isApex = hostHostname === domainHostname;
-  const isSubdomain = hostHostname.endsWith(`.${domainHostname}`);
-
-  if (!isApex && !isSubdomain) {
+  // Generic bracketed IPv6 authorities (for example [::1]:5445) cannot
+  // belong to the DNS route-domain namespace. Leave them to the existing
+  // Registry ingress instead of misclassifying them as invalid node routes.
+  if (cleanHost.startsWith("[")) {
     return { type: "unrelated", authority: cleanHost };
   }
+
+  // Determine namespace membership before applying the strict Orbit DNS
+  // authority grammar. This preserves unrelated legacy/private Host values,
+  // while malformed values that still target the route domain fail closed.
+  const firstColon = cleanHost.indexOf(":");
+  const rawHostname = firstColon === -1 ? cleanHost : cleanHost.slice(0, firstColon);
+  const trailingDots = rawHostname.match(/\.+$/)?.[0].length ?? 0;
+  const namespaceHostname = rawHostname.replace(/\.+$/, "");
+  const targetsApex = namespaceHostname === domainHostname;
+  const targetsSubdomain = namespaceHostname.endsWith(`.${domainHostname}`);
+
+  if (!targetsApex && !targetsSubdomain) {
+    return { type: "unrelated", authority: cleanHost };
+  }
+
+  // One trailing dot is the normal FQDN spelling and is canonicalized away.
+  // More than one trailing dot is malformed but still targets the route
+  // namespace, so it must never fall through to Registry APIs.
+  if (trailingDots > 1) {
+    return { type: "invalid-route-domain", reason: "multiple-trailing-dots" };
+  }
+
+  const normalizedHost = cleanHost.replace(/\.(:\d+)?$/, "$1");
+  if (!/^[a-z0-9.-]+(:[0-9]+)?$/.test(normalizedHost)) {
+    return { type: "invalid-route-domain", reason: "malformed-authority-grammar" };
+  }
+
+  const parts = normalizedHost.split(":");
+  const hostHostname = parts[0];
+  const hostPort = parts.length === 2 ? parts[1] : null;
+
+  // Check the canonicalized hostname against the configured route namespace.
+  const isApex = hostHostname === domainHostname;
+  const isSubdomain = hostHostname.endsWith(`.${domainHostname}`);
 
   // Exact port matching
   if (domainPort) {

@@ -122,7 +122,12 @@ test("Host -> Node Mapping: deterministic format parsed, invalid and wrong domai
   assert.equal(classifyHostAuthority(`${ROUTE_DOMAIN}.`, ROUTE_DOMAIN).type, "selector-apex");
   assert.equal(classifyHostAuthority(`foo.${ROUTE_DOMAIN}`, ROUTE_DOMAIN).type, "invalid-route-domain");
   assert.equal(classifyHostAuthority(`foo.${ROUTE_DOMAIN}.`, ROUTE_DOMAIN).type, "invalid-route-domain");
-  assert.equal(classifyHostAuthority("127.0.0.1", ROUTE_DOMAIN).type, "unrelated");
+  assert.equal(classifyHostAuthority(`foo.${ROUTE_DOMAIN}..`, ROUTE_DOMAIN).type, "invalid-route-domain");
+  assert.equal(classifyHostAuthority(`${ROUTE_DOMAIN}..`, ROUTE_DOMAIN).type, "invalid-route-domain");
+  assert.equal(classifyHostAuthority(`n-${"ab".repeat(16)}.${ROUTE_DOMAIN}..`, ROUTE_DOMAIN).type, "invalid-route-domain");
+  assert.equal(classifyHostAuthority("127.0.0.1:5445", ROUTE_DOMAIN).type, "unrelated");
+  assert.equal(classifyHostAuthority("localhost:5445", ROUTE_DOMAIN).type, "unrelated");
+  assert.equal(classifyHostAuthority("[::1]:5445", ROUTE_DOMAIN).type, "unrelated");
   assert.equal(classifyHostAuthority("registration.example", ROUTE_DOMAIN).type, "unrelated");
 });
 
@@ -469,6 +474,30 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
       headers: { host: `${ROUTE_DOMAIN}.` },
     });
     assert.equal(apexTrailingDotRes.status, 404);
+
+    // Multiple trailing dots remain inside the route namespace and must fail
+    // closed instead of being reclassified as unrelated Registry traffic.
+    const multiTrailingDotRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/api/v1/enroll",
+      method: "POST",
+      headers: { host: `foo.${ROUTE_DOMAIN}..` },
+    });
+    assert.equal(multiTrailingDotRes.status, 404);
+    const multiTrailingDotBody = await multiTrailingDotRes.json();
+    assert.equal(multiTrailingDotBody.error.code, "route-not-found");
+
+    // Stage 3 routing classification must not break the pre-existing IPv6
+    // loopback Registry/browser ingress. Bracketed IPv6 is unrelated to the
+    // DNS route domain and therefore continues to the ordinary UI shell.
+    const ipv6LoopbackHostRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/",
+      method: "GET",
+      headers: { host: "[::1]:5445" },
+    });
+    assert.equal(ipv6LoopbackHostRes.status, 200);
+    assert.match(await ipv6LoopbackHostRes.text(), /<!doctype html|<html/i);
 
     const invalidSessionRes = await makeHttpRequest({
       port: hubPort,
