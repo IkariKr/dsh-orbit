@@ -16,18 +16,53 @@ export { isValidOriginFormTarget };
 
 const ROUTE_HOST_PATTERN = /^n-([0-9a-f]{32})\.(.+)$/i;
 
+// Checks whether hostHeader is any subdomain/variant under configuredRouteDomain
+// (e.g. foo.dsh.example.com, invalid.dsh.example.com)
+export function isRouteDomainHost(hostHeader, configuredRouteDomain) {
+  if (typeof hostHeader !== "string" || !hostHeader) return false;
+  const cleanHost = hostHeader.trim().toLowerCase();
+  let cleanDomain;
+  try {
+    cleanDomain = validateRouteDomain(configuredRouteDomain);
+  } catch {
+    return false;
+  }
+  const hostHostname = cleanHost.split(":")[0];
+  const domainHostname = cleanDomain.split(":")[0];
+  return hostHostname.endsWith(`.${domainHostname}`) || hostHostname === domainHostname;
+}
+
+// Compute selector return link for unavailable 503 responses (RFC-0010 D1, D7)
+export function getSelectorReturnUrl(configuredRouteDomain, trustedScheme = "https") {
+  if (!configuredRouteDomain) return "/";
+  const cleanDomain = validateRouteDomain(configuredRouteDomain);
+  return `${trustedScheme}://${cleanDomain}/`;
+}
+
 // Parse incoming Host header into { nodeId, routeAuthority } against configured routeDomain.
-// Strict exact port matching:
+// Strict exact port matching and strict authority grammar:
+// - Host must match either `^[a-z0-9.-]+$` or `^[a-z0-9.-]+:[0-9]+$`
 // - If configuredRouteDomain has a port (e.g. "dsh.example.com:8443"), incoming host MUST carry the exact same port.
 // - If configuredRouteDomain has NO port (e.g. "dsh.example.com"), incoming host MUST NOT carry any port.
-// Any port mismatch returns null fail-closed.
+// Any extra colons, non-digit ports, or port mismatches return null fail-closed.
 export function parseRouteAuthority(hostHeader, configuredRouteDomain) {
   if (typeof hostHeader !== "string" || !hostHeader) return null;
   const cleanHost = hostHeader.trim().toLowerCase();
+
+  // Strict grammar check: no extra colons, no trailing garbage
+  if (!/^[a-z0-9.-]+(:[0-9]+)?$/.test(cleanHost)) {
+    return null;
+  }
+
   const cleanDomain = validateRouteDomain(configuredRouteDomain);
 
-  const [hostHostname, hostPort = null] = cleanHost.split(":");
-  const [domainHostname, domainPort = null] = cleanDomain.split(":");
+  const parts = cleanHost.split(":");
+  const hostHostname = parts[0];
+  const hostPort = parts.length === 2 ? parts[1] : null;
+
+  const domainParts = cleanDomain.split(":");
+  const domainHostname = domainParts[0];
+  const domainPort = domainParts.length === 2 ? domainParts[1] : null;
 
   if (domainPort) {
     if (hostPort !== domainPort) {
@@ -163,6 +198,8 @@ export function proxyHttpRequest({
   res,
   snapshot,
   routeAuthority,
+  configuredRouteDomain = null,
+  trustedScheme = "https",
   caCertificates = null,
   nowMs = Date.now(),
 }) {
@@ -250,9 +287,14 @@ export function proxyHttpRequest({
 
   upstreamReq.on("error", (err) => {
     if (!res.headersSent) {
+      const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
       res.writeHead(503, { "content-type": "application/json" });
       res.end(JSON.stringify({
-        error: { code: "node-unavailable", message: "Selected node is unavailable" },
+        error: {
+          code: "node-unavailable",
+          message: "Selected node is unavailable",
+          selectorUrl,
+        },
       }));
     }
   });

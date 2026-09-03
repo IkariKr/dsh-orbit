@@ -5,21 +5,23 @@
 // 3. Separate deterministic public route authorities:
 //    - Route Authority A: n-<nodeIdA>.<routeDomain>
 //    - Route Authority B: n-<nodeIdB>.<routeDomain>
-// 4. Downstream DSH server A returns distinct identifying fixture A
-// 5. Downstream DSH server B returns distinct identifying fixture B
+// 4. Downstream DSH server A returns distinct identifying fixture A (HTML root, static assets, and APIs)
+// 5. Downstream DSH server B returns distinct identifying fixture B (HTML root, static assets, and APIs)
 // 6. Verification that Authority A returns Fixture A, Authority B returns Fixture B, and A never reaches B
 // 7. Verified HTTPS + private CA on Node A; wrong SAN / non-matching leaf fails closed
 // 8. Rehearsal wildcard HTTPS gateway (*.stage3-test.example) terminating TLS:
-//    - Public clients connect via HTTPS to the rehearsal gateway
-//    - Gateway terminates TLS, strips outer gateway credentials, preserves canonical Host
-//    - Gateway forwards to Hub loopback
+//    - Real gateway authentication gate: missing or invalid credentials denied with 401
+//    - Valid credentials consumed and stripped before proxying to Hub loopback
+//    - Preserves canonical Host
 //    - Public registration authority denies private machine surface (/api/v1/*) with 403
-//    - Wildcard node authority passes ordinary HTTP requests (including /api/v1/*) opaquely to DSH
+//    - Wildcard node authority passes ordinary HTTP requests (root, static assets, and /api/v1/*) opaquely to DSH
 //    - Outer gateway credentials never reach downstream DSH
 // 9. Negative fault injections:
+//    - Missing gateway auth fails with 401
+//    - Invalid gateway auth fails with 401
 //    - Wrong SAN fails closed on TLS
-//    - Conflicting Host headers denied
-// 10. Ingress fault isolation: stop Node A -> Node A unavailable (503); Node B unaffected
+//    - Invalid wildcard host (e.g. foo.stage3-test.example) fails closed with 404
+// 10. Ingress fault isolation: stop Node A -> Node A unavailable (503 with selectorUrl); Node B unaffected
 // 11. Process restarts: restart Hub and both Node daemons -> routing & isolation preserved with zero drift
 
 import assert from "node:assert/strict";
@@ -38,6 +40,7 @@ import { computeRouteAuthority } from "../src/registry/protocol.mjs";
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const REHEARSAL_DOMAIN = "stage3-test.example";
 const REGISTRATION_AUTHORITY = `registration.${REHEARSAL_DOMAIN}`;
+const REHEARSAL_GATEWAY_TOKEN = "valid-rehearsal-gateway-secret-token";
 
 function killProcess(child) {
   return new Promise((resolve) => {
@@ -108,8 +111,18 @@ function startWildcardGateway({ keyPath, certPath, hubPort }) {
       }
 
       // Branch 2: Wildcard Node route authority (*.stage3-test.example)
-      // Preserves canonical Host, consumes and strips outer gateway credentials,
-      // and passes ALL ordinary HTTP paths opaquely to Hub -> Node -> DSH.
+      // Enforce the gateway authentication gate:
+      // Validates outer gateway credential (X-Gateway-Auth).
+      // Missing or wrong credential fails closed with HTTP 401.
+      const providedGatewayAuth = req.headers["x-gateway-auth"];
+      if (!providedGatewayAuth || providedGatewayAuth !== REHEARSAL_GATEWAY_TOKEN) {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "gateway-auth-required", message: "valid outer gateway authentication required" } }));
+        return;
+      }
+
+      // Authentication passed: consume and strip outer gateway credentials,
+      // preserve canonical Host, and proxy all paths opaquely to Hub.
       forwardToHub(req, res, hubPort, incomingHost);
     });
 
@@ -118,7 +131,6 @@ function startWildcardGateway({ keyPath, certPath, hubPort }) {
       // Preserve canonical Host
       forwardHeaders.host = originalHost;
       // Strip outer gateway credentials
-      delete forwardHeaders.authorization;
       delete forwardHeaders["x-gateway-auth"];
       delete forwardHeaders["x-gateway-secret"];
 
@@ -371,6 +383,29 @@ function startIdentifiedDshServer(fixtureId) {
       res.end(JSON.stringify({ error: "dsh_down" }));
       return;
     }
+
+    // Branch A: Static root HTML document
+    if (req.url === "/" || req.url === "/index.html") {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "x-node-fixture": fixtureId,
+        "set-cookie": `node_session=${fixtureId}_sess; Domain=.${REHEARSAL_DOMAIN}; Path=/; HttpOnly`,
+      });
+      res.end(`<!DOCTYPE html><html><head><title>DSH ${fixtureId}</title></head><body><h1>Welcome to ${fixtureId}</h1><script src="/assets/app.js"></script></body></html>`);
+      return;
+    }
+
+    // Branch B: Static client asset JavaScript
+    if (req.url === "/assets/app.js") {
+      res.writeHead(200, {
+        "content-type": "application/javascript; charset=utf-8",
+        "x-node-fixture": fixtureId,
+      });
+      res.end(`console.log("Loaded asset bundle for ${fixtureId}");`);
+      return;
+    }
+
+    // Branch C: General API paths
     res.writeHead(200, {
       "content-type": "application/json",
       "x-node-fixture": fixtureId,
@@ -526,8 +561,8 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
   console.log("\n=== STEP 1: Launch Downstream DSH Servers with Distinct Identifiers ===");
   dshA = await startIdentifiedDshServer("fixture-nas-node-A");
   dshB = await startIdentifiedDshServer("fixture-workstation-node-B");
-  console.log(`[Evidence] DSH A running on ${dshA.target} with fixture 'fixture-nas-node-A'`);
-  console.log(`[Evidence] DSH B running on ${dshB.target} with fixture 'fixture-workstation-node-B'`);
+  console.log(`[Evidence] DSH A running on ${dshA.target} with HTML root, /assets/app.js, and API`);
+  console.log(`[Evidence] DSH B running on ${dshB.target} with HTML root, /assets/app.js, and API`);
 
   console.log("\n=== STEP 2: Start Hub Daemon with Route Domain & Private CA ===");
   hub = await startHubProcess({ dbPath, caCertPath: nodeCertPath, routeDomain: REHEARSAL_DOMAIN, cadenceSeconds: 1 });
@@ -538,7 +573,7 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
   gateway = await startWildcardGateway({ keyPath: gwKeyPath, certPath: gwCertPath, hubPort: hub.port });
   console.log(`[Evidence] Rehearsal Wildcard HTTPS Gateway running on port ${gateway.port}`);
 
-  console.log("\n=== STEP 4: Negative Gateway Tests (Public Machine API Denial & TLS SAN Rejection) ===");
+  console.log("\n=== STEP 4: Negative Gateway Tests (Auth Gate, Public Machine Denial, Invalid Wildcard Host & TLS SAN) ===");
   // Test 4.1: Public registration authority denies private machine API /api/v1/enroll with 403
   const machineDenialRes = await makeGatewayRequest({
     gatewayPort: gateway.port,
@@ -552,7 +587,46 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
   assert.equal(machineDenialBody.error.code, "machine-ingress-denied");
   console.log(`[Evidence] Negative test passed: /api/v1/* denied with 403 on registration authority`);
 
-  // Test 4.2: Connecting to gateway with non-matching SAN fails closed on TLS
+  // Test 4.2: Missing outer gateway authentication fails closed with 401
+  const missingAuthRes = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: `n-${"aa".repeat(16)}.${REHEARSAL_DOMAIN}`,
+    path: "/",
+    caCert: wildcardCaCert,
+  });
+  assert.equal(missingAuthRes.status, 401);
+  const missingAuthBody = await missingAuthRes.json();
+  assert.equal(missingAuthBody.error.code, "gateway-auth-required");
+  console.log(`[Evidence] Negative test passed: Missing outer gateway auth denied with 401`);
+
+  // Test 4.3: Wrong outer gateway authentication fails closed with 401
+  const wrongAuthRes = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: `n-${"aa".repeat(16)}.${REHEARSAL_DOMAIN}`,
+    path: "/",
+    headers: { "x-gateway-auth": "wrong-bogus-token" },
+    caCert: wildcardCaCert,
+  });
+  assert.equal(wrongAuthRes.status, 401);
+  const wrongAuthBody = await wrongAuthRes.json();
+  assert.equal(wrongAuthBody.error.code, "gateway-auth-required");
+  console.log(`[Evidence] Negative test passed: Wrong outer gateway auth denied with 401`);
+
+  // Test 4.4: Invalid wildcard Host (e.g. foo.stage3-test.example) fails closed with 404 (does NOT fall through to Registry)
+  const invalidWildcardHostRes = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: `foo.${REHEARSAL_DOMAIN}`,
+    path: "/api/v1/enroll",
+    method: "POST",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+    caCert: wildcardCaCert,
+  });
+  assert.equal(invalidWildcardHostRes.status, 404);
+  const invalidWildcardHostBody = await invalidWildcardHostRes.json();
+  assert.equal(invalidWildcardHostBody.error.code, "route-not-found");
+  console.log(`[Evidence] Negative test passed: Invalid wildcard host 'foo.stage3-test.example' blocked from Registry API and returned 404`);
+
+  // Test 4.5: Connecting to gateway with non-matching SAN fails closed on TLS
   let wrongSanCaught = false;
   try {
     await makeGatewayRequest({
@@ -617,16 +691,46 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
   console.log(`[Evidence] Both nodes satisfied all 5 conditions (active, routeTarget, reachable=ok, activeKey, web.routes)`);
 
   console.log("\n=== STEP 8: Execute Routed HTTP Requests via Real HTTPS Wildcard Gateway ===");
-  // Request through Authority A -> Must reach DSH A and return Fixture A
-  // We send outer gateway credentials (Authorization and X-Gateway-Auth) to prove they are stripped by the gateway!
+  // Request 8.1: Static HTML root through Authority A -> Must reach DSH A and return Fixture A HTML document
+  const rootResA = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: authorityA,
+    path: "/",
+    method: "GET",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+    caCert: wildcardCaCert,
+  });
+  assert.equal(rootResA.status, 200);
+  assert.equal(rootResA.headers["content-type"], "text/html; charset=utf-8");
+  assert.equal(rootResA.headers["x-node-fixture"], "fixture-nas-node-A");
+  const rootHtmlA = await rootResA.text();
+  assert.ok(rootHtmlA.includes("Welcome to fixture-nas-node-A"));
+  console.log(`[Evidence] Authority A static root HTML verified`);
+
+  // Request 8.2: Static Asset (/assets/app.js) through Authority A -> Must reach DSH A and return JavaScript
+  const assetResA = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: authorityA,
+    path: "/assets/app.js",
+    method: "GET",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+    caCert: wildcardCaCert,
+  });
+  assert.equal(assetResA.status, 200);
+  assert.equal(assetResA.headers["content-type"], "application/javascript; charset=utf-8");
+  assert.equal(assetResA.headers["x-node-fixture"], "fixture-nas-node-A");
+  const assetJsA = await assetResA.text();
+  assert.ok(assetJsA.includes("Loaded asset bundle for fixture-nas-node-A"));
+  console.log(`[Evidence] Authority A static asset (/assets/app.js) verified`);
+
+  // Request 8.3: API Request through Authority A -> Must reach DSH A and return JSON
   const resA = await makeGatewayRequest({
     gatewayPort: gateway.port,
     authority: authorityA,
     path: "/api/v1/workspaces?query=alpha",
     method: "GET",
     headers: {
-      authorization: "Basic b3BlcmF0b3I6cGFzc3dvcmQ=",
-      "x-gateway-auth": "secret-rehearsal-token",
+      "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN,
     },
     caCert: wildcardCaCert,
   });
@@ -640,7 +744,6 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
 
   // Outer gateway credential isolation verified: downstream DSH never saw gateway credentials
   const dshAHeaders = dshA.getLastHeaders();
-  assert.equal(typeof dshAHeaders.authorization, "undefined");
   assert.equal(typeof dshAHeaders["x-gateway-auth"], "undefined");
 
   // Cookie isolation: Domain attribute stripped on response
@@ -650,12 +753,45 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
   assert.equal(cookieValA.toLowerCase().includes("domain="), false);
   console.log(`[Evidence] Authority A via HTTPS Wildcard Gateway routed to Node A (Fixture A returned, gateway credentials stripped, cookie host-only)`);
 
-  // Request through Authority B -> Must reach DSH B and return Fixture B
+  // Request 8.4: Static HTML root through Authority B -> Must reach DSH B and return Fixture B HTML document
+  const rootResB = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: authorityB,
+    path: "/",
+    method: "GET",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+    caCert: wildcardCaCert,
+  });
+  assert.equal(rootResB.status, 200);
+  assert.equal(rootResB.headers["content-type"], "text/html; charset=utf-8");
+  assert.equal(rootResB.headers["x-node-fixture"], "fixture-workstation-node-B");
+  const rootHtmlB = await rootResB.text();
+  assert.ok(rootHtmlB.includes("Welcome to fixture-workstation-node-B"));
+  console.log(`[Evidence] Authority B static root HTML verified`);
+
+  // Request 8.5: Static Asset (/assets/app.js) through Authority B -> Must reach DSH B and return JavaScript
+  const assetResB = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: authorityB,
+    path: "/assets/app.js",
+    method: "GET",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+    caCert: wildcardCaCert,
+  });
+  assert.equal(assetResB.status, 200);
+  assert.equal(assetResB.headers["content-type"], "application/javascript; charset=utf-8");
+  assert.equal(assetResB.headers["x-node-fixture"], "fixture-workstation-node-B");
+  const assetJsB = await assetResB.text();
+  assert.ok(assetJsB.includes("Loaded asset bundle for fixture-workstation-node-B"));
+  console.log(`[Evidence] Authority B static asset (/assets/app.js) verified`);
+
+  // Request 8.6: API Request through Authority B -> Must reach DSH B and return JSON
   const resB = await makeGatewayRequest({
     gatewayPort: gateway.port,
     authority: authorityB,
     path: "/api/v1/workspaces?query=beta",
     method: "GET",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
     caCert: wildcardCaCert,
   });
   assert.equal(resB.status, 200);
@@ -678,18 +814,20 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
   // Allow Hub probe scheduler to detect failure and mark unreachable
   await sleep(3500);
 
-  // Request through Authority A -> Must fail closed with 503 Selected node is unavailable
+  // Request through Authority A -> Must fail closed with 503 Selected node is unavailable and contain selectorUrl
   const failResA = await makeGatewayRequest({
     gatewayPort: gateway.port,
     authority: authorityA,
     path: "/api/v1/workspaces",
     method: "GET",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
     caCert: wildcardCaCert,
   });
   assert.equal(failResA.status, 503);
   const failDataA = await failResA.json();
   assert.equal(failDataA.error.code, "node-unavailable");
-  console.log(`[Evidence] Authority A failed closed with 503 (no fallback to Node B)`);
+  assert.equal(failDataA.error.selectorUrl, `https://${REHEARSAL_DOMAIN}/`);
+  console.log(`[Evidence] Authority A failed closed with 503 and selectorUrl (no fallback to Node B)`);
 
   // Request through Authority B -> Must remain 100% operational
   const okResB = await makeGatewayRequest({
@@ -697,6 +835,7 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
     authority: authorityB,
     path: "/api/v1/workspaces",
     method: "GET",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
     caCert: wildcardCaCert,
   });
   assert.equal(okResB.status, 200);
@@ -749,18 +888,22 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
     gatewayPort: gateway.port,
     authority: authorityA,
     path: "/",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
     caCert: wildcardCaCert,
   });
   assert.equal(postResA.status, 200);
+  assert.equal(postResA.headers["content-type"], "text/html; charset=utf-8");
   assert.equal(postResA.headers["x-node-fixture"], "fixture-nas-node-A");
 
   const postResB = await makeGatewayRequest({
     gatewayPort: gateway.port,
     authority: authorityB,
     path: "/",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
     caCert: wildcardCaCert,
   });
   assert.equal(postResB.status, 200);
+  assert.equal(postResB.headers["content-type"], "text/html; charset=utf-8");
   assert.equal(postResB.headers["x-node-fixture"], "fixture-workstation-node-B");
   console.log(`[Evidence] Post-restart verification: Authorities A and B route through HTTPS gateway with zero identity drift!`);
 });

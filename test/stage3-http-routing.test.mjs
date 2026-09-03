@@ -94,6 +94,12 @@ test("Host -> Node Mapping: deterministic format parsed, invalid and wrong domai
   assert.equal(parseRouteAuthority(`${authority}:9999`, `${ROUTE_DOMAIN}:5445`), null);
   // Negative: omitted port when domain specifies port
   assert.equal(parseRouteAuthority(authority, `${ROUTE_DOMAIN}:5445`), null);
+  // Negative: extra colons or trailing garbage (e.g. :8443:evil, :8443:9999)
+  assert.equal(parseRouteAuthority(`${authority}:5445:evil`, `${ROUTE_DOMAIN}:5445`), null);
+  assert.equal(parseRouteAuthority(`${authority}:5445:9999`, `${ROUTE_DOMAIN}:5445`), null);
+  assert.equal(parseRouteAuthority(`${authority}:`, `${ROUTE_DOMAIN}:5445`), null);
+  assert.equal(parseRouteAuthority(`${authority}::`, `${ROUTE_DOMAIN}:5445`), null);
+  assert.equal(parseRouteAuthority(`${authority}:extra`, ROUTE_DOMAIN), null);
   // Negative: unexpected port (:9999, :443, :80) when domain has no port
   assert.equal(parseRouteAuthority(`${authority}:9999`, ROUTE_DOMAIN), null);
   assert.equal(parseRouteAuthority(`${authority}:443`, ROUTE_DOMAIN), null);
@@ -402,7 +408,7 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
     const wsBody = await wsRes.json();
     assert.equal(wsBody.error.code, "websocket-upgrade-not-supported");
 
-    // Test Case C: Ineligible node returns 503 generic unavailable without leaking infrastructure
+    // Test Case C: Ineligible node returns 503 generic unavailable with selectorUrl and without leaking infrastructure
     registry.recordProbeResult(nodeId, false, "injected-failure");
     registry.recordProbeResult(nodeId, false, "injected-failure");
     registry.recordProbeResult(nodeId, false, "injected-failure"); // reachable -> unreachable
@@ -417,9 +423,32 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
     const unavailBody = await unavailRes.json();
     assert.equal(unavailBody.error.code, "node-unavailable");
     assert.equal(unavailBody.error.message, "Selected node is unavailable");
+    assert.equal(unavailBody.error.selectorUrl, `https://${ROUTE_DOMAIN}/`);
     // Ensure no private info leaked
     assert.equal(JSON.stringify(unavailBody).includes("127.0.0.1"), false);
     assert.equal(JSON.stringify(unavailBody).includes("hubKey"), false);
+
+    // Test Case D: Invalid / unrecognized wildcard route host fails closed before Registry APIs
+    // e.g. foo.dsh.example.com or bad-hex.dsh.example.com
+    const invalidWildcardRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/api/v1/enroll",
+      method: "POST",
+      headers: { host: `foo.${ROUTE_DOMAIN}` },
+    });
+    assert.equal(invalidWildcardRes.status, 404);
+    const invalidWildcardBody = await invalidWildcardRes.json();
+    assert.equal(invalidWildcardBody.error.code, "route-not-found");
+
+    const invalidSessionRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/hub/session",
+      method: "POST",
+      headers: { host: `attacker.${ROUTE_DOMAIN}` },
+    });
+    assert.equal(invalidSessionRes.status, 404);
+    const invalidSessionBody = await invalidSessionRes.json();
+    assert.equal(invalidSessionBody.error.code, "route-not-found");
   } finally {
     await new Promise((resolve) => hubServer.close(resolve));
     await ingress.close();

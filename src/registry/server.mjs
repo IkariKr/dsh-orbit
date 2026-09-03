@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
 import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
-import { evaluateRouteEligibility, isValidOriginFormTarget, parseRouteAuthority, proxyHttpRequest } from "./route-proxy.mjs";
+import { evaluateRouteEligibility, getSelectorReturnUrl, isRouteDomainHost, isValidOriginFormTarget, parseRouteAuthority, proxyHttpRequest } from "./route-proxy.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -205,9 +205,14 @@ export function createHubServer({ registry, options = {} }) {
       // Check 5-condition eligibility
       const eligibility = evaluateRouteEligibility(registry, routeTargetParsed.nodeId);
       if (!eligibility.eligible) {
+        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, registry.trustedScheme || "https");
         response.writeHead(503, { "content-type": "application/json" });
         response.end(JSON.stringify({
-          error: { code: "node-unavailable", message: "Selected node is unavailable" },
+          error: {
+            code: "node-unavailable",
+            message: "Selected node is unavailable",
+            selectorUrl,
+          },
         }));
         return;
       }
@@ -218,9 +223,23 @@ export function createHubServer({ registry, options = {} }) {
         res: response,
         snapshot: eligibility.snapshot,
         routeAuthority: routeTargetParsed.routeAuthority,
+        configuredRouteDomain: registry.routeDomain,
+        trustedScheme: registry.trustedScheme || "https",
         caCertificates: registry.caCertificates,
         nowMs: registry.now().getTime(),
       });
+      return;
+    }
+
+    // Defense-in-depth: If the incoming Host targets the wildcard routeDomain
+    // (e.g. foo.stage3-test.example, invalid-authority.dsh.example.com)
+    // but failed parseRouteAuthority (not a valid deterministic n-<hex> authority),
+    // deny immediately fail-closed. Do NOT fall through to Registry /api/v1/* or /hub/* !
+    if (registry.routeDomain && isRouteDomainHost(hostHeader, registry.routeDomain)) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "route-not-found", message: "invalid or unrecognized node route authority" },
+      }));
       return;
     }
 
