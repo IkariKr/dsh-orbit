@@ -67,6 +67,7 @@ runbook at [`docs/sop/v0.3-node-enrollment-sop.md`](sop/v0.3-node-enrollment-sop
 - Do not accept client-supplied assertion or principal headers.
 - Keep the Hub loopback-only and keep machine ingress private.
 - Keep trusted certificate validation enabled.
+- For Stage 3 public node routing (`*.routeDomain`), terminate wildcard TLS at the outer gateway, preserve canonical `Host`, strip outer gateway credentials, and deny `/api/v1/*` machine surface.
 
 The example Registry Compose file is
 [`docker-registry/compose.example.yaml`](../docker-registry/compose.example.yaml).

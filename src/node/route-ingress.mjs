@@ -7,7 +7,7 @@ import https from "node:https";
 import net from "node:net";
 import { URL } from "node:url";
 import { RouteNonceCache, verifyRouteRequest } from "../registry/route-auth.mjs";
-import { computeRouteAuthority, validateRouteDomain } from "../registry/protocol.mjs";
+import { computeRouteAuthority, isValidOriginFormTarget, validateRouteDomain } from "../registry/protocol.mjs";
 
 export class RouteIngress {
   constructor({
@@ -115,6 +115,12 @@ export class RouteIngress {
       return;
     }
 
+    if (!isValidOriginFormTarget(req.url)) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "invalid-target", message: "only origin-form request-target is supported" } }));
+      return;
+    }
+
     if (this.getNodeState && this.getNodeState() === "revoked") {
       res.writeHead(401, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { code: "revoked", message: "node is revoked" } }));
@@ -204,12 +210,15 @@ export class RouteIngress {
   }
 
   forwardToDsh(req, res, routeAuthority) {
-    let dshUrl;
+    let dshOrigin;
     try {
-      dshUrl = new URL(req.url, this.dshTarget);
+      const base = typeof this.dshTarget === "string" && (this.dshTarget.startsWith("http://") || this.dshTarget.startsWith("https://"))
+        ? this.dshTarget
+        : `http://${this.dshTarget}`;
+      dshOrigin = new URL(base);
     } catch {
-      res.writeHead(400, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: { code: "bad-request", message: "invalid target URL" } }));
+      res.writeHead(500, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { code: "config-error", message: "invalid dshTarget configuration" } }));
       return;
     }
 
@@ -226,13 +235,13 @@ export class RouteIngress {
     // Public authority presented to DSH adapter stays as deterministic route authority
     forwardHeaders.host = routeAuthority;
 
-    const isHttps = dshUrl.protocol === "https:";
+    const isHttps = dshOrigin.protocol === "https:";
     const clientMod = isHttps ? https : http;
 
     const reqOptions = {
-      protocol: dshUrl.protocol,
-      hostname: dshUrl.hostname,
-      port: dshUrl.port || (isHttps ? 443 : 80),
+      protocol: dshOrigin.protocol,
+      hostname: dshOrigin.hostname,
+      port: dshOrigin.port || (isHttps ? 443 : 80),
       path: req.url,
       method: req.method,
       headers: forwardHeaders,

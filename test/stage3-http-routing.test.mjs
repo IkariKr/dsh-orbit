@@ -19,7 +19,7 @@ import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
 import { createHubServer } from "../src/registry/server.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
-import { parseRouteAuthority, evaluateRouteEligibility, sanitizeSetCookieHeader, sanitizeClientHeaders } from "../src/registry/route-proxy.mjs";
+import { parseRouteAuthority, evaluateRouteEligibility, sanitizeSetCookieHeader, sanitizeClientHeaders, isValidOriginFormTarget } from "../src/registry/route-proxy.mjs";
 import { RouteIngress } from "../src/node/route-ingress.mjs";
 import { generateNodeKeyPair, deriveKeyId, randomHex } from "../src/registry/crypto.mjs";
 
@@ -88,6 +88,16 @@ test("Host -> Node Mapping: deterministic format parsed, invalid and wrong domai
   // Positive with port
   const parsedPort = parseRouteAuthority(`${authority}:5445`, `${ROUTE_DOMAIN}:5445`);
   assert.equal(parsedPort.nodeId, nodeId);
+  assert.equal(parsedPort.routeAuthority, `${authority}:5445`);
+
+  // Negative: mismatched port
+  assert.equal(parseRouteAuthority(`${authority}:9999`, `${ROUTE_DOMAIN}:5445`), null);
+  // Negative: omitted port when domain specifies port
+  assert.equal(parseRouteAuthority(authority, `${ROUTE_DOMAIN}:5445`), null);
+  // Negative: unexpected port (:9999, :443, :80) when domain has no port
+  assert.equal(parseRouteAuthority(`${authority}:9999`, ROUTE_DOMAIN), null);
+  assert.equal(parseRouteAuthority(`${authority}:443`, ROUTE_DOMAIN), null);
+  assert.equal(parseRouteAuthority(`${authority}:80`, ROUTE_DOMAIN), null);
 
   // Negative: malformed hex
   assert.equal(parseRouteAuthority(`n-xyz.${ROUTE_DOMAIN}`, ROUTE_DOMAIN), null);
@@ -127,19 +137,37 @@ test("RFC-0010 Eligibility: requires all 5 conditions; fails closed on any failu
   const { nodeId: nodeUnreachable } = createSeededNode(registry, { nodeId: "node_" + "14".repeat(16), reachable: "unreachable" });
   assert.equal(evaluateRouteEligibility(registry, nodeUnreachable).eligible, false);
 
-  // 5. Hub route identity !== active/rotating (e.g. provisioned or revoked) -> ineligible
-  const { nodeId: nodeProvKey } = createSeededNode(registry, { nodeId: "node_" + "15".repeat(16), hubRouteKeyState: "provisioned" });
+  // 5. Hub route identity: only active key satisfies condition; rotating-only fails closed
+  const { nodeId: nodeRotKey } = createSeededNode(registry, { nodeId: "node_" + "15".repeat(16), hubRouteKeyState: "rotating" });
+  assert.equal(evaluateRouteEligibility(registry, nodeRotKey).eligible, false);
+  assert.equal(evaluateRouteEligibility(registry, nodeRotKey).reason, "no-active-hub-route-key");
+  const { nodeId: nodeProvKey } = createSeededNode(registry, { nodeId: "node_" + "16".repeat(16), hubRouteKeyState: "provisioned" });
   assert.equal(evaluateRouteEligibility(registry, nodeProvKey).eligible, false);
-  const { nodeId: nodeRevKey } = createSeededNode(registry, { nodeId: "node_" + "16".repeat(16), hubRouteKeyState: "revoked" });
+  const { nodeId: nodeRevKey } = createSeededNode(registry, { nodeId: "node_" + "17".repeat(16), hubRouteKeyState: "revoked" });
   assert.equal(evaluateRouteEligibility(registry, nodeRevKey).eligible, false);
 
   // 6. web.routes capability absent or stale -> ineligible
-  const { nodeId: nodeNoWebRoutes } = createSeededNode(registry, { nodeId: "node_" + "17".repeat(16), hasWebRoutes: false });
+  const { nodeId: nodeNoWebRoutes } = createSeededNode(registry, { nodeId: "node_" + "18".repeat(16), hasWebRoutes: false });
   assert.equal(evaluateRouteEligibility(registry, nodeNoWebRoutes).eligible, false);
-  const { nodeId: nodeStale } = createSeededNode(registry, { nodeId: "node_" + "18".repeat(16), evidenceFresh: false });
+  const { nodeId: nodeStale } = createSeededNode(registry, { nodeId: "node_" + "19".repeat(16), evidenceFresh: false });
   assert.equal(evaluateRouteEligibility(registry, nodeStale).eligible, false);
 
   registry.close();
+});
+
+test("Origin-Form Target Validation: origin-form accepted, scheme-relative and absolute URIs rejected", () => {
+  assert.equal(isValidOriginFormTarget("/api/v1/workspaces"), true);
+  assert.equal(isValidOriginFormTarget("/api/v1/workspaces?a=1%20b&x=%2F"), true);
+  assert.equal(isValidOriginFormTarget("/path?redirect=https://example.com"), true);
+
+  // Negative SSRF attempts: scheme-relative, absolute URI, backslash
+  assert.equal(isValidOriginFormTarget("//127.0.0.1:6553/evil?x=1"), false);
+  assert.equal(isValidOriginFormTarget("http://127.0.0.1:6554/evil?x=2"), false);
+  assert.equal(isValidOriginFormTarget("https://evil.com/"), false);
+  assert.equal(isValidOriginFormTarget("/\\evil"), false);
+  assert.equal(isValidOriginFormTarget("api/v1"), false);
+  assert.equal(isValidOriginFormTarget(""), false);
+  assert.equal(isValidOriginFormTarget(null), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -189,7 +217,36 @@ test("Security Boundary: client headers sanitized, proofs stripped, cookies made
 // 4. End-to-End HTTP Proxying, Streaming & Exact RAW_TARGET
 // ---------------------------------------------------------------------------
 
-test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, status/body transparency, WebSocket denial", async () => {
+function makeHttpRequest({ hostname = "127.0.0.1", port, path = "/", method = "GET", headers = {}, body = null }) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname,
+      port,
+      path,
+      method,
+      headers,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        const rawBody = Buffer.concat(chunks);
+        resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          text: async () => rawBody.toString("utf8"),
+          json: async () => JSON.parse(rawBody.toString("utf8")),
+        });
+      });
+    });
+    req.on("error", reject);
+    if (body) {
+      req.write(body);
+    }
+    req.end();
+  });
+}
+
+test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canonical Host, WebSocket denial", async () => {
   let receivedDshRequest = null;
   let receivedDshBody = "";
 
@@ -249,15 +306,16 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, status/body transpa
   const hubPort = hubServer.address().port;
 
   try {
-    // Test Case A: Exact RAW_TARGET & Streaming POST with complex query string
+    // Test Case A1: Canonical Host routing (no XFH needed), exact RAW_TARGET & Streaming POST
     const rawTarget = "/api/v1/workspaces?a=1%20b&x=%2F&nested=val%2Bplus";
     const postPayload = JSON.stringify({ message: "Hello streaming world", largeArray: new Array(100).fill("data") });
 
-    const clientRes = await fetch(`http://127.0.0.1:${hubPort}${rawTarget}`, {
+    const clientRes = await makeHttpRequest({
+      port: hubPort,
+      path: rawTarget,
       method: "POST",
       headers: {
         host: authority,
-        "x-forwarded-host": authority,
         "content-type": "application/json",
         cookie: "dsh_session=active",
         "x-orbit-route-signature": "browser-forged-signature-must-be-stripped",
@@ -265,17 +323,14 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, status/body transpa
       body: postPayload,
     });
 
-    if (clientRes.status !== 201) {
-      console.log("CLIENT RES STATUS:", clientRes.status, await clientRes.text());
-    }
-
     assert.equal(clientRes.status, 201);
-    assert.equal(clientRes.headers.get("x-downstream-server"), "dsh-node-adapter");
+    assert.equal(clientRes.headers["x-downstream-server"], "dsh-node-adapter");
 
     // Cookie isolation verified on browser response
-    const setCookieResp = clientRes.headers.get("set-cookie");
-    assert.ok(setCookieResp.includes("session_dsh=token456"));
-    assert.equal(setCookieResp.toLowerCase().includes("domain="), false);
+    const setCookieResp = clientRes.headers["set-cookie"];
+    const cookieHeaderVal = Array.isArray(setCookieResp) ? setCookieResp.join("; ") : setCookieResp;
+    assert.ok(cookieHeaderVal.includes("session_dsh=token456"));
+    assert.equal(cookieHeaderVal.toLowerCase().includes("domain="), false);
 
     const bodyResp = await clientRes.json();
     assert.equal(bodyResp.status, "created");
@@ -289,31 +344,59 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, status/body transpa
     assert.equal(typeof receivedDshRequest.headers["x-orbit-route-signature"], "undefined");
     assert.equal(typeof receivedDshRequest.headers["x-orbit-route-key"], "undefined");
 
+    // Test Case A2: Conflicting Host and X-Forwarded-Host fails closed with 400
+    const conflictRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/api/v1/workspaces",
+      method: "GET",
+      headers: {
+        host: authority,
+        "x-forwarded-host": `n-${"99".repeat(16)}.${ROUTE_DOMAIN}`,
+      },
+    });
+    assert.equal(conflictRes.status, 400);
+    const conflictBody = await conflictRes.json();
+    assert.equal(conflictBody.error.code, "conflicting-host-headers");
+
+    // Test Case A3: Scheme-relative and absolute URIs (SSRF attempts) rejected fail-closed with 400
+    const ssrfRelativeRes = await makeHttpRequest({
+      port: hubPort,
+      path: "//127.0.0.1:6553/evil?x=1",
+      headers: { host: authority },
+    });
+    assert.equal(ssrfRelativeRes.status, 400);
+    const ssrfRelativeBody = await ssrfRelativeRes.json();
+    assert.equal(ssrfRelativeBody.error.code, "invalid-target");
+
+    const ssrfAbsoluteRes = await makeHttpRequest({
+      port: hubPort,
+      path: "http://127.0.0.1:6554/evil?x=2",
+      headers: { host: authority },
+    });
+    assert.equal(ssrfAbsoluteRes.status, 400);
+    const ssrfAbsoluteBody = await ssrfAbsoluteRes.json();
+    assert.equal(ssrfAbsoluteBody.error.code, "invalid-target");
+
+    // Test Case A4: Node RouteIngress directly rejects scheme-relative and absolute URIs
+    const ingressSsrfRes = await makeHttpRequest({
+      port: ingressPort,
+      path: "//127.0.0.1:6553/evil",
+      headers: { host: authority },
+    });
+    assert.equal(ingressSsrfRes.status, 400);
+    const ingressSsrfBody = await ingressSsrfRes.json();
+    assert.equal(ingressSsrfBody.error.code, "invalid-target");
+
     // Test Case B: WebSocket upgrade fails closed with 400
-    const wsRes = await new Promise((resolve, reject) => {
-      const req = http.request({
-        hostname: "127.0.0.1",
-        port: hubPort,
-        path: "/ws",
-        method: "GET",
-        headers: {
-          host: authority,
-          "x-forwarded-host": authority,
-          upgrade: "websocket",
-          connection: "Upgrade",
-        },
-      }, (res) => {
-        const chunks = [];
-        res.on("data", (c) => chunks.push(c));
-        res.on("end", () => {
-          resolve({
-            status: res.statusCode,
-            json: async () => JSON.parse(Buffer.concat(chunks).toString("utf8")),
-          });
-        });
-      });
-      req.on("error", reject);
-      req.end();
+    const wsRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/ws",
+      method: "GET",
+      headers: {
+        host: authority,
+        upgrade: "websocket",
+        connection: "Upgrade",
+      },
     });
     assert.equal(wsRes.status, 400);
     const wsBody = await wsRes.json();
@@ -324,12 +407,11 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, status/body transpa
     registry.recordProbeResult(nodeId, false, "injected-failure");
     registry.recordProbeResult(nodeId, false, "injected-failure"); // reachable -> unreachable
 
-    const unavailRes = await fetch(`http://127.0.0.1:${hubPort}/api/v1/workspaces`, {
+    const unavailRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/api/v1/workspaces",
       method: "GET",
-      headers: {
-        host: authority,
-        "x-forwarded-host": authority,
-      },
+      headers: { host: authority },
     });
     assert.equal(unavailRes.status, 503);
     const unavailBody = await unavailRes.json();
@@ -397,33 +479,40 @@ test("HTTP Proxying: downstream status codes (401, 404, 500) preserved without f
   try {
     // 1. Status 401 transparently returned
     downstreamStatus = 401;
-    const res401 = await fetch(`http://127.0.0.1:${hubPort}/api/v1/auth`, {
-      headers: { host: authority, "x-forwarded-host": authority },
+    const res401 = await makeHttpRequest({
+      port: hubPort,
+      path: "/api/v1/auth",
+      headers: { host: authority },
     });
     assert.equal(res401.status, 401);
 
     // 2. Status 404 transparently returned
     downstreamStatus = 404;
-    const res404 = await fetch(`http://127.0.0.1:${hubPort}/api/v1/nonexistent`, {
-      headers: { host: authority, "x-forwarded-host": authority },
+    const res404 = await makeHttpRequest({
+      port: hubPort,
+      path: "/api/v1/nonexistent",
+      headers: { host: authority },
     });
     assert.equal(res404.status, 404);
 
     // 3. Status 500 transparently returned
     downstreamStatus = 500;
-    const res500 = await fetch(`http://127.0.0.1:${hubPort}/api/v1/error`, {
-      headers: { host: authority, "x-forwarded-host": authority },
+    const res500 = await makeHttpRequest({
+      port: hubPort,
+      path: "/api/v1/error",
+      headers: { host: authority },
     });
     assert.equal(res500.status, 500);
 
     // 4. Large upload streaming (e.g. 500 KiB payload streamed without whole-body buffering)
     downstreamStatus = 200;
     const largeBuffer = Buffer.alloc(512 * 1024, "x");
-    const resLarge = await fetch(`http://127.0.0.1:${hubPort}/upload`, {
+    const resLarge = await makeHttpRequest({
+      port: hubPort,
+      path: "/upload",
       method: "POST",
       headers: {
         host: authority,
-        "x-forwarded-host": authority,
         "content-type": "application/octet-stream",
       },
       body: largeBuffer,

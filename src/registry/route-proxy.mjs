@@ -8,28 +8,45 @@ import https from "node:https";
 import tls from "node:tls";
 import { URL } from "node:url";
 import { randomHex } from "./crypto.mjs";
-import { computeRouteAuthority, validateRouteDomain } from "./protocol.mjs";
+import { computeRouteAuthority, isValidOriginFormTarget, validateRouteDomain } from "./protocol.mjs";
 import { signRouteRequest } from "./route-auth.mjs";
 import { extendDefaultCaCertificates } from "../tls-trust.mjs";
 
+export { isValidOriginFormTarget };
+
 const ROUTE_HOST_PATTERN = /^n-([0-9a-f]{32})\.(.+)$/i;
 
-// Parse incoming Host header into { nodeId, routeAuthority } against configured routeDomain
+// Parse incoming Host header into { nodeId, routeAuthority } against configured routeDomain.
+// Strict exact port matching:
+// - If configuredRouteDomain has a port (e.g. "dsh.example.com:8443"), incoming host MUST carry the exact same port.
+// - If configuredRouteDomain has NO port (e.g. "dsh.example.com"), incoming host MUST NOT carry any port.
+// Any port mismatch returns null fail-closed.
 export function parseRouteAuthority(hostHeader, configuredRouteDomain) {
   if (typeof hostHeader !== "string" || !hostHeader) return null;
   const cleanHost = hostHeader.trim().toLowerCase();
-  // Strip port if present for domain matching, but preserve port in authority if original carried it
-  const hostWithoutPort = cleanHost.replace(/:\d+$/, "");
   const cleanDomain = validateRouteDomain(configuredRouteDomain);
-  const domainWithoutPort = cleanDomain.replace(/:\d+$/, "");
 
-  const match = hostWithoutPort.match(ROUTE_HOST_PATTERN);
+  const [hostHostname, hostPort = null] = cleanHost.split(":");
+  const [domainHostname, domainPort = null] = cleanDomain.split(":");
+
+  if (domainPort) {
+    if (hostPort !== domainPort) {
+      return null;
+    }
+  } else {
+    // If no port configured on domain, incoming host must NOT carry any explicit port
+    if (hostPort !== null) {
+      return null;
+    }
+  }
+
+  const match = hostHostname.match(ROUTE_HOST_PATTERN);
   if (!match) return null;
 
   const hex = match[1].toLowerCase();
   const domainPart = match[2];
 
-  if (domainPart !== domainWithoutPort) {
+  if (domainPart !== domainHostname) {
     return null;
   }
 
@@ -60,7 +77,7 @@ export function evaluateRouteEligibility(registry, nodeId) {
   }
 
   const activeKey = registry.getActiveHubRouteKey(nodeId);
-  if (!activeKey || (activeKey.state !== "active" && activeKey.state !== "rotating")) {
+  if (!activeKey || activeKey.state !== "active") {
     return { eligible: false, reason: "no-active-hub-route-key" };
   }
 
@@ -153,6 +170,14 @@ export function proxyHttpRequest({
 
   // RFC-0010 D5: exact rawTarget without decode, re-encode, or query modification
   const rawTarget = req.url;
+  if (!isValidOriginFormTarget(rawTarget)) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      error: { code: "invalid-target", message: "only origin-form request-target is supported" },
+    }));
+    return;
+  }
+
   const method = req.method;
 
   const nonce = randomHex(16);
@@ -168,7 +193,19 @@ export function proxyHttpRequest({
   });
 
   const sanitizedHeaders = sanitizeClientHeaders(req.headers);
-  const targetUrl = new URL(rawTarget, routeTargetOrigin);
+
+  // Connection destination ALWAYS comes from operator-approved routeTargetOrigin.
+  // rawTarget is never used to determine connection destination.
+  let originUrl;
+  try {
+    originUrl = new URL(routeTargetOrigin);
+  } catch {
+    res.writeHead(503, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      error: { code: "invalid-route-target", message: "persisted route target origin is invalid" },
+    }));
+    return;
+  }
 
   const forwardHeaders = {
     ...sanitizedHeaders,
@@ -177,17 +214,16 @@ export function proxyHttpRequest({
     "x-orbit-route-authority": routeAuthority,
   };
 
-  const isHttps = targetUrl.protocol === "https:";
+  const isHttps = originUrl.protocol === "https:";
   const clientMod = isHttps ? https : http;
 
   // The route target origin identifies where the Hub connects to the Node's route ingress.
-  // When forwardHeaders.host is set to routeAuthority (the public browser-facing Host),
-  // Node.js TLS verification will by default check the certificate SAN against headers.host unless servername is explicit.
-  // Explicitly set servername to targetUrl.hostname so TLS verifies against the actual route target host/SAN.
+  // Host header is set to routeAuthority, and servername is explicitly set to originUrl.hostname
+  // so TLS verifies against the actual route target origin SAN.
   const reqOptions = {
-    protocol: targetUrl.protocol,
-    hostname: targetUrl.hostname,
-    port: targetUrl.port || (isHttps ? 443 : 80),
+    protocol: originUrl.protocol,
+    hostname: originUrl.hostname,
+    port: originUrl.port || (isHttps ? 443 : 80),
     path: rawTarget,
     method,
     headers: forwardHeaders,
@@ -195,7 +231,7 @@ export function proxyHttpRequest({
   };
 
   if (isHttps) {
-    reqOptions.servername = targetUrl.hostname;
+    reqOptions.servername = originUrl.hostname;
     if (caCertificates) {
       reqOptions.ca = extendDefaultCaCertificates(caCertificates);
     }

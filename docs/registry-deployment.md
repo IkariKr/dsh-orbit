@@ -127,6 +127,17 @@ Review Gate B is **approved**. Stage 7 is complete and accepted; see
 operator-grade evidence. Stage 8 remains at its final-review stop point; see
 `docs/release-attestations/v0.3.0-rc.1.md`.
 
+## Stage 3 Wildcard route authority gateway
+
+RFC-0010 defines deterministic public node routing via `n-<nodeId-hex>.<routeDomain>`.
+The gateway architecture requires:
+
+1. **Wildcard DNS and TLS Termination**: The outer gateway terminates wildcard TLS for `*.<routeDomain>` (e.g., `*.dsh.example.local` in production or `*.stage3-test.example` for testing/rehearsal). The production domain `dsh.ikarikore.top` remains untouched until production release.
+2. **Canonical Host Preservation**: The gateway forwards requests to the Hub's loopback listener preserving the exact canonical `Host` header. The Hub routes on `Host` only; if an incoming request carries conflicting `Host` and `X-Forwarded-Host` headers, it fails closed with HTTP 400.
+3. **Gateway Credential Stripping**: Any outer gateway authentication credentials (such as gateway Basic Auth or gateway headers) are consumed and stripped at the gateway boundary so they never reach the Hub, Node RouteIngress, or DSH.
+4. **Opaque DSH Route Namespace**: The wildcard node authority forwards all ordinary HTTP request paths opaquely to the downstream node's DSH adapter without blanket path interference. Orbit's private machine surface (`/api/v1/*`) remains restricted to the loopback listener and private registration/selector authority.
+5. **Fail-closed Routing and Isolation**: Requests targeting an unroutable node fail closed with generic HTTP 503 (`Selected node is unavailable`). Upstream `Set-Cookie` headers have any `Domain=` attribute stripped to ensure strict host-only cookie isolation to the specific public node authority.
+
 ## Stage 8 stop point
 
 The release candidate adds no feature work and has not been tagged, published,

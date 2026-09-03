@@ -130,6 +130,21 @@ export function computeRouteAuthority(nodeId, routeDomain = DEFAULT_ROUTE_DOMAIN
   return `n-${hex}.${cleanDomain}`;
 }
 
+// RFC 9112 origin-form target validation:
+// Must begin with a single "/" and must not begin with "//" (scheme-relative)
+// or contain scheme "://" or backslash before the query component.
+export function isValidOriginFormTarget(target) {
+  if (typeof target !== "string" || !target.startsWith("/") || target.startsWith("//")) {
+    return false;
+  }
+  const qIdx = target.indexOf("?");
+  const pathOnly = qIdx === -1 ? target : target.slice(0, qIdx);
+  if (pathOnly.startsWith("//") || pathOnly.includes("://") || pathOnly.includes("\\")) {
+    return false;
+  }
+  return true;
+}
+
 export function requireHex(value, pattern, label) {
   if (typeof value !== "string" || !pattern.test(value)) {
     return new Error(`registry wire contract: ${label} must be ${pattern} (got ${JSON.stringify(value)})`);

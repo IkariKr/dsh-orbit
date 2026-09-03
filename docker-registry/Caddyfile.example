@@ -57,3 +57,17 @@ registration.example.invalid {
 
 # Generate the bcrypt hash with:
 #   caddy hash-password --plaintext '<gateway operator password>'
+
+# Wildcard public route authority (RFC-0010, Stage 3).
+# Terminates public wildcard TLS for *.dsh.example.local (or your configured route domain),
+# preserves canonical Host, strips outer gateway credentials, and transparently reverse proxies
+# all requests to the Hub loopback listener. The Hub routes opaquely based on deterministic Host.
+# Note: machine surface protection lives on the registration/selector authority above;
+# wildcard node authorities forward all ordinary HTTP paths to the downstream DSH adapter.
+*.dsh.example.local {
+    reverse_proxy 127.0.0.1:5445 {
+        header_up Host {host}
+        header_up -Authorization
+        header_up -X-Gateway-Auth
+    }
+}
