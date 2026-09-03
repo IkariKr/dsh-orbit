@@ -80,7 +80,7 @@ function generateWildcardCertificate(dir) {
         "-subj",
         `/CN=*.${REHEARSAL_DOMAIN}`,
         "-addext",
-        `subjectAltName=DNS:*.${REHEARSAL_DOMAIN},DNS:${REGISTRATION_AUTHORITY},IP:127.0.0.1`,
+        `subjectAltName=DNS:*.${REHEARSAL_DOMAIN},DNS:${REHEARSAL_DOMAIN},DNS:${REGISTRATION_AUTHORITY},IP:127.0.0.1`,
       ],
       { env: { ...process.env, MSYS_NO_PATHCONV: "1" } },
       (error) => (error ? reject(error) : resolve({ keyPath, certPath })),
@@ -95,9 +95,21 @@ function startWildcardGateway({ keyPath, certPath, hubPort }) {
 
     const server = https.createServer({ key, cert }, (req, res) => {
       const incomingHost = req.headers.host || "";
-      const hostWithoutPort = incomingHost.toLowerCase().split(":")[0];
+      const hostWithoutPort = incomingHost.toLowerCase().split(":")[0].replace(/\.$/, "");
 
-      // Branch 1: Registration / selector authority
+      // Defense-in-depth: gateway only routes hosts belonging to REHEARSAL_DOMAIN
+      // Rejects unrelated Host headers (e.g. valid SNI but Host: evil.attacker.example)
+      const isRehearsalHost = hostWithoutPort === REHEARSAL_DOMAIN ||
+        hostWithoutPort === REGISTRATION_AUTHORITY ||
+        hostWithoutPort.endsWith(`.${REHEARSAL_DOMAIN}`);
+
+      if (!isRehearsalHost) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { code: "unrelated-host-denied", message: "gateway does not route foreign host" } }));
+        return;
+      }
+
+      // Branch 1: Registration authority
       if (hostWithoutPort === REGISTRATION_AUTHORITY) {
         // Machine API surface (/api/v1/*) is private and must never be exposed publicly
         if (req.url.startsWith("/api/v1/")) {
@@ -110,7 +122,13 @@ function startWildcardGateway({ keyPath, certPath, hubPort }) {
         return;
       }
 
-      // Branch 2: Wildcard Node route authority (*.stage3-test.example)
+      // Branch 2: Selector apex authority (https://stage3-test.example/)
+      if (hostWithoutPort === REHEARSAL_DOMAIN) {
+        forwardToHub(req, res, hubPort, incomingHost);
+        return;
+      }
+
+      // Branch 3: Wildcard Node route authority (*.stage3-test.example)
       // Enforce the gateway authentication gate:
       // Validates outer gateway credential (X-Gateway-Auth).
       // Missing or wrong credential fails closed with HTTP 401.
@@ -643,6 +661,49 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
   }
   assert.equal(wrongSanCaught, true);
   console.log(`[Evidence] Negative test passed: Non-matching SAN rejected fail-closed during TLS handshake`);
+
+  // Test 4.6: Valid SNI (*.stage3-test.example) with unrelated Host (evil.attacker.example) denied by gateway
+  const foreignHostRes = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: "evil.attacker.example",
+    path: "/",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+    caCert: wildcardCaCert,
+    servername: `n-${"aa".repeat(16)}.${REHEARSAL_DOMAIN}`,
+  });
+  assert.equal(foreignHostRes.status, 400);
+  const foreignHostBody = await foreignHostRes.json();
+  assert.equal(foreignHostBody.error.code, "unrelated-host-denied");
+  console.log(`[Evidence] Negative test passed: Valid SNI + foreign Host denied by gateway`);
+
+  // Test 4.7: FQDN trailing-dot attack on invalid wildcard host (foo.stage3-test.example.) fails closed with 404
+  const trailingDotWildcardRes = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: `foo.${REHEARSAL_DOMAIN}.`,
+    path: "/api/v1/enroll",
+    method: "POST",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+    caCert: wildcardCaCert,
+    servername: `foo.${REHEARSAL_DOMAIN}`,
+  });
+  assert.equal(trailingDotWildcardRes.status, 404);
+  const trailingDotWildcardBody = await trailingDotWildcardRes.json();
+  assert.equal(trailingDotWildcardBody.error.code, "route-not-found");
+  console.log(`[Evidence] Negative test passed: Trailing-dot wildcard host 'foo.stage3-test.example.' fails closed with 404`);
+
+  // Test 4.8: Selector apex landing accessible over HTTPS gateway (separated from wildcard fence)
+  const selectorApexRes = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: REHEARSAL_DOMAIN,
+    path: "/",
+    method: "GET",
+    caCert: wildcardCaCert,
+    servername: REHEARSAL_DOMAIN,
+  });
+  assert.equal(selectorApexRes.status, 200);
+  const selectorHtml = await selectorApexRes.text();
+  assert.ok(selectorHtml.includes("DSH Orbit Endpoint Selector"));
+  console.log(`[Evidence] Selector apex authority (https://${REHEARSAL_DOMAIN}/) verified over gateway`);
 
   console.log("\n=== STEP 5: Enroll and Upload Compatibility Reports for Both Nodes ===");
   const tokenA = await operatorMintToken(hub.baseUrl, opSession);

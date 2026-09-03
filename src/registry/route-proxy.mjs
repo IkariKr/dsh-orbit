@@ -16,20 +16,93 @@ export { isValidOriginFormTarget };
 
 const ROUTE_HOST_PATTERN = /^n-([0-9a-f]{32})\.(.+)$/i;
 
-// Checks whether hostHeader is any subdomain/variant under configuredRouteDomain
-// (e.g. foo.dsh.example.com, invalid.dsh.example.com)
-export function isRouteDomainHost(hostHeader, configuredRouteDomain) {
-  if (typeof hostHeader !== "string" || !hostHeader) return false;
-  const cleanHost = hostHeader.trim().toLowerCase();
+// Unified Host Authority Classification:
+// Evaluates an incoming Host header against the configured routeDomain.
+// Handles FQDN trailing-dot normalization (e.g. "dsh.example.com." -> "dsh.example.com").
+// Returns one of:
+// - { type: "node-route", nodeId, routeAuthority } (valid deterministic n-<32hex> node authority)
+// - { type: "selector-apex", authority } (exact apex selector authority e.g. "dsh.example.com")
+// - { type: "invalid-route-domain", reason } (any other host inside or targeting the routeDomain namespace)
+// - { type: "unrelated", authority } (unrelated host e.g. "127.0.0.1", "localhost", "registration.example")
+export function classifyHostAuthority(hostHeader, configuredRouteDomain) {
+  if (typeof hostHeader !== "string" || !hostHeader) {
+    return { type: "unrelated", authority: null };
+  }
+
+  let cleanHost = hostHeader.trim().toLowerCase();
+  // Strip trailing dot if present before port (e.g. "foo.example.com.:8443" or "foo.example.com.")
+  cleanHost = cleanHost.replace(/\.(:\d+)?$/, "$1");
+
+  // Strict grammar check: no extra colons, no trailing garbage
+  if (!/^[a-z0-9.-]+(:[0-9]+)?$/.test(cleanHost)) {
+    return { type: "invalid-route-domain", reason: "malformed-authority-grammar" };
+  }
+
+  if (!configuredRouteDomain) {
+    return { type: "unrelated", authority: cleanHost };
+  }
+
   let cleanDomain;
   try {
     cleanDomain = validateRouteDomain(configuredRouteDomain);
   } catch {
-    return false;
+    return { type: "unrelated", authority: cleanHost };
   }
-  const hostHostname = cleanHost.split(":")[0];
-  const domainHostname = cleanDomain.split(":")[0];
-  return hostHostname.endsWith(`.${domainHostname}`) || hostHostname === domainHostname;
+
+  const parts = cleanHost.split(":");
+  const hostHostname = parts[0];
+  const hostPort = parts.length === 2 ? parts[1] : null;
+
+  const domainParts = cleanDomain.split(":");
+  const domainHostname = domainParts[0];
+  const domainPort = domainParts.length === 2 ? domainParts[1] : null;
+
+  // Check if host belongs to the configured routeDomain namespace
+  const isApex = hostHostname === domainHostname;
+  const isSubdomain = hostHostname.endsWith(`.${domainHostname}`);
+
+  if (!isApex && !isSubdomain) {
+    return { type: "unrelated", authority: cleanHost };
+  }
+
+  // Exact port matching
+  if (domainPort) {
+    if (hostPort !== domainPort) {
+      return { type: "invalid-route-domain", reason: "port-mismatch" };
+    }
+  } else {
+    if (hostPort !== null) {
+      return { type: "invalid-route-domain", reason: "unexpected-port" };
+    }
+  }
+
+  // Exact apex: this is the selector authority
+  if (isApex) {
+    return { type: "selector-apex", authority: cleanDomain };
+  }
+
+  // Subdomain: check if it matches deterministic node authority
+  const match = hostHostname.match(ROUTE_HOST_PATTERN);
+  if (!match) {
+    return { type: "invalid-route-domain", reason: "non-node-subdomain" };
+  }
+
+  const hex = match[1].toLowerCase();
+  const domainPart = match[2];
+
+  if (domainPart !== domainHostname) {
+    return { type: "invalid-route-domain", reason: "domain-suffix-mismatch" };
+  }
+
+  const nodeId = `node_${hex}`;
+  const routeAuthority = computeRouteAuthority(nodeId, configuredRouteDomain);
+  return { type: "node-route", nodeId, routeAuthority };
+}
+
+// Legacy helper preserved for callers:
+export function isRouteDomainHost(hostHeader, configuredRouteDomain) {
+  const classification = classifyHostAuthority(hostHeader, configuredRouteDomain);
+  return classification.type === "node-route" || classification.type === "selector-apex" || classification.type === "invalid-route-domain";
 }
 
 // Compute selector return link for unavailable 503 responses (RFC-0010 D1, D7)
@@ -40,54 +113,13 @@ export function getSelectorReturnUrl(configuredRouteDomain, trustedScheme = "htt
 }
 
 // Parse incoming Host header into { nodeId, routeAuthority } against configured routeDomain.
-// Strict exact port matching and strict authority grammar:
-// - Host must match either `^[a-z0-9.-]+$` or `^[a-z0-9.-]+:[0-9]+$`
-// - If configuredRouteDomain has a port (e.g. "dsh.example.com:8443"), incoming host MUST carry the exact same port.
-// - If configuredRouteDomain has NO port (e.g. "dsh.example.com"), incoming host MUST NOT carry any port.
-// Any extra colons, non-digit ports, or port mismatches return null fail-closed.
+// Returns { nodeId, routeAuthority } if valid, null otherwise.
 export function parseRouteAuthority(hostHeader, configuredRouteDomain) {
-  if (typeof hostHeader !== "string" || !hostHeader) return null;
-  const cleanHost = hostHeader.trim().toLowerCase();
-
-  // Strict grammar check: no extra colons, no trailing garbage
-  if (!/^[a-z0-9.-]+(:[0-9]+)?$/.test(cleanHost)) {
-    return null;
+  const classification = classifyHostAuthority(hostHeader, configuredRouteDomain);
+  if (classification.type === "node-route") {
+    return { nodeId: classification.nodeId, routeAuthority: classification.routeAuthority };
   }
-
-  const cleanDomain = validateRouteDomain(configuredRouteDomain);
-
-  const parts = cleanHost.split(":");
-  const hostHostname = parts[0];
-  const hostPort = parts.length === 2 ? parts[1] : null;
-
-  const domainParts = cleanDomain.split(":");
-  const domainHostname = domainParts[0];
-  const domainPort = domainParts.length === 2 ? domainParts[1] : null;
-
-  if (domainPort) {
-    if (hostPort !== domainPort) {
-      return null;
-    }
-  } else {
-    // If no port configured on domain, incoming host must NOT carry any explicit port
-    if (hostPort !== null) {
-      return null;
-    }
-  }
-
-  const match = hostHostname.match(ROUTE_HOST_PATTERN);
-  if (!match) return null;
-
-  const hex = match[1].toLowerCase();
-  const domainPart = match[2];
-
-  if (domainPart !== domainHostname) {
-    return null;
-  }
-
-  const nodeId = `node_${hex}`;
-  const routeAuthority = computeRouteAuthority(nodeId, configuredRouteDomain);
-  return { nodeId, routeAuthority };
+  return null;
 }
 
 // Evaluate RFC-0010 5-condition eligibility:

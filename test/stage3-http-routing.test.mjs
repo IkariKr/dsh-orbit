@@ -19,7 +19,7 @@ import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
 import { createHubServer } from "../src/registry/server.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
-import { parseRouteAuthority, evaluateRouteEligibility, sanitizeSetCookieHeader, sanitizeClientHeaders, isValidOriginFormTarget } from "../src/registry/route-proxy.mjs";
+import { parseRouteAuthority, evaluateRouteEligibility, sanitizeSetCookieHeader, sanitizeClientHeaders, isValidOriginFormTarget, classifyHostAuthority } from "../src/registry/route-proxy.mjs";
 import { RouteIngress } from "../src/node/route-ingress.mjs";
 import { generateNodeKeyPair, deriveKeyId, randomHex } from "../src/registry/crypto.mjs";
 
@@ -114,6 +114,16 @@ test("Host -> Node Mapping: deterministic format parsed, invalid and wrong domai
   // Negative: empty / non-string
   assert.equal(parseRouteAuthority("", ROUTE_DOMAIN), null);
   assert.equal(parseRouteAuthority(null, ROUTE_DOMAIN), null);
+
+  // Authority Classifier Unit Assertions
+  assert.equal(classifyHostAuthority(authority, ROUTE_DOMAIN).type, "node-route");
+  assert.equal(classifyHostAuthority(`${authority}.`, ROUTE_DOMAIN).type, "node-route");
+  assert.equal(classifyHostAuthority(ROUTE_DOMAIN, ROUTE_DOMAIN).type, "selector-apex");
+  assert.equal(classifyHostAuthority(`${ROUTE_DOMAIN}.`, ROUTE_DOMAIN).type, "selector-apex");
+  assert.equal(classifyHostAuthority(`foo.${ROUTE_DOMAIN}`, ROUTE_DOMAIN).type, "invalid-route-domain");
+  assert.equal(classifyHostAuthority(`foo.${ROUTE_DOMAIN}.`, ROUTE_DOMAIN).type, "invalid-route-domain");
+  assert.equal(classifyHostAuthority("127.0.0.1", ROUTE_DOMAIN).type, "unrelated");
+  assert.equal(classifyHostAuthority("registration.example", ROUTE_DOMAIN).type, "unrelated");
 });
 
 // ---------------------------------------------------------------------------
@@ -429,7 +439,7 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
     assert.equal(JSON.stringify(unavailBody).includes("hubKey"), false);
 
     // Test Case D: Invalid / unrecognized wildcard route host fails closed before Registry APIs
-    // e.g. foo.dsh.example.com or bad-hex.dsh.example.com
+    // e.g. foo.dsh.example.com, foo.dsh.example.com., dsh.example.com. or bad-hex.dsh.example.com
     const invalidWildcardRes = await makeHttpRequest({
       port: hubPort,
       path: "/api/v1/enroll",
@@ -440,6 +450,26 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
     const invalidWildcardBody = await invalidWildcardRes.json();
     assert.equal(invalidWildcardBody.error.code, "route-not-found");
 
+    // Trailing dot variant: foo.dsh.example.com. must NOT fall through to Registry enroll API
+    const trailingDotRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/api/v1/enroll",
+      method: "POST",
+      headers: { host: `foo.${ROUTE_DOMAIN}.` },
+    });
+    assert.equal(trailingDotRes.status, 404);
+    const trailingDotBody = await trailingDotRes.json();
+    assert.equal(trailingDotBody.error.code, "route-not-found");
+
+    // Trailing dot variant of apex: dsh.example.com. on /api/v1/enroll must NOT fall through
+    const apexTrailingDotRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/api/v1/enroll",
+      method: "POST",
+      headers: { host: `${ROUTE_DOMAIN}.` },
+    });
+    assert.equal(apexTrailingDotRes.status, 404);
+
     const invalidSessionRes = await makeHttpRequest({
       port: hubPort,
       path: "/hub/session",
@@ -449,6 +479,18 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
     assert.equal(invalidSessionRes.status, 404);
     const invalidSessionBody = await invalidSessionRes.json();
     assert.equal(invalidSessionBody.error.code, "route-not-found");
+
+    // Test Case E: Selector apex returns selector landing (separated from wildcard fence)
+    const selectorApexRes = await makeHttpRequest({
+      port: hubPort,
+      path: "/",
+      method: "GET",
+      headers: { host: ROUTE_DOMAIN },
+    });
+    assert.equal(selectorApexRes.status, 200);
+    const selectorHtml = await selectorApexRes.text();
+    assert.ok(selectorHtml.includes("DSH Orbit Endpoint Selector"));
+    assert.ok(selectorHtml.includes(ROUTE_DOMAIN));
   } finally {
     await new Promise((resolve) => hubServer.close(resolve));
     await ingress.close();

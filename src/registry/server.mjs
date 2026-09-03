@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
 import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
-import { evaluateRouteEligibility, getSelectorReturnUrl, isRouteDomainHost, isValidOriginFormTarget, parseRouteAuthority, proxyHttpRequest } from "./route-proxy.mjs";
+import { classifyHostAuthority, evaluateRouteEligibility, getSelectorReturnUrl, isValidOriginFormTarget, proxyHttpRequest } from "./route-proxy.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -176,9 +176,9 @@ export function createHubServer({ registry, options = {} }) {
     }
 
     const hostHeader = rawHost;
-    const routeTargetParsed = registry.routeDomain ? parseRouteAuthority(hostHeader, registry.routeDomain) : null;
+    const hostClass = registry.routeDomain ? classifyHostAuthority(hostHeader, registry.routeDomain) : { type: "unrelated" };
 
-    if (routeTargetParsed) {
+    if (hostClass.type === "node-route") {
       // Validate origin-form request-target
       if (!isValidOriginFormTarget(request.url)) {
         response.writeHead(400, { "content-type": "application/json" });
@@ -203,7 +203,7 @@ export function createHubServer({ registry, options = {} }) {
       }
 
       // Check 5-condition eligibility
-      const eligibility = evaluateRouteEligibility(registry, routeTargetParsed.nodeId);
+      const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
       if (!eligibility.eligible) {
         const selectorUrl = getSelectorReturnUrl(registry.routeDomain, registry.trustedScheme || "https");
         response.writeHead(503, { "content-type": "application/json" });
@@ -222,7 +222,7 @@ export function createHubServer({ registry, options = {} }) {
         req: request,
         res: response,
         snapshot: eligibility.snapshot,
-        routeAuthority: routeTargetParsed.routeAuthority,
+        routeAuthority: hostClass.routeAuthority,
         configuredRouteDomain: registry.routeDomain,
         trustedScheme: registry.trustedScheme || "https",
         caCertificates: registry.caCertificates,
@@ -231,11 +231,32 @@ export function createHubServer({ registry, options = {} }) {
       return;
     }
 
-    // Defense-in-depth: If the incoming Host targets the wildcard routeDomain
-    // (e.g. foo.stage3-test.example, invalid-authority.dsh.example.com)
-    // but failed parseRouteAuthority (not a valid deterministic n-<hex> authority),
-    // deny immediately fail-closed. Do NOT fall through to Registry /api/v1/* or /hub/* !
-    if (registry.routeDomain && isRouteDomainHost(hostHeader, registry.routeDomain)) {
+    // Selector apex authority (RFC-0010 D1, D7):
+    // The exact apex of configured routeDomain (e.g. https://dsh.example.com/)
+    // serves the selector return surface (placeholder until Stage 5 UI).
+    // On the selector apex, only browser root/landing paths are served;
+    // Registry machine surface (/api/v1/*) or operator surface (/hub/*)
+    // are NOT exposed through the public selector apex!
+    if (hostClass.type === "selector-apex") {
+      const path = (request.url ?? "/").split("?")[0];
+      if (path === "/" || path === "/index.html") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        response.end(`<!DOCTYPE html><html><head><title>DSH Selector</title></head><body><h1>DSH Orbit Endpoint Selector</h1><p>Selector authority: ${hostClass.authority}</p></body></html>`);
+        return;
+      }
+      // Any other path on selector apex (especially /api/v1/* or /hub/*) is denied
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "not-found", message: "selector authority does not expose API routes" },
+      }));
+      return;
+    }
+
+    // Defense-in-depth Wildcard Route Fence:
+    // Any other host inside or targeting the routeDomain namespace
+    // (e.g. foo.dsh.example.com, foo.dsh.example.com., dsh.example.com., malformed ports, non-node subdomains)
+    // fails closed immediately with 404. It NEVER falls through to Registry /api/v1/* or /hub/* !
+    if (hostClass.type === "invalid-route-domain") {
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({
         error: { code: "route-not-found", message: "invalid or unrecognized node route authority" },
