@@ -3,6 +3,7 @@
 
 import http from "node:http";
 import https from "node:https";
+import tls from "node:tls";
 
 export function defaultRouteTransport(urlStr, { method = "GET", headers = {}, caCertificates = null, timeoutMs = 5000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -20,7 +21,8 @@ export function defaultRouteTransport(urlStr, { method = "GET", headers = {}, ca
       timeout: timeoutMs,
     };
     if (isHttps && caCertificates) {
-      reqOptions.ca = caCertificates;
+      const extraCas = Array.isArray(caCertificates) ? caCertificates : [caCertificates];
+      reqOptions.ca = [...tls.rootCertificates, ...extraCas];
     }
     const req = client.request(url, reqOptions, (res) => {
       const chunks = [];

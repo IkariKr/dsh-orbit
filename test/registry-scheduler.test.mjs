@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import test from "node:test";
-import { createMaintenanceScheduler } from "../src/registry/scheduler.mjs";
+import { createMaintenanceScheduler, createRouteProbeScheduler } from "../src/registry/scheduler.mjs";
 
 test("the scheduler runs maintenance immediately at startup", () => {
   let calls = 0;
@@ -38,4 +38,31 @@ test("the scheduler ticks at the configured cadence and stops cleanly", async ()
 
 test("the scheduler requires a registry with maintenance()", () => {
   assert.throws(() => createMaintenanceScheduler({}), /maintenance\(\)/);
+});
+
+test("the route probe scheduler runs probeAllNodes immediately and avoids overlap", async () => {
+  let calls = 0;
+  let inFlight = false;
+  let overlapping = false;
+  const registry = {
+    probeAllNodes: async () => {
+      if (inFlight) overlapping = true;
+      inFlight = true;
+      calls += 1;
+      await sleep(15);
+      inFlight = false;
+    },
+  };
+  const scheduler = createRouteProbeScheduler(registry, { cadenceSeconds: 0.02, runImmediately: true });
+  await sleep(60);
+  assert.ok(calls >= 2);
+  assert.equal(overlapping, false);
+  scheduler.stop();
+  const after = calls;
+  await sleep(40);
+  assert.equal(calls, after);
+});
+
+test("the route probe scheduler requires a registry with probeAllNodes()", () => {
+  assert.throws(() => createRouteProbeScheduler({}), /probeAllNodes\(\)/);
 });

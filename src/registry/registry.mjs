@@ -770,6 +770,10 @@ export class Registry {
         .prepare("UPDATE hub_route_keys SET state = 'revoked', revoked_at = ?, revocation_reason = 'node-delete' WHERE node_id = ? AND state != 'revoked'")
         .run(at, nodeId);
       this.routeProbeFailures.delete(nodeId);
+      if (node.reachable !== "unknown") {
+        this.transitionDimension(nodeId, "reachable", "unknown", "node-delete");
+        this.db.prepare("UPDATE nodes SET reachable = 'unknown' WHERE node_id = ?").run(nodeId);
+      }
       this.recordAudit(actor, "hub.nodes.delete", { nodeId, reason, requestId });
       this.recordEvent(nodeId, "state", "active", "tombstoned", "operator-delete");
     });
@@ -969,7 +973,7 @@ export class Registry {
     }
   }
 
-  rotateHubRouteKey({ actor = "operator", nodeId, overlapDays = this.hubRouteOverlapDays }) {
+  rotateHubRouteKey({ actor = "operator", nodeId }) {
     requireString(nodeId, "nodeId");
     requireString(actor, "actor");
     const node = this.getNodeRow(nodeId);
@@ -1001,7 +1005,7 @@ export class Registry {
         nodeId,
         currentKeyId: currentActive.key_id,
         newKeyId,
-        overlapDays,
+        overlapDays: this.hubRouteOverlapDays,
       });
       return { nodeId, currentKeyId: currentActive.key_id, newKeyId, state: "provisioned" };
     });

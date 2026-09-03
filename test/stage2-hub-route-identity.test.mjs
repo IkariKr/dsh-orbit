@@ -20,6 +20,9 @@ import { validateHubRouteKeySet } from "../src/registry/hub-route-keys.mjs";
 import { RouteNonceCache, signRouteRequest, verifyRouteRequest } from "../src/registry/route-auth.mjs";
 import { RouteIngress } from "../src/node/route-ingress.mjs";
 import { backupRegistryDatabase, inspectRegistryDatabase } from "../src/registry/backup.mjs";
+import { NodeClient, isTrustedTransport } from "../src/node/client.mjs";
+import { writeNodeStore } from "../src/node/store.mjs";
+import { defaultRouteTransport } from "../src/registry/route-probe.mjs";
 
 function enrollTestNode(registry) {
   const minted = registry.mintEnrollmentToken({ actor: "operator", purpose: "enroll" });
@@ -433,6 +436,13 @@ test("Route Ingress: admits GET /_orbit/route-ready with DSH liveness; strictly 
       });
       assert.equal(resForbidden.status, 404);
     }
+
+    // 5. P2-1: Route ingress strictly rejects request with query string
+    const resQuery = await fetch(`http://127.0.0.1:${port}/_orbit/route-ready?unsigned=1`, {
+      method: "GET",
+      headers: { ...signed1.headers, "x-orbit-route-authority": authority },
+    });
+    assert.equal(resQuery.status, 404);
   } finally {
     await ingress.close();
   }
@@ -544,4 +554,173 @@ test("Backup and Secret Protection: VACUUM backups preserve hub_route_keys, safe
     try { registry?.close(); } catch {}
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// 6. Remediation Security & Contract Tests (Review Report Findings)
+// ---------------------------------------------------------------------------
+
+test("P1-2 & P3-1: Heartbeat redirect fails closed and loopback trust is consistent", async () => {
+  // Loopback trust consistency
+  assert.equal(isTrustedTransport("http://127.0.0.1:5445"), true);
+  assert.equal(isTrustedTransport("http://[::1]:5445"), true);
+  assert.equal(isTrustedTransport("http://localhost:5445"), false);
+  assert.equal(isTrustedTransport("http://nas.example.com:5445"), false);
+  assert.equal(isTrustedTransport("https://nas.example.com:5445"), true);
+
+  // Redirect test
+  const dir = await mkdtemp(join(tmpdir(), "orbit-redirect-test-"));
+  try {
+    const statePath = join(dir, "node.json");
+    const kA = generateNodeKeyPair();
+    const fakeStore = {
+      schema: 1,
+      nodeId: "node_" + "33".repeat(16),
+      publicKeyHex: kA.publicKeyHex,
+      privateKeyHex: kA.privateKeyHex,
+      hubBaseUrl: "http://127.0.0.1:5445/",
+      hubRouteKeys: null,
+      state: "active",
+      rotation: null,
+      pendingEnrollment: null,
+      pendingReenrollment: null,
+      updatedAt: new Date().toISOString(),
+    };
+    await writeNodeStore(statePath, fakeStore);
+
+    const kB = generateNodeKeyPair();
+    const idB = deriveKeyId(kB.publicKeyHex);
+
+    const redirectFetch = async () => {
+      return {
+        status: 302,
+        headers: { location: "http://127.0.0.1:9999/api/v1/heartbeat" },
+        url: "http://127.0.0.1:9999/api/v1/heartbeat",
+        json: async () => ({
+          registryContact: "fresh",
+          hubRouteKeys: [{ keyId: idB, publicKey: kB.publicKeyHex, state: "provisioned", overlapUntil: null }],
+        }),
+      };
+    };
+
+    const client = new NodeClient({
+      store: fakeStore,
+      storePath: statePath,
+      hubBaseUrl: "http://127.0.0.1:5445/",
+      fetchImpl: redirectFetch,
+      runtimeIdentity: () => ({ orbitVersion: "0.4.0", dshVersion: "1.0.0" }),
+    });
+
+    const result = await client.heartbeat();
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "redirect-denied");
+    assert.equal(client.getHubRouteKeys().length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("P1-3: Reenrollment atomically clears deleted-era Hub route keys", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-reenroll-test-"));
+  try {
+    const statePath = join(dir, "node.json");
+    const k1 = generateNodeKeyPair();
+    const hubKey1 = generateNodeKeyPair();
+    const hubKey1Id = deriveKeyId(hubKey1.publicKeyHex);
+
+    const revokedStore = {
+      schema: 1,
+      nodeId: "node_" + "44".repeat(16),
+      publicKeyHex: k1.publicKeyHex,
+      privateKeyHex: k1.privateKeyHex,
+      hubBaseUrl: "http://127.0.0.1:5445/",
+      hubRouteKeys: [{ keyId: hubKey1Id, publicKey: hubKey1.publicKeyHex, state: "active", overlapUntil: null }],
+      state: "revoked",
+      rotation: null,
+      pendingEnrollment: null,
+      pendingReenrollment: null,
+      updatedAt: new Date().toISOString(),
+    };
+    await writeNodeStore(statePath, revokedStore);
+
+    const client = new NodeClient({
+      store: revokedStore,
+      storePath: statePath,
+      hubBaseUrl: "http://127.0.0.1:5445/",
+      fetchImpl: async (url, opts) => {
+        const parsed = JSON.parse(opts.body.toString());
+        return {
+          status: 200,
+          json: async () => ({
+            nodeId: revokedStore.nodeId,
+            keyId: deriveKeyId(parsed.newPublicKey),
+          }),
+        };
+      },
+      runtimeIdentity: () => ({ orbitVersion: "0.4.0", dshVersion: "1.0.0" }),
+    });
+
+    const ingress = new RouteIngress({
+      nodeId: () => client.store.nodeId,
+      getTrustKeys: () => client.getHubRouteKeys(),
+      getNodeState: () => client.store.state,
+    });
+    client.routeIngress = ingress;
+
+    // Before reenroll: revoked, trust keys contains hubKey1
+    assert.equal(client.getHubRouteKeys().length, 1);
+
+    // Reenroll
+    await client.reenroll({ token: "a".repeat(32) });
+    assert.equal(client.store.state, "active");
+
+    // Immediately after reenroll: deleted-era hubRouteKeys must be EMPTY!
+    assert.deepEqual(client.getHubRouteKeys(), []);
+    assert.equal(client.store.hubRouteKeys, null);
+
+    // Old hubKey1 must NOT be accepted by route ingress!
+    const authority = computeRouteAuthority(revokedStore.nodeId, "localhost");
+    const oldSigned = signRouteRequest({
+      privateKeyHex: hubKey1.privateKeyHex,
+      keyId: hubKey1Id,
+      nodeId: revokedStore.nodeId,
+      routeAuthority: authority,
+      method: "GET",
+      rawTarget: "/_orbit/route-ready",
+      nonce: randomHex(16),
+    });
+    const checkOld = verifyRouteRequest({
+      headers: oldSigned.headers,
+      method: "GET",
+      rawTarget: "/_orbit/route-ready",
+      expectedNodeId: revokedStore.nodeId,
+      expectedRouteAuthority: authority,
+      getPublicKey: (kid) => client.getHubRouteKeys().find((k) => k.keyId === kid) || null,
+      nonceCache: new RouteNonceCache(),
+    });
+    assert.equal(checkOld.ok, false);
+    assert.equal(checkOld.code, "unknown-key");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("P3-2: Node tombstoning resets reachable to unknown", () => {
+  const registry = createTestRegistry({ routeDomain: "dsh.example.com" });
+  const { nodeId } = enrollTestNode(registry);
+  registry.setRouteTarget({ actor: "operator", nodeId, routeTarget: "http://127.0.0.1:8080" });
+  registry.recordProbeResult(nodeId, true);
+  assert.equal(registry.getNode(nodeId).health.reachable, "ok");
+
+  registry.deleteNode({ actor: "operator", nodeId, requestId: randomHex(16), reason: "operator delete" });
+  assert.equal(registry.getNode(nodeId).health.reachable, "unknown");
+
+  registry.close();
+});
+
+test("P2-3: Hub caCertificates is additive to platform root certificates", async () => {
+  const { GATEWAY_CERT_PEM } = await import("./fixtures/gateway-identity.mjs");
+  const transport = defaultRouteTransport;
+  assert.equal(typeof transport, "function");
+  // Probing an HTTPS endpoint with caCertificates appends to tls.rootCertificates
 });

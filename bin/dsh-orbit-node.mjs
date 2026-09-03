@@ -21,9 +21,11 @@
 //   DSH_ORBIT_NODE_DSH_VERSION        DSH version reported to the hub
 //   DSH_ORBIT_NODE_DSH_PROFILE        DSH compatibility profile
 
-import process from "node:process";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import process from "node:process";
 import { NodeClient } from "../src/node/client.mjs";
+import { RouteIngress } from "../src/node/route-ingress.mjs";
 import { assertStateFilePermissions, loadNodeStore, loadNodeStoreAsync } from "../src/node/store.mjs";
 
 function requireEnv(name) {
@@ -40,7 +42,7 @@ function buildClient({ storePath, forbidEnrollmentBinding = false }) {
   const availability = {
     orbitVersion: process.env.DSH_ORBIT_NODE_ORBIT_VERSION ?? "0.3.0",
     orbitRevision: process.env.DSH_ORBIT_NODE_ORBIT_REVISION ?? null,
-    dshVersion: process.env.DSH_ORBIT_NODE_DSH_VERSION ?? "",
+    dshVersion: process.env.DSH_ORBIT_NODE_DSH_VERSION ?? "0.1.1",
     compatibilityProfile: process.env.DSH_ORBIT_NODE_DSH_PROFILE ?? null,
   };
   const store = loadNodeStore(storePath);
@@ -48,10 +50,26 @@ function buildClient({ storePath, forbidEnrollmentBinding = false }) {
   // pendingEnrollment on an unenrolled store (round-2 P2-01) — so the
   // POSIX permission check applies to every existing state file.
   assertStateFilePermissions(storePath);
+
+  let caCertificates = null;
+  if (process.env.DSH_ORBIT_NODE_CA_CERT) {
+    const caTarget = process.env.DSH_ORBIT_NODE_CA_CERT;
+    try {
+      if (existsSync(caTarget)) {
+        caCertificates = [readFileSync(caTarget, "utf8")];
+      } else {
+        caCertificates = [caTarget];
+      }
+    } catch {
+      caCertificates = [caTarget];
+    }
+  }
+
   return new NodeClient({
     store,
     storePath,
     hubBaseUrl,
+    caCertificates,
     runtimeIdentity: () => availability,
     heartbeatCadenceSeconds: Number.parseInt(process.env.DSH_ORBIT_NODE_HEARTBEAT_SECONDS ?? "60", 10),
   });
@@ -143,11 +161,44 @@ switch (command) {
     // The main heartbeat loop timer is REF'd: the daemon must stay alive
     // on its own (P1-04). Only the shutdown watchdog may unref.
     let mainTimer = null;
+    let ingress = null;
     const cadenceMs = client.heartbeatCadenceSeconds * 1000;
+
+    const routeIngressDisabled = process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_DISABLED === "1";
+    const ingressPort = Number.parseInt(process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_PORT ?? "0", 10);
+    const ingressListen = process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN ?? "127.0.0.1";
+    const routeDomain = process.env.DSH_ORBIT_NODE_ROUTE_DOMAIN ?? "localhost";
+    const dshTarget = process.env.DSH_ORBIT_NODE_DSH_TARGET ?? "http://127.0.0.1:5000";
+
+    let tls = null;
+    if (process.env.DSH_ORBIT_NODE_ROUTE_TLS_KEY && process.env.DSH_ORBIT_NODE_ROUTE_TLS_CERT) {
+      const keyVal = process.env.DSH_ORBIT_NODE_ROUTE_TLS_KEY;
+      const certVal = process.env.DSH_ORBIT_NODE_ROUTE_TLS_CERT;
+      const key = existsSync(keyVal) ? readFileSync(keyVal, "utf8") : keyVal;
+      const cert = existsSync(certVal) ? readFileSync(certVal, "utf8") : certVal;
+      tls = { key, cert };
+    }
+
     loadNodeStoreAsync(storePath)
       .then(async (store) => {
         client.store = store;
         await client.recoverAfterRestart();
+
+        if (!routeIngressDisabled) {
+          ingress = new RouteIngress({
+            nodeId: () => client.store.nodeId,
+            routeDomain,
+            dshTarget,
+            tls,
+            getTrustKeys: () => client.getHubRouteKeys(),
+            getNodeState: () => client.status().state,
+          });
+          client.routeIngress = ingress;
+          await ingress.listen(ingressPort, ingressListen);
+          const scheme = tls ? "https" : "http";
+          console.log(`dsh-orbit-node: route ingress listening on ${scheme}://${ingressListen}:${ingress.port} (target ${dshTarget})`);
+        }
+
         console.log(`dsh-orbit-node: running against ${client.status().hubBaseUrl} (cadence ${client.heartbeatCadenceSeconds}s, state ${client.status().state})`);
         const loop = async () => {
           try {
@@ -169,11 +220,16 @@ switch (command) {
       });
 
     let shuttingDown = false;
-    const shutdown = (signal) => {
+    const shutdown = async (signal) => {
       if (shuttingDown) return;
       shuttingDown = true;
       console.log(`dsh-orbit-node: ${signal}, shutting down`);
       if (mainTimer) clearTimeout(mainTimer);
+      if (ingress) {
+        try {
+          await ingress.close();
+        } catch {}
+      }
       setTimeout(() => process.exit(0), 200).unref();
     };
     process.on("SIGINT", () => shutdown("SIGINT"));

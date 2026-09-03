@@ -19,7 +19,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import process from "node:process";
-import { createMaintenanceScheduler } from "../src/registry/scheduler.mjs";
+import { createMaintenanceScheduler, createRouteProbeScheduler } from "../src/registry/scheduler.mjs";
 import { validateHubConfig } from "../src/registry/config.mjs";
 import { openRegistryDatabase, RegistryDatabaseError } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
@@ -33,6 +33,18 @@ const singlePrincipal = process.env.DSH_ORBIT_HUB_OPERATOR_PRINCIPAL ?? null;
 const lanBoundaryOnly = process.env.DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY === "1";
 const trustedExternalScheme = process.env.DSH_ORBIT_HUB_TRUSTED_SCHEME ?? "http";
 const rotationOverlapHours = Number.parseInt(process.env.DSH_ORBIT_HUB_ROTATION_OVERLAP_H ?? "24", 10);
+const routeDomain = process.env.DSH_ORBIT_HUB_ROUTE_DOMAIN ?? "localhost";
+const probeCadenceSeconds = Number.parseInt(process.env.DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS ?? "60", 10);
+
+let caCertificates = null;
+if (process.env.DSH_ORBIT_HUB_CA_CERT) {
+  const caTarget = process.env.DSH_ORBIT_HUB_CA_CERT;
+  if (existsSync(caTarget)) {
+    caCertificates = [readFileSync(caTarget, "utf8")];
+  } else {
+    caCertificates = [caTarget];
+  }
+}
 const acceleratedAging = process.env.DSH_ORBIT_HUB_DRILL_AGING === "1";
 const agingClockPath = process.env.DSH_ORBIT_HUB_DRILL_AGING_CLOCK ?? null;
 if (agingClockPath !== null && !acceleratedAging) {
@@ -103,6 +115,8 @@ try {
 const registry = new Registry({
   db,
   rotationOverlapHours,
+  routeDomain,
+  caCertificates,
   ...(drillContactNow ? { registryContactNow: drillContactNow } : {}),
 });
 const options = { lanBoundaryOnly, trustedExternalScheme };
@@ -125,12 +139,16 @@ server.listen(port, listen, () => {
 // reachable when maintenance actually runs at that cadence.
 const maintenanceScheduler = createMaintenanceScheduler(registry, { tickMs: 30 * 1000 });
 
+// 60s asynchronous route probe scheduler (RFC-0010, SOP Stage 2).
+const routeProbeScheduler = createRouteProbeScheduler(registry, { cadenceSeconds: probeCadenceSeconds });
+
 let shuttingDown = false;
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`dsh-orbit-hub: ${signal}, shutting down`);
   maintenanceScheduler.stop();
+  routeProbeScheduler.stop();
   server.closeAllConnections?.();
   server.close(() => {
     registry.close();

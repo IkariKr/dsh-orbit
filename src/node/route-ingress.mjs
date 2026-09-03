@@ -69,7 +69,7 @@ export class RouteIngress {
             },
             (res) => {
               res.resume();
-              resolve(true);
+              resolve(res.statusCode >= 200 && res.statusCode < 500);
             },
           );
           req.on("error", () => resolve(false));
@@ -109,7 +109,7 @@ export class RouteIngress {
   async handleRequest(req, res) {
     if (!this.enabled) {
       res.writeHead(503, { "content-type": "application/json" });
-      res.end(JSON.stringify({ nodeId: this.nodeId, ready: false, error: "ingress_disabled" }));
+      res.end(JSON.stringify({ ready: false, error: "ingress_disabled" }));
       return;
     }
 
@@ -119,12 +119,17 @@ export class RouteIngress {
       return;
     }
 
-    const fullUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const activeNodeId = typeof this.nodeId === "function" ? this.nodeId() : this.nodeId;
+    if (!activeNodeId) {
+      res.writeHead(503, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ready: false, error: "node_not_enrolled" }));
+      return;
+    }
 
-    // Strict path gating: ONLY /_orbit/route-ready in Stage 2
-    if (fullUrl.pathname !== "/_orbit/route-ready") {
+    // Strict path gating: ONLY exact /_orbit/route-ready in Stage 2 (no query strings, no aliases)
+    if (req.url !== "/_orbit/route-ready") {
       res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: { code: "not-found", message: "route not allowed in stage 2" } }));
+      res.end(JSON.stringify({ error: { code: "not-found", message: "only exact /_orbit/route-ready is allowed in stage 2" } }));
       return;
     }
 
@@ -134,7 +139,7 @@ export class RouteIngress {
       return;
     }
 
-    const expectedRouteAuthority = computeRouteAuthority(this.nodeId, this.routeDomain);
+    const expectedRouteAuthority = computeRouteAuthority(activeNodeId, this.routeDomain);
     const trustKeys = typeof this.getTrustKeys === "function" ? this.getTrustKeys() : [];
     const getPublicKey = (keyId) => trustKeys.find((k) => k.keyId === keyId) || null;
 
@@ -144,8 +149,8 @@ export class RouteIngress {
     const authResult = verifyRouteRequest({
       headers: req.headers,
       method: req.method,
-      rawTarget: "/_orbit/route-ready",
-      expectedNodeId: this.nodeId,
+      rawTarget: req.url,
+      expectedNodeId: activeNodeId,
       expectedRouteAuthority,
       getPublicKey,
       nonceCache: this.nonceCache,
@@ -162,14 +167,14 @@ export class RouteIngress {
       const isAlive = await this.checkDshLiveness();
       if (isAlive) {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ nodeId: this.nodeId, ready: true }));
+        res.end(JSON.stringify({ nodeId: activeNodeId, ready: true }));
       } else {
         res.writeHead(503, { "content-type": "application/json" });
-        res.end(JSON.stringify({ nodeId: this.nodeId, ready: false, error: "dsh_unreachable" }));
+        res.end(JSON.stringify({ nodeId: activeNodeId, ready: false, error: "dsh_unreachable" }));
       }
     } catch {
       res.writeHead(503, { "content-type": "application/json" });
-      res.end(JSON.stringify({ nodeId: this.nodeId, ready: false, error: "dsh_unreachable" }));
+      res.end(JSON.stringify({ nodeId: activeNodeId, ready: false, error: "dsh_unreachable" }));
     }
   }
 

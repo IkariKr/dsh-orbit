@@ -7,6 +7,9 @@
 // lost response + restart is always reconcilable by exact replay or
 // commit detection. 401 revoked NEVER re-enrolls automatically.
 
+import http from "node:http";
+import https from "node:https";
+import tls from "node:tls";
 import { HeartbeatBackoff } from "./backoff.mjs";
 import { deriveKeyId, generateNodeKeyPair, randomHex, sha256Hex, signSigningString } from "../registry/crypto.mjs";
 import { buildSigningString, MACHINE_V1_LABEL, REENROLL_V1_LABEL } from "../registry/protocol.mjs";
@@ -47,12 +50,65 @@ export function isTrustedTransport(hubBaseUrl) {
     const url = new URL(hubBaseUrl);
     if (url.protocol === "https:") return true;
     if (url.protocol === "http:") {
-      return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+      return url.hostname === "127.0.0.1" || url.hostname === "::1" || url.hostname === "[::1]";
     }
     return false;
   } catch {
     return false;
   }
+}
+
+export function defaultNodeMachineFetch(
+  urlStr,
+  { method = "POST", headers = {}, body = null, caCertificates = null, timeoutMs = 10000 } = {},
+) {
+  return new Promise((resolve, reject) => {
+    let url;
+    try {
+      url = new URL(urlStr);
+    } catch (e) {
+      return reject(e);
+    }
+    const isHttps = url.protocol === "https:";
+    const client = isHttps ? https : http;
+    const reqOptions = {
+      method,
+      headers,
+      timeout: timeoutMs,
+    };
+    if (isHttps && caCertificates) {
+      const extraCas = Array.isArray(caCertificates) ? caCertificates : [caCertificates];
+      reqOptions.ca = [...tls.rootCertificates, ...extraCas];
+    }
+    const req = client.request(url, reqOptions, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          status: res.statusCode ?? 0,
+          headers: res.headers,
+          url: urlStr,
+          text: async () => text,
+          json: async () => {
+            try {
+              return JSON.parse(text);
+            } catch {
+              return {};
+            }
+          },
+        });
+      });
+    });
+    req.on("error", (err) => reject(err));
+    req.on("timeout", () => {
+      req.destroy(new Error("machine request timeout"));
+    });
+    if (body) {
+      req.write(body);
+    }
+    req.end();
+  });
 }
 
 function wireError(status, body) {
@@ -100,6 +156,7 @@ export class NodeClient {
     this.lastContactAt = null;
     this.lastError = null;
     this.runtimeState = "idle";
+    this.pendingKeyAck = false;
     // Normal cadence clock, independent of the failure backoff (P1-05):
     // a successful heartbeat schedules the next one at now + cadence;
     // failures schedule retries through backoff.
@@ -204,6 +261,7 @@ export class NodeClient {
         publicKeyHex: pending.publicKeyHex,
         privateKeyHex: pending.privateKeyHex,
         hubBaseUrl: this.baseHubUrl,
+        hubRouteKeys: null,
         state: "active",
         rotation: null,
         pendingEnrollment: null,
@@ -225,11 +283,25 @@ export class NodeClient {
   // ------------------------------------------------------------------
   // Machine transport (RFC-0006 header contract).
 
+  async callFetch(url, options = {}) {
+    if (this.fetchImpl === globalThis.fetch) {
+      return defaultNodeMachineFetch(url, {
+        ...options,
+        caCertificates: this.caCertificates,
+      });
+    }
+    return this.fetchImpl(url, {
+      ...options,
+      redirect: "manual",
+    });
+  }
+
   // Plain JSON transport with the injected fetch (used by enrollment).
   async transport(path, { body, headers = {} }) {
     let response;
+    const targetUrl = `${this.baseHubUrl.replace(/\/$/, "")}${path}`;
     try {
-      response = await this.fetchImpl(`${this.baseHubUrl.replace(/\/$/, "")}${path}`, {
+      response = await this.callFetch(targetUrl, {
         method: "POST",
         headers: { "content-type": "application/json", ...headers },
         body: Buffer.from(JSON.stringify(body)),
@@ -237,6 +309,21 @@ export class NodeClient {
     } catch (error) {
       return { status: 0, body: { error: { code: "network", message: error.message } } };
     }
+
+    if (response.status >= 300 && response.status < 400) {
+      return { status: response.status, body: { error: { code: "redirect-denied", message: "redirects are forbidden" } } };
+    }
+
+    if (response.url) {
+      try {
+        const respUrl = new URL(response.url);
+        const expectedUrl = new URL(this.baseHubUrl);
+        if (respUrl.origin !== expectedUrl.origin) {
+          return { status: 401, body: { error: { code: "authority-mismatch", message: "response URL origin does not match hubBaseUrl" } } };
+        }
+      } catch {}
+    }
+
     const parsed = typeof response.json === "function" ? await response.json().catch(() => ({})) : {};
     return { status: response.status ?? 0, body: parsed };
   }
@@ -303,6 +390,11 @@ export class NodeClient {
   }
 
   scheduleNextHeartbeat() {
+    if (this.pendingKeyAck) {
+      this.pendingKeyAck = false;
+      this.nextHeartbeatAt = this.now().getTime() + 500;
+      return;
+    }
     this.nextHeartbeatAt = this.now().getTime() + this.heartbeatCadenceSeconds * 1000;
   }
 
@@ -354,6 +446,7 @@ export class NodeClient {
             if (currentJson !== incomingJson) {
               await this.persist({ ...this.store, hubRouteKeys: validation.keys });
               this.recordEvent("hub-route-keys-updated", { keyIds: validation.keys.map((k) => k.keyId) });
+              this.pendingKeyAck = true;
             }
           }
         }
@@ -628,7 +721,7 @@ export class NodeClient {
         }),
       );
       try {
-        response = await this.fetchImpl(`${this.baseHubUrl.replace(/\/$/, "")}${REENROLL_PATH}`, {
+        response = await this.callFetch(`${this.baseHubUrl.replace(/\/$/, "")}${REENROLL_PATH}`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -643,6 +736,9 @@ export class NodeClient {
       } catch (error) {
         this.recordEvent("reenroll-failed", { code: "network", message: error.message });
         throw new Error(`re-enrollment outcome unknown (network failure): retry with the same re-enrollment token (${error.message})`);
+      }
+      if (response.status >= 300 && response.status < 400) {
+        throw new Error("re-enrollment denied: redirect-denied (redirects are forbidden)");
       }
       const probed = typeof response.json === "function" ? await response.json().catch(() => ({})) : {};
       const probedStatus = response.status ?? 0;
@@ -675,14 +771,19 @@ export class NodeClient {
       if (body.keyId !== expectedKeyId) {
         throw new Error(`re-enrollment keyId ${JSON.stringify(body.keyId)} does not match the pending public key`);
       }
+      // P1-3: Clear deleted-era Hub route keys immediately upon reenrollment!
       await this.persist({
         ...this.store,
         publicKeyHex: pending.publicKeyHex,
         privateKeyHex: pending.privateKeyHex,
+        hubRouteKeys: null,
         state: "active",
         rotation: null,
         pendingReenrollment: null,
       });
+      if (this.routeIngress) {
+        try { this.routeIngress.enable(); } catch {}
+      }
       this.runtimeState = "running";
       this.recordEvent("reenrolled", { nodeId: body.nodeId, keyId: body.keyId, proofSigner: signerUsed });
       return { nodeId: body.nodeId, keyId: body.keyId };
@@ -786,7 +887,7 @@ export class NodeClient {
     // Reachability only: ANY HTTP response proves the listener is up;
     // a heartbeat would mutate registryContact and is forbidden here.
     try {
-      const response = await this.fetchImpl(`${this.baseHubUrl.replace(/\/$/, "")}/`);
+      const response = await this.callFetch(`${this.baseHubUrl.replace(/\/$/, "")}/`, { method: "GET" });
       add("ok", "hub-probe", `hub listener reachable (HTTP ${response.status ?? "unknown"})`);
     } catch (error) {
       add("fail", "hub-probe", `hub listener unreachable: ${error.message}`);
