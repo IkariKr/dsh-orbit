@@ -7,7 +7,7 @@
 import { chmodSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export class RegistryDatabaseError extends Error {
   constructor(code, message, { cause = null } = {}) {
@@ -100,6 +100,18 @@ const EXPECTED_TABLE_COLUMNS = {
     "route_target_origin",
     "created_at",
     "updated_at",
+  ],
+  hub_route_keys: [
+    "node_id",
+    "key_id",
+    "public_key",
+    "private_key",
+    "state",
+    "created_at",
+    "activated_at",
+    "revoke_after",
+    "revoked_at",
+    "revocation_reason",
   ],
 };
 
@@ -251,6 +263,20 @@ function expectedTableNamesFor(version = SCHEMA_VERSION) {
       "seen_nonces",
     ];
   }
+  if (version === 4) {
+    return [
+      "audit",
+      "browser_sessions",
+      "enrollment_results",
+      "enrollment_tokens",
+      "events",
+      "node_keys",
+      "nodes",
+      "reports",
+      "route_targets",
+      "seen_nonces",
+    ];
+  }
   return Object.keys(EXPECTED_TABLE_COLUMNS).sort();
 }
 
@@ -280,6 +306,9 @@ function canonicalSchemaMetadata(version = SCHEMA_VERSION) {
   const canonical = new DatabaseSync(":memory:");
   try {
     for (const statement of schemaStatements) canonical.exec(statement);
+    if (version < 5) {
+      canonical.exec("DROP TABLE hub_route_keys");
+    }
     if (version < 4) {
       canonical.exec("DROP TABLE route_targets");
       canonical.exec("PRAGMA foreign_keys = OFF");
@@ -319,7 +348,7 @@ function canonicalSchemaMetadata(version = SCHEMA_VERSION) {
     } else if (version === 2) {
       canonical.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
       canonical.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
-    } else if (version !== 3 && version !== SCHEMA_VERSION) {
+    } else if (version !== 3 && version !== 4 && version !== SCHEMA_VERSION) {
       throw new RegistryDatabaseError("malformed-schema", `no canonical schema is defined for version ${version}`);
     }
     return schemaMetadata(canonical, version);
@@ -468,6 +497,21 @@ const upgradeSteps = {
       updated_at TEXT NOT NULL
     )`,
   ],
+  4: [
+    `CREATE TABLE hub_route_keys (
+      node_id TEXT NOT NULL REFERENCES nodes(node_id),
+      key_id TEXT NOT NULL,
+      public_key TEXT NOT NULL,
+      private_key TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('provisioned', 'active', 'rotating', 'revoked')),
+      created_at TEXT NOT NULL,
+      activated_at TEXT,
+      revoke_after TEXT,
+      revoked_at TEXT,
+      revocation_reason TEXT,
+      PRIMARY KEY (node_id, key_id)
+    )`,
+  ],
 };
 
 const schemaStatements = [
@@ -583,6 +627,20 @@ const schemaStatements = [
     route_target_origin TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+  )`,
+  `
+  CREATE TABLE hub_route_keys (
+    node_id TEXT NOT NULL REFERENCES nodes(node_id),
+    key_id TEXT NOT NULL,
+    public_key TEXT NOT NULL,
+    private_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('provisioned', 'active', 'rotating', 'revoked')),
+    created_at TEXT NOT NULL,
+    activated_at TEXT,
+    revoke_after TEXT,
+    revoked_at TEXT,
+    revocation_reason TEXT,
+    PRIMARY KEY (node_id, key_id)
   )`,
   `
   CREATE INDEX idx_seen_nonces_created_at ON seen_nonces (created_at)`,

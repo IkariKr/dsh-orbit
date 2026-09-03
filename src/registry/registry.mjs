@@ -4,16 +4,23 @@
 
 import { createCompatibilityReport } from "../compatibility-report.mjs";
 import { deriveCapabilities, deriveDshHealthy, deriveOrbitCompatible, identityMatches, reportIdentity } from "./capabilities.mjs";
-import { deriveKeyId, randomHex, sha256Hex, signSigningString, verifySigningString } from "./crypto.mjs";
+import { deriveKeyId, generateNodeKeyPair, randomHex, sha256Hex, signSigningString, verifySigningString } from "./crypto.mjs";
 import { validateRouteTargetOrigin } from "./route-target.mjs";
+import { validateHubRouteKeySet } from "./hub-route-keys.mjs";
+import { signRouteRequest } from "./route-auth.mjs";
+import { defaultRouteTransport } from "./route-probe.mjs";
 import {
   AUDIT_RETENTION_MS,
+  DEFAULT_ROUTE_DOMAIN,
   ENROLLMENT_RESULT_RETENTION_MS,
   EVENT_RETENTION_MS,
   EVENT_ROLLUP_AFTER_MS,
   HEARTBEAT_CADENCE_SECONDS_DEFAULT,
   HEARTBEAT_LOST_MS,
   HEARTBEAT_MISSED_BEATS_STALE,
+  HUB_ROUTE_ROTATION_OVERLAP_DAYS_DEFAULT,
+  HUB_ROUTE_ROTATION_OVERLAP_DAYS_MAX,
+  HUB_ROUTE_ROTATION_OVERLAP_DAYS_MIN,
   MACHINE_V1_LABEL,
   NONCE_PATTERN,
   NODE_ID_PATTERN,
@@ -26,6 +33,7 @@ import {
   ROTATION_OVERLAP_HOURS_DEFAULT,
   ROTATION_OVERLAP_HOURS_MAX,
   ROTATION_OVERLAP_HOURS_MIN,
+  ROUTE_PROBE_FAILURE_THRESHOLD,
   SESSION_IDLE_MS,
   SESSION_TTL_MS,
   SIGNATURE_PATTERN,
@@ -35,7 +43,9 @@ import {
   TOKEN_TTL_SECONDS_MAX,
   TOKEN_TTL_SECONDS_MIN,
   buildSigningString,
+  computeRouteAuthority,
   requireHex,
+  validateRouteDomain,
 } from "./protocol.mjs";
 import { nowIso, withTransaction } from "./sqlite.mjs";
 
@@ -93,6 +103,9 @@ export class Registry {
     registryContactNow = null,
     heartbeatCadenceSeconds = HEARTBEAT_CADENCE_SECONDS_DEFAULT,
     rotationOverlapHours = ROTATION_OVERLAP_HOURS_DEFAULT,
+    hubRouteOverlapDays = HUB_ROUTE_ROTATION_OVERLAP_DAYS_DEFAULT,
+    routeDomain = DEFAULT_ROUTE_DOMAIN,
+    caCertificates = null,
   }) {
     this.db = db;
     this.now = now;
@@ -102,6 +115,13 @@ export class Registry {
       throw new Error(`rotation overlap must be within ${ROTATION_OVERLAP_HOURS_MIN}-${ROTATION_OVERLAP_HOURS_MAX} hours`);
     }
     this.rotationOverlapHours = rotationOverlapHours;
+    if (hubRouteOverlapDays < HUB_ROUTE_ROTATION_OVERLAP_DAYS_MIN || hubRouteOverlapDays > HUB_ROUTE_ROTATION_OVERLAP_DAYS_MAX) {
+      throw new Error(`hub route overlap must be within ${HUB_ROUTE_ROTATION_OVERLAP_DAYS_MIN}-${HUB_ROUTE_ROTATION_OVERLAP_DAYS_MAX} days`);
+    }
+    this.hubRouteOverlapDays = hubRouteOverlapDays;
+    this.routeDomain = validateRouteDomain(routeDomain);
+    this.caCertificates = caCertificates;
+    this.routeProbeFailures = new Map();
   }
 
   // ------------------------------------------------------------------
@@ -474,8 +494,11 @@ export class Registry {
   // lastSeen. A report upload never moves registryContact and never
   // clears the contact-lost alert flag (round-2 P1).
   heartbeatAuthenticated({ node, rawBody }) {
-    const runtime = requireIdentityJson(parseJsonBody(rawBody));
+    const body = parseJsonBody(rawBody);
+    const runtime = requireIdentityJson(body);
+    const acceptedHubRouteKeyIds = Array.isArray(body?.acceptedHubRouteKeyIds) ? body.acceptedHubRouteKeyIds : null;
     const nodeId = node.node_id;
+    let hubRouteKeys = [];
     withTransaction(this.db, () => {
       const current = this.getNodeRow(nodeId);
       this.transitionRegistryContact(current, "fresh", "heartbeat");
@@ -493,8 +516,13 @@ export class Registry {
           this.withholdCapabilities(nodeId, "heartbeat");
         }
       }
+      if (acceptedHubRouteKeyIds) {
+        this.acknowledgeHubRouteKeys(nodeId, acceptedHubRouteKeyIds);
+      }
+      this.ensureHubRouteKey(nodeId);
+      hubRouteKeys = this.getHubRouteKeysForNode(nodeId);
     });
-    return { ok: true, registryContact: "fresh", heartbeatCadenceSeconds: this.heartbeatCadenceSeconds };
+    return { ok: true, registryContact: "fresh", heartbeatCadenceSeconds: this.heartbeatCadenceSeconds, hubRouteKeys };
   }
 
   // Active capability withholding (RFC-0009 "withheld until refreshed"
@@ -738,6 +766,10 @@ export class Registry {
       this.db
         .prepare("UPDATE node_keys SET state = 'revoked', revoked_at = ?, revocation_reason = 'node-delete' WHERE node_id = ? AND state = 'active'")
         .run(at, nodeId);
+      this.db
+        .prepare("UPDATE hub_route_keys SET state = 'revoked', revoked_at = ?, revocation_reason = 'node-delete' WHERE node_id = ? AND state != 'revoked'")
+        .run(at, nodeId);
+      this.routeProbeFailures.delete(nodeId);
       this.recordAudit(actor, "hub.nodes.delete", { nodeId, reason, requestId });
       this.recordEvent(nodeId, "state", "active", "tombstoned", "operator-delete");
     });
@@ -803,6 +835,9 @@ export class Registry {
           routeTargetOrigin: origin,
         });
       }
+      this.transitionDimension(nodeId, "reachable", "unknown", "route-target-change");
+      this.db.prepare("UPDATE nodes SET reachable = 'unknown' WHERE node_id = ?").run(nodeId);
+      this.routeProbeFailures.delete(nodeId);
       return {
         nodeId,
         routeTarget: this.getRouteTarget(nodeId),
@@ -826,12 +861,261 @@ export class Registry {
           previousRouteTargetOrigin: existing.origin,
         });
       }
+      this.transitionDimension(nodeId, "reachable", "unknown", "route-target-remove");
+      this.db.prepare("UPDATE nodes SET reachable = 'unknown' WHERE node_id = ?").run(nodeId);
+      this.routeProbeFailures.delete(nodeId);
       return {
         nodeId,
         routeTarget: null,
         removed: existing !== null,
       };
     });
+  }
+
+  // ------------------------------------------------------------------
+  // Hub Route Identity lifecycle (RFC-0008, RFC-0010, SOP Stage 2).
+  // Per-node Ed25519 identity; private keys kept strictly Hub-side.
+  // Lifecycle: provisioned -> active -> rotating -> revoked.
+
+  ensureHubRouteKey(nodeId) {
+    const existing = this.db
+      .prepare(
+        "SELECT * FROM hub_route_keys WHERE node_id = ? AND state != 'revoked' ORDER BY created_at ASC",
+      )
+      .all(nodeId);
+    if (existing.length > 0) {
+      return existing[0];
+    }
+    const { publicKeyHex, privateKeyHex } = generateNodeKeyPair();
+    const keyId = deriveKeyId(publicKeyHex);
+    const at = nowIso(this.now());
+    this.db
+      .prepare(
+        "INSERT INTO hub_route_keys (node_id, key_id, public_key, private_key, state, created_at) VALUES (?, ?, ?, ?, 'provisioned', ?)",
+      )
+      .run(nodeId, keyId, publicKeyHex, privateKeyHex, at);
+    this.recordAudit(`system:${nodeId}`, "hub.route-keys.provision", { nodeId, keyId });
+    return {
+      node_id: nodeId,
+      key_id: keyId,
+      public_key: publicKeyHex,
+      private_key: privateKeyHex,
+      state: "provisioned",
+      created_at: at,
+      activated_at: null,
+      revoke_after: null,
+      revoked_at: null,
+      revocation_reason: null,
+    };
+  }
+
+  getHubRouteKeysForNode(nodeId) {
+    const rows = this.db
+      .prepare(
+        "SELECT key_id, public_key, state, revoke_after FROM hub_route_keys WHERE node_id = ? AND state IN ('provisioned', 'active', 'rotating') ORDER BY created_at ASC",
+      )
+      .all(nodeId);
+    return rows.map((row) => ({
+      keyId: row.key_id,
+      publicKey: row.public_key,
+      state: row.state,
+      overlapUntil: row.revoke_after ?? null,
+    }));
+  }
+
+  getActiveHubRouteKey(nodeId) {
+    return this.db
+      .prepare(
+        "SELECT * FROM hub_route_keys WHERE node_id = ? AND state IN ('active', 'rotating') ORDER BY created_at DESC LIMIT 1",
+      )
+      .get(nodeId);
+  }
+
+  acknowledgeHubRouteKeys(nodeId, acceptedHubRouteKeyIds) {
+    if (!Array.isArray(acceptedHubRouteKeyIds) || acceptedHubRouteKeyIds.length === 0) return;
+    const keys = this.db
+      .prepare(
+        "SELECT * FROM hub_route_keys WHERE node_id = ? AND state != 'revoked' ORDER BY created_at ASC",
+      )
+      .all(nodeId);
+    if (keys.length === 1 && keys[0].state === "provisioned") {
+      if (acceptedHubRouteKeyIds.includes(keys[0].key_id)) {
+        const at = nowIso(this.now());
+        this.db
+          .prepare("UPDATE hub_route_keys SET state = 'active', activated_at = ? WHERE node_id = ? AND key_id = ?")
+          .run(at, nodeId, keys[0].key_id);
+        this.recordAudit(`system:${nodeId}`, "hub.route-keys.activate", { nodeId, keyId: keys[0].key_id });
+      }
+      return;
+    }
+    const activeKey = keys.find((k) => k.state === "active");
+    const provisionedKey = keys.find((k) => k.state === "provisioned");
+    if (activeKey && provisionedKey && acceptedHubRouteKeyIds.includes(provisionedKey.key_id)) {
+      const at = nowIso(this.now());
+      const overlapMs = this.hubRouteOverlapDays * 24 * 60 * 60 * 1000;
+      const revokeAfter = new Date(this.now().getTime() + overlapMs).toISOString();
+      this.db
+        .prepare("UPDATE hub_route_keys SET state = 'active', activated_at = ? WHERE node_id = ? AND key_id = ?")
+        .run(at, nodeId, provisionedKey.key_id);
+      this.db
+        .prepare("UPDATE hub_route_keys SET state = 'rotating', revoke_after = ? WHERE node_id = ? AND key_id = ?")
+        .run(revokeAfter, nodeId, activeKey.key_id);
+      this.recordAudit(`system:${nodeId}`, "hub.route-keys.rotate", {
+        nodeId,
+        activeKeyId: provisionedKey.key_id,
+        rotatingKeyId: activeKey.key_id,
+        overlapUntil: revokeAfter,
+      });
+    }
+  }
+
+  rotateHubRouteKey({ actor = "operator", nodeId, overlapDays = this.hubRouteOverlapDays }) {
+    requireString(nodeId, "nodeId");
+    requireString(actor, "actor");
+    const node = this.getNodeRow(nodeId);
+    if (!node || node.state !== "active") {
+      denied(404, "not-found", "active node required for rotation");
+    }
+    const activeKeys = this.db
+      .prepare(
+        "SELECT * FROM hub_route_keys WHERE node_id = ? AND state != 'revoked' ORDER BY created_at ASC",
+      )
+      .all(nodeId);
+    const currentActive = activeKeys.find((k) => k.state === "active");
+    if (!currentActive) {
+      denied(409, "no-active-route-key", "node has no active Hub route identity to rotate");
+    }
+    if (activeKeys.some((k) => k.state === "provisioned" || k.state === "rotating")) {
+      denied(409, "rotation-in-progress", "rotation is already in progress for this node");
+    }
+    return withTransaction(this.db, () => {
+      const { publicKeyHex, privateKeyHex } = generateNodeKeyPair();
+      const newKeyId = deriveKeyId(publicKeyHex);
+      const at = nowIso(this.now());
+      this.db
+        .prepare(
+          "INSERT INTO hub_route_keys (node_id, key_id, public_key, private_key, state, created_at) VALUES (?, ?, ?, ?, 'provisioned', ?)",
+        )
+        .run(nodeId, newKeyId, publicKeyHex, privateKeyHex, at);
+      this.recordAudit(actor, "hub.route-keys.rotate-intent", {
+        nodeId,
+        currentKeyId: currentActive.key_id,
+        newKeyId,
+        overlapDays,
+      });
+      return { nodeId, currentKeyId: currentActive.key_id, newKeyId, state: "provisioned" };
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Reachability probe (RFC-0009, RFC-0010 D3, SOP Stage 2).
+  // Probes GET /_orbit/route-ready with ORBIT-ROUTE-V1 over verified TLS.
+
+  async probeNode(nodeId, { requestTransport = defaultRouteTransport } = {}) {
+    const node = this.getNodeRow(nodeId);
+    if (!node || node.state !== "active") {
+      return { reachable: "unknown", probed: false, reason: "node-not-active" };
+    }
+    const routeTarget = this.getRouteTarget(nodeId);
+    if (!routeTarget) {
+      this.routeProbeFailures.delete(nodeId);
+      if (node.reachable !== "unknown") {
+        this.transitionDimension(nodeId, "reachable", "unknown", "route-probe");
+        this.db.prepare("UPDATE nodes SET reachable = 'unknown' WHERE node_id = ?").run(nodeId);
+      }
+      return { reachable: "unknown", probed: false, reason: "no-target" };
+    }
+    const activeKey = this.getActiveHubRouteKey(nodeId);
+    if (!activeKey) {
+      this.routeProbeFailures.delete(nodeId);
+      if (node.reachable !== "unknown") {
+        this.transitionDimension(nodeId, "reachable", "unknown", "route-probe");
+        this.db.prepare("UPDATE nodes SET reachable = 'unknown' WHERE node_id = ?").run(nodeId);
+      }
+      return { reachable: "unknown", probed: false, reason: "identity-not-active" };
+    }
+
+    const authority = computeRouteAuthority(nodeId, this.routeDomain);
+    const nowMs = this.now().getTime();
+    const nonce = randomHex(16);
+    const { headers } = signRouteRequest({
+      privateKeyHex: activeKey.private_key,
+      keyId: activeKey.key_id,
+      nodeId,
+      routeAuthority: authority,
+      method: "GET",
+      rawTarget: "/_orbit/route-ready",
+      nowMs,
+      nonce,
+    });
+
+    const probeHeaders = {
+      ...headers,
+      "x-orbit-route-authority": authority,
+    };
+
+    const targetUrl = `${routeTarget.origin}/_orbit/route-ready`;
+    let response;
+    try {
+      response = await requestTransport(targetUrl, {
+        method: "GET",
+        headers: probeHeaders,
+        caCertificates: this.caCertificates,
+        timeoutMs: 5000,
+      });
+    } catch (error) {
+      return this.recordProbeResult(nodeId, false, error.message);
+    }
+
+    if (response.status === 200) {
+      let body;
+      try {
+        body = JSON.parse(response.body);
+      } catch {
+        return this.recordProbeResult(nodeId, false, "malformed-json");
+      }
+      if (body && body.nodeId === nodeId && body.ready === true) {
+        return this.recordProbeResult(nodeId, true);
+      }
+      return this.recordProbeResult(nodeId, false, `ready-false-or-mismatch: ${JSON.stringify(body)}`);
+    }
+
+    return this.recordProbeResult(nodeId, false, `http-${response.status}`);
+  }
+
+  recordProbeResult(nodeId, success, reason = null) {
+    const current = this.getNodeRow(nodeId);
+    if (!current || current.state !== "active") {
+      return { reachable: "unknown", probed: true, ok: false };
+    }
+    if (success) {
+      this.routeProbeFailures.delete(nodeId);
+      if (current.reachable !== "ok") {
+        this.transitionDimension(nodeId, "reachable", "ok", "route-probe");
+        this.db.prepare("UPDATE nodes SET reachable = 'ok' WHERE node_id = ?").run(nodeId);
+      }
+      return { reachable: "ok", probed: true, ok: true };
+    }
+
+    const fails = (this.routeProbeFailures.get(nodeId) ?? 0) + 1;
+    this.routeProbeFailures.set(nodeId, fails);
+    if (fails >= ROUTE_PROBE_FAILURE_THRESHOLD) {
+      if (current.reachable !== "unreachable") {
+        this.transitionDimension(nodeId, "reachable", "unreachable", "route-probe");
+        this.db.prepare("UPDATE nodes SET reachable = 'unreachable' WHERE node_id = ?").run(nodeId);
+      }
+      return { reachable: "unreachable", probed: true, ok: false, failures: fails, reason };
+    }
+    return { reachable: current.reachable, probed: true, ok: false, failures: fails, reason };
+  }
+
+  async probeAllNodes(options) {
+    const activeNodes = this.db.prepare("SELECT node_id FROM nodes WHERE state = 'active'").all();
+    const results = [];
+    for (const { node_id } of activeNodes) {
+      results.push({ nodeId: node_id, ...(await this.probeNode(node_id, options)) });
+    }
+    return results;
   }
 
   listNodes() {
@@ -869,6 +1153,7 @@ export class Registry {
       // malformed alert_flags -> no flags
     }
     const routeTarget = this.getRouteTarget(row.node_id);
+    const hubRouteKeys = this.getHubRouteKeysForNode(row.node_id);
     return {
       nodeId: row.node_id,
       state: row.state,
@@ -876,6 +1161,7 @@ export class Registry {
       tombstonedAt: row.tombstoned_at,
       tombstoneReason: row.tombstone_reason,
       routeTarget,
+      hubRouteKeys,
       health: {
         registryContact: row.registry_contact,
         authenticated: row.authenticated,
@@ -967,6 +1253,25 @@ export class Registry {
         this.db
           .prepare("UPDATE node_keys SET state = 'revoked', revoked_at = ?, revocation_reason = 'rotation-overlap-ended' WHERE node_id = ? AND key_id = ?")
           .run(nowIso(this.now()), row.node_id, row.key_id);
+      }
+
+      // Hub route keys rotation overlap expiry (RFC-0008 rev. 5).
+      const expiredRouteKeys = this.db
+        .prepare(
+          "SELECT node_id, key_id FROM hub_route_keys WHERE state = 'rotating' AND revoke_after IS NOT NULL AND revoke_after <= ?",
+        )
+        .all(nowIso(this.now()));
+      for (const row of expiredRouteKeys) {
+        this.db
+          .prepare(
+            "UPDATE hub_route_keys SET state = 'revoked', revoked_at = ?, revocation_reason = 'rotation-overlap-ended' WHERE node_id = ? AND key_id = ?",
+          )
+          .run(nowIso(this.now()), row.node_id, row.key_id);
+        this.recordAudit(`system:${row.node_id}`, "hub.route-keys.revoke", {
+          nodeId: row.node_id,
+          keyId: row.key_id,
+          reason: "rotation-overlap-ended",
+        });
       }
 
       // Nonce and replay retention (RFC-0006 / RFC-0005 D2).

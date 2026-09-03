@@ -36,6 +36,10 @@ const STATE_TABLES = [
     "SELECT session_id, operator_principal, created_at, expires_at, idle_until, revoked_at, expiry_audited_at FROM browser_sessions ORDER BY session_id",
   ],
   ["route_targets", "SELECT * FROM route_targets ORDER BY node_id"],
+  [
+    "hub_route_keys",
+    "SELECT node_id, key_id, public_key, state, created_at, activated_at, revoke_after, revoked_at, revocation_reason FROM hub_route_keys ORDER BY node_id, key_id",
+  ],
 ];
 
 function requirePath(path, label) {

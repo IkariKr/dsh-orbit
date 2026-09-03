@@ -9,6 +9,7 @@ import { readFileSync, statSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { deriveKeyId, signSigningString, verifySigningString } from "../registry/crypto.mjs";
+import { validateHubRouteKeySet } from "../registry/hub-route-keys.mjs";
 
 export const NODE_STORE_SCHEMA = 1;
 
@@ -29,6 +30,7 @@ export function emptyNodeStore() {
     publicKeyHex: null,
     privateKeyHex: null,
     hubBaseUrl: null,
+    hubRouteKeys: null,
     state: "unenrolled",
     rotation: null,
     pendingEnrollment: null,
@@ -103,6 +105,9 @@ export function validateNodeStore(store) {
     }
     if (store.rotation !== null && store.rotation !== undefined) {
       problems.push("unenrolled store must not carry a rotation marker");
+    }
+    if (store.hubRouteKeys !== null && store.hubRouteKeys !== undefined) {
+      problems.push("unenrolled store must not carry hubRouteKeys");
     }
   } else {
     for (const [field, label] of [
@@ -227,6 +232,18 @@ export function validateNodeStore(store) {
     }
     if (!/^node_[0-9a-f]{32}$/.test(pending.nodeId ?? "")) {
       problems.push("pendingReenrollment lacks a valid nodeId");
+    }
+  }
+
+  // Hub route keys trust material (RFC-0006, RFC-0008 rev. 5, SOP Stage 2).
+  if (store.hubRouteKeys !== null && store.hubRouteKeys !== undefined) {
+    if (!Array.isArray(store.hubRouteKeys)) {
+      problems.push("hubRouteKeys must be an array");
+    } else {
+      const check = validateHubRouteKeySet(store.hubRouteKeys, new Date(0));
+      if (!check.valid) {
+        problems.push(`invalid hubRouteKeys: ${check.reason}`);
+      }
     }
   }
 

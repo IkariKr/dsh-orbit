@@ -10,6 +10,7 @@
 import { HeartbeatBackoff } from "./backoff.mjs";
 import { deriveKeyId, generateNodeKeyPair, randomHex, sha256Hex, signSigningString } from "../registry/crypto.mjs";
 import { buildSigningString, MACHINE_V1_LABEL, REENROLL_V1_LABEL } from "../registry/protocol.mjs";
+import { validateHubRouteKeySet } from "../registry/hub-route-keys.mjs";
 import {
   assertStateFilePermissions,
   canonicalHubBaseUrl,
@@ -41,6 +42,19 @@ export function isCredentialRevocation(body) {
   return REVOCATION_CODES.has(body?.error?.code);
 }
 
+export function isTrustedTransport(hubBaseUrl) {
+  try {
+    const url = new URL(hubBaseUrl);
+    if (url.protocol === "https:") return true;
+    if (url.protocol === "http:") {
+      return url.hostname === "127.0.0.1" || url.hostname === "localhost";
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function wireError(status, body) {
   const code = body?.error?.code ?? `http-${status}`;
   const message = body?.error?.message ?? `hub returned HTTP ${status}`;
@@ -60,6 +74,9 @@ export class NodeClient {
     rotationOverlapHours = 24,
     now = () => new Date(),
     fetchImpl = globalThis.fetch,
+    caCertificates = null,
+    onRevoked = null,
+    routeIngress = null,
   }) {
     if (!Number.isInteger(heartbeatCadenceSeconds) || heartbeatCadenceSeconds < HEARTBEAT_CADENCE_SECONDS_MIN || heartbeatCadenceSeconds > HEARTBEAT_CADENCE_SECONDS_MAX) {
       throw new Error(`heartbeat cadence must be an integer of ${HEARTBEAT_CADENCE_SECONDS_MIN}-${HEARTBEAT_CADENCE_SECONDS_MAX} seconds`);
@@ -70,6 +87,9 @@ export class NodeClient {
     this.rotationOverlapHours = rotationOverlapHours;
     this.now = now;
     this.fetchImpl = fetchImpl;
+    this.caCertificates = caCertificates;
+    this.onRevoked = onRevoked;
+    this.routeIngress = routeIngress;
     this.backoff = new HeartbeatBackoff({ now: () => this.now().getTime() });
     // Report retries get their OWN backoff: report outcomes must never
     // change the heartbeat schedule (round-2 P1-02).
@@ -303,12 +323,13 @@ export class NodeClient {
   // Heartbeat with an explicit key (commit-detection probes).
   async heartbeatAs({ keyId, keyHex, persistOnRevoked = true }) {
     const identity = this.runtimeIdentity();
+    const acceptedHubRouteKeyIds = (this.store.hubRouteKeys ?? []).map((k) => k.keyId);
     const result = await this.signedRequest({
       path: HEARTBEAT_PATH,
       nodeId: this.store.nodeId,
       keyId,
       keyHex,
-      body: { runtime: identity },
+      body: { runtime: identity, acceptedHubRouteKeyIds },
     });
     if (result.status === 200) {
       this.backoff.recordSuccess();
@@ -319,6 +340,25 @@ export class NodeClient {
         this.lastHeartbeatAt = this.lastContactAt;
       }
       this.recordEvent("heartbeat-ok", { registryContact: result.body.registryContact, keyId });
+
+      if (result.body.hubRouteKeys !== undefined) {
+        if (!isTrustedTransport(this.baseHubUrl)) {
+          this.recordEvent("hub-route-keys-rejected", { reason: "untrusted-transport", hubBaseUrl: this.baseHubUrl });
+        } else {
+          const validation = validateHubRouteKeySet(result.body.hubRouteKeys, this.now());
+          if (!validation.valid) {
+            this.recordEvent("hub-route-keys-rejected", { reason: validation.reason });
+          } else {
+            const currentJson = JSON.stringify(this.store.hubRouteKeys ?? null);
+            const incomingJson = JSON.stringify(validation.keys);
+            if (currentJson !== incomingJson) {
+              await this.persist({ ...this.store, hubRouteKeys: validation.keys });
+              this.recordEvent("hub-route-keys-updated", { keyIds: validation.keys.map((k) => k.keyId) });
+            }
+          }
+        }
+      }
+
       return { state: "active", attempted: true, ok: true };
     }
     if (result.status === 401 && isCredentialRevocation(result.body)) {
@@ -328,6 +368,12 @@ export class NodeClient {
       this.runtimeState = "revoked";
       this.lastError = wireError(result.status, result.body);
       this.recordEvent("revoked", { code: result.body?.error?.code, message: result.body?.error?.message });
+      if (this.onRevoked) {
+        try { this.onRevoked(); } catch {}
+      }
+      if (this.routeIngress) {
+        try { this.routeIngress.disable(); } catch {}
+      }
       return { state: "revoked", attempted: true, ok: false, error: this.lastError };
     }
     // Any other outcome — 429, 5xx, non-revocation 401 (timestamp,
@@ -370,6 +416,12 @@ export class NodeClient {
       this.runtimeState = "revoked";
       this.lastError = wireError(result.status, result.body);
       this.recordEvent("revoked", { code: result.body?.error?.code ?? "unauthorized", message: result.body?.error?.message ?? "hub denied the report" });
+      if (this.onRevoked) {
+        try { this.onRevoked(); } catch {}
+      }
+      if (this.routeIngress) {
+        try { this.routeIngress.disable(); } catch {}
+      }
       throw new Error(`report upload denied: ${this.lastError.code} (${this.lastError.message})`);
     }
     const { code, message } = wireError(result.status, result.body);
@@ -382,6 +434,10 @@ export class NodeClient {
     if (this.store.state !== "active") {
       throw new Error(`operation requires an active node (state is ${this.store.state})`);
     }
+  }
+
+  getHubRouteKeys() {
+    return this.store.hubRouteKeys ?? [];
   }
 
   // ------------------------------------------------------------------

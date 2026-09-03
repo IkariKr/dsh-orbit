@@ -4,8 +4,11 @@
 
 export const MACHINE_V1_LABEL = "ORBIT-MACHINE-V1";
 export const REENROLL_V1_LABEL = "ORBIT-REENROLL-V1";
+export const ROUTE_V1_LABEL = "ORBIT-ROUTE-V1";
 
 export const SIGNATURE_SKEW_SECONDS = 30;
+export const ROUTE_SKEW_MS = 30 * 1000;
+export const NONCE_CACHE_RETENTION_MS = 60 * 1000;
 
 export const NODE_ID_PATTERN = /^node_[0-9a-f]{32}$/;
 export const KEY_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -21,6 +24,14 @@ export const MACHINE_HEADERS = Object.freeze([
   "x-orbit-nonce",
   "x-orbit-key",
   "x-orbit-signature",
+]);
+
+export const ROUTE_HEADERS = Object.freeze([
+  "x-orbit-route-node",
+  "x-orbit-route-key",
+  "x-orbit-route-timestamp",
+  "x-orbit-route-nonce",
+  "x-orbit-route-signature",
 ]);
 
 // Body size limits (fixed): heartbeat/enroll/reenroll/rotate <= 64 KiB,
@@ -42,6 +53,14 @@ export const RATE_LIMITS = Object.freeze({
 export const ROTATION_OVERLAP_HOURS_DEFAULT = 24;
 export const ROTATION_OVERLAP_HOURS_MIN = 1;
 export const ROTATION_OVERLAP_HOURS_MAX = 168;
+
+export const HUB_ROUTE_ROTATION_OVERLAP_DAYS_DEFAULT = 14;
+export const HUB_ROUTE_ROTATION_OVERLAP_DAYS_MIN = 1;
+export const HUB_ROUTE_ROTATION_OVERLAP_DAYS_MAX = 30;
+
+export const ROUTE_PROBE_CADENCE_SECONDS_DEFAULT = 60;
+export const ROUTE_PROBE_FAILURE_THRESHOLD = 3;
+export const DEFAULT_ROUTE_DOMAIN = "dsh.example.com";
 
 export const HEARTBEAT_CADENCE_SECONDS_DEFAULT = 60;
 
@@ -82,6 +101,33 @@ export const MAINTENANCE_TICK_MS = 30 * 1000;
 
 export function buildSigningString({ label, method, path, timestamp, nonce, bodyHash, nodeId }) {
   return [label, method, path, String(timestamp), nonce, bodyHash, nodeId].join("\n");
+}
+
+export function buildRouteSigningString({ label = ROUTE_V1_LABEL, nodeId, routeAuthority, method, rawTarget, timestamp, nonce }) {
+  return [label, nodeId, routeAuthority, method, rawTarget, String(timestamp), nonce].join("\n");
+}
+
+export function validateRouteDomain(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error("routeDomain is required");
+  }
+  const trimmed = value.trim().toLowerCase().replace(/^\.+|\.+$/g, "");
+  if (trimmed.includes("/") || trimmed.includes("?") || trimmed.includes("#") || trimmed.includes("@")) {
+    throw new Error(`routeDomain must carry no scheme, path, query, or credentials (got ${JSON.stringify(value)})`);
+  }
+  if (!/^[a-z0-9.-]+(:[0-9]+)?$/.test(trimmed)) {
+    throw new Error(`routeDomain is malformed (got ${JSON.stringify(value)})`);
+  }
+  return trimmed;
+}
+
+export function computeRouteAuthority(nodeId, routeDomain = DEFAULT_ROUTE_DOMAIN) {
+  if (typeof nodeId !== "string" || !NODE_ID_PATTERN.test(nodeId)) {
+    throw new Error(`invalid nodeId for route authority: ${JSON.stringify(nodeId)}`);
+  }
+  const cleanDomain = validateRouteDomain(routeDomain);
+  const hex = nodeId.slice("node_".length);
+  return `n-${hex}.${cleanDomain}`;
 }
 
 export function requireHex(value, pattern, label) {

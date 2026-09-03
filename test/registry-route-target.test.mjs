@@ -588,26 +588,19 @@ test("live two-node evidence: NAS & Workstation independently configured, retain
 // 9. Forbidden scope confirmation (Section 五)
 // ---------------------------------------------------------------------------
 
-test("forbidden scope confirmation: Hub route keys, probe, ingress, HTTP router absent in Stage 1", () => {
+test("forbidden scope confirmation: proxy and router absent", () => {
   const registry = createTestRegistry();
   const tables = registry.db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
     .all()
     .map((r) => r.name);
 
-  // No hub route key tables
-  assert.equal(tables.includes("hub_keys"), false);
-  assert.equal(tables.includes("hub_route_keys"), false);
+  // No ingress or dynamic router tables in Registry
   assert.equal(tables.includes("route_ingress"), false);
   assert.equal(tables.includes("route_probes"), false);
+  assert.equal(tables.includes("browser_routes"), false);
 
-  // Node reachable is strictly unknown
-  const node = seedNode(registry);
-  registry.setRouteTarget({ actor: "operator", nodeId: node.nodeId, routeTarget: "https://nas.example" });
-  assert.equal(registry.getNode(node.nodeId).health.reachable, "unknown");
-
-  // No probe or proxy methods on Registry
-  assert.equal(typeof registry.probeRouteTarget, "undefined");
+  // No proxy or browser router methods on Registry
   assert.equal(typeof registry.proxyRouteRequest, "undefined");
   assert.equal(typeof registry.routeHttpTraffic, "undefined");
 

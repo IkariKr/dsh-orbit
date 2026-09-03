@@ -18,6 +18,7 @@ test("in-memory registry has the fixed v0.4 table set", () => {
     "enrollment_results",
     "enrollment_tokens",
     "events",
+    "hub_route_keys",
     "node_keys",
     "nodes",
     "reports",
@@ -60,11 +61,20 @@ test("route_targets foreign key rejects orphan rows", () => {
   db.close();
 });
 
+test("hub_route_keys foreign key rejects orphan rows", () => {
+  const db = openRegistryDatabase(":memory:");
+  assert.throws(() => db.prepare("INSERT INTO hub_route_keys (node_id, key_id, public_key, private_key, state, created_at) VALUES (?, ?, ?, ?, 'provisioned', ?)").run("node_missing", "k1", "a".repeat(64), "b".repeat(96), "now"));
+  db.close();
+});
+
 async function makeLegacyPath(path, version) {
   const db = openRegistryDatabase(path);
   const nodeId = "node_" + "a".repeat(32);
   db.prepare("INSERT INTO nodes (node_id, state, minted_at, authenticated) VALUES (?, 'active', 't', 'ok')").run(nodeId);
   db.prepare("INSERT INTO reports (node_id, uploaded_at, orbit_version, dsh_version, compatibility, identity_json, checks_json, report_json) VALUES (?, 't', '0.3.0', 'd', 'pass', '{}', '{}', '{}')").run(nodeId);
+  if (version < 5) {
+    db.exec("DROP TABLE hub_route_keys");
+  }
   if (version < 4) {
     db.exec("DROP TABLE route_targets");
     db.exec("PRAGMA foreign_keys = OFF");
@@ -282,6 +292,7 @@ test("v2->v3 state migration: heartbeat-sourced contact backfills, other old cla
     assert.deepEqual(aged.health.alertFlags, ["contact-lost"]);
     assert.equal(aged.health.reachable, "unknown");
     assert.equal(registry.getNode("node_report").health.registryContact, "unknown");
+    upgraded.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
     registry.close();
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -310,6 +321,37 @@ test("a v3 database migrates in place to the current schema with route_targets a
     assert.throws(() => upgraded.prepare("UPDATE nodes SET reachable = 'invalid' WHERE node_id = ?").run(nodeId));
     upgraded.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
     upgraded.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a v4 database migrates in place to the current schema with hub_route_keys", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-registry-v4-"));
+  try {
+    const path = join(dir, "registry.db");
+    const { nodeId } = await makeLegacyPath(path, 4);
+
+    let upgraded = null;
+    try {
+      upgraded = openRegistryDatabase(path);
+      assert.equal(upgraded.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
+      const tables = upgraded.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
+      assert.equal(tables.includes("hub_route_keys"), true);
+      assert.equal(tables.includes("route_targets"), true);
+      // Can insert valid hub_route_keys
+      upgraded
+        .prepare(
+          "INSERT INTO hub_route_keys (node_id, key_id, public_key, private_key, state, created_at) VALUES (?, ?, ?, ?, 'provisioned', 't')",
+        )
+        .run(nodeId, "k1", "a".repeat(64), "b".repeat(96));
+      assert.equal(upgraded.prepare("SELECT key_id FROM hub_route_keys WHERE node_id = ?").get(nodeId).key_id, "k1");
+    } finally {
+      if (upgraded) {
+        upgraded.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+        upgraded.close();
+      }
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
