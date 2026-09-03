@@ -1,13 +1,13 @@
-// SQLite/WAL registry persistence for the v0.3 registry (RFC-0005 D7).
+// SQLite/WAL registry persistence for the v0.4 registry (RFC-0005 D7, RFC-0010 D2).
 // Single writer connection with BEGIN IMMEDIATE; readers use the WAL
 // snapshot. The table set is exactly the fixed contract: nodes,
 // node_keys, enrollment_tokens, enrollment_results, seen_nonces,
-// reports, events, audit, browser_sessions.
+// reports, events, audit, browser_sessions, route_targets.
 
 import { chmodSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export class RegistryDatabaseError extends Error {
   constructor(code, message, { cause = null } = {}) {
@@ -94,6 +94,12 @@ const EXPECTED_TABLE_COLUMNS = {
     "idle_until",
     "revoked_at",
     "expiry_audited_at",
+  ],
+  route_targets: [
+    "node_id",
+    "route_target_origin",
+    "created_at",
+    "updated_at",
   ],
 };
 
@@ -231,9 +237,26 @@ function indexDefinitions(db) {
   return definitions;
 }
 
-function schemaMetadata(db) {
+function expectedTableNamesFor(version = SCHEMA_VERSION) {
+  if (version < 4) {
+    return [
+      "audit",
+      "browser_sessions",
+      "enrollment_results",
+      "enrollment_tokens",
+      "events",
+      "node_keys",
+      "nodes",
+      "reports",
+      "seen_nonces",
+    ];
+  }
+  return Object.keys(EXPECTED_TABLE_COLUMNS).sort();
+}
+
+function schemaMetadata(db, version = SCHEMA_VERSION) {
   const tables = {};
-  for (const table of Object.keys(EXPECTED_TABLE_COLUMNS)) {
+  for (const table of expectedTableNamesFor(version)) {
     const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)?.sql;
     tables[table] = {
       columns: tableInfo(db, table),
@@ -257,6 +280,38 @@ function canonicalSchemaMetadata(version = SCHEMA_VERSION) {
   const canonical = new DatabaseSync(":memory:");
   try {
     for (const statement of schemaStatements) canonical.exec(statement);
+    if (version < 4) {
+      canonical.exec("DROP TABLE route_targets");
+      canonical.exec("PRAGMA foreign_keys = OFF");
+      canonical.exec(`
+        CREATE TABLE nodes_v3 (
+          node_id TEXT PRIMARY KEY,
+          state TEXT NOT NULL CHECK (state IN ('active', 'tombstoned')),
+          minted_at TEXT NOT NULL,
+          tombstoned_at TEXT,
+          tombstone_reason TEXT,
+          registry_contact TEXT NOT NULL DEFAULT 'unknown' CHECK (registry_contact IN ('fresh', 'stale', 'lost', 'unknown')),
+          authenticated TEXT NOT NULL DEFAULT 'unknown' CHECK (authenticated IN ('ok', 'revoked', 'unknown')),
+          dsh_healthy TEXT NOT NULL DEFAULT 'unknown' CHECK (dsh_healthy IN ('ok', 'degraded', 'unknown')),
+          orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
+          reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable = 'unknown'),
+          alert_flags TEXT NOT NULL DEFAULT '[]',
+          last_heartbeat_at TEXT,
+          capabilities TEXT NOT NULL DEFAULT '[]',
+          capabilities_stale INTEGER NOT NULL DEFAULT 1,
+          last_seen TEXT,
+          last_seen_source TEXT,
+          orbit_version TEXT NOT NULL DEFAULT '',
+          orbit_revision TEXT,
+          dsh_version TEXT NOT NULL DEFAULT '',
+          compatibility_profile TEXT
+        );
+        INSERT INTO nodes_v3 SELECT * FROM nodes;
+        DROP TABLE nodes;
+        ALTER TABLE nodes_v3 RENAME TO nodes;
+      `);
+      canonical.exec("PRAGMA foreign_keys = ON");
+    }
     if (version === 1) {
       canonical.exec("ALTER TABLE nodes DROP COLUMN alert_flags");
       canonical.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
@@ -264,17 +319,17 @@ function canonicalSchemaMetadata(version = SCHEMA_VERSION) {
     } else if (version === 2) {
       canonical.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
       canonical.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
-    } else if (version !== SCHEMA_VERSION) {
+    } else if (version !== 3 && version !== SCHEMA_VERSION) {
       throw new RegistryDatabaseError("malformed-schema", `no canonical schema is defined for version ${version}`);
     }
-    return schemaMetadata(canonical);
+    return schemaMetadata(canonical, version);
   } finally {
     canonical.close();
   }
 }
 
 function validateSchemaVersion(db, version) {
-  const expectedTables = Object.keys(EXPECTED_TABLE_COLUMNS).sort();
+  const expectedTables = expectedTableNamesFor(version);
   const actualTables = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
     .all()
@@ -286,7 +341,7 @@ function validateSchemaVersion(db, version) {
     );
   }
   const expected = canonicalSchemaMetadata(version);
-  const actual = schemaMetadata(db);
+  const actual = schemaMetadata(db, version);
   for (const table of expectedTables) {
     if (JSON.stringify(actual.tables[table]) !== JSON.stringify(expected.tables[table])) {
       throw new RegistryDatabaseError(
@@ -328,6 +383,8 @@ function wrapDatabaseError(error, path, phase) {
 // maintenance can age them correctly; every other old contact claim
 // (old report uploads wrongly refreshed registryContact) fails closed
 // to registryContact = unknown.
+// v3 -> v4: reachable CHECK relaxed to unknown|ok|unreachable domain;
+// route_targets table added for v0.4 Endpoint Selector (RFC-0010 D2).
 const upgradeSteps = {
   1: ["ALTER TABLE nodes ADD COLUMN alert_flags TEXT NOT NULL DEFAULT '[]'"],
   2: [
@@ -335,6 +392,81 @@ const upgradeSteps = {
     "ALTER TABLE browser_sessions ADD COLUMN expiry_audited_at TEXT",
     "UPDATE nodes SET last_heartbeat_at = last_seen WHERE last_seen_source = 'heartbeat' AND last_seen IS NOT NULL",
     "UPDATE nodes SET registry_contact = 'unknown' WHERE last_seen IS NULL OR last_seen_source IS NULL OR last_seen_source <> 'heartbeat'",
+  ],
+  3: [
+    `CREATE TABLE nodes_v4 (
+      node_id TEXT PRIMARY KEY,
+      state TEXT NOT NULL CHECK (state IN ('active', 'tombstoned')),
+      minted_at TEXT NOT NULL,
+      tombstoned_at TEXT,
+      tombstone_reason TEXT,
+      registry_contact TEXT NOT NULL DEFAULT 'unknown' CHECK (registry_contact IN ('fresh', 'stale', 'lost', 'unknown')),
+      authenticated TEXT NOT NULL DEFAULT 'unknown' CHECK (authenticated IN ('ok', 'revoked', 'unknown')),
+      dsh_healthy TEXT NOT NULL DEFAULT 'unknown' CHECK (dsh_healthy IN ('ok', 'degraded', 'unknown')),
+      orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
+      reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable IN ('unknown', 'ok', 'unreachable')),
+      alert_flags TEXT NOT NULL DEFAULT '[]',
+      last_heartbeat_at TEXT,
+      capabilities TEXT NOT NULL DEFAULT '[]',
+      capabilities_stale INTEGER NOT NULL DEFAULT 1,
+      last_seen TEXT,
+      last_seen_source TEXT,
+      orbit_version TEXT NOT NULL DEFAULT '',
+      orbit_revision TEXT,
+      dsh_version TEXT NOT NULL DEFAULT '',
+      compatibility_profile TEXT
+    )`,
+    `INSERT INTO nodes_v4 (
+      node_id,
+      state,
+      minted_at,
+      tombstoned_at,
+      tombstone_reason,
+      registry_contact,
+      authenticated,
+      dsh_healthy,
+      orbit_compatible,
+      reachable,
+      alert_flags,
+      last_heartbeat_at,
+      capabilities,
+      capabilities_stale,
+      last_seen,
+      last_seen_source,
+      orbit_version,
+      orbit_revision,
+      dsh_version,
+      compatibility_profile
+    ) SELECT
+      node_id,
+      state,
+      minted_at,
+      tombstoned_at,
+      tombstone_reason,
+      registry_contact,
+      authenticated,
+      dsh_healthy,
+      orbit_compatible,
+      reachable,
+      alert_flags,
+      last_heartbeat_at,
+      capabilities,
+      capabilities_stale,
+      last_seen,
+      last_seen_source,
+      orbit_version,
+      orbit_revision,
+      dsh_version,
+      compatibility_profile
+    FROM nodes`,
+    "DROP TABLE nodes",
+    "ALTER TABLE nodes_v4 RENAME TO nodes",
+    `CREATE TABLE route_targets (
+      node_id TEXT PRIMARY KEY REFERENCES nodes(node_id),
+      route_target_origin TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`,
   ],
 };
 
@@ -350,7 +482,7 @@ const schemaStatements = [
     authenticated TEXT NOT NULL DEFAULT 'unknown' CHECK (authenticated IN ('ok', 'revoked', 'unknown')),
     dsh_healthy TEXT NOT NULL DEFAULT 'unknown' CHECK (dsh_healthy IN ('ok', 'degraded', 'unknown')),
     orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
-    reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable = 'unknown'),
+    reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable IN ('unknown', 'ok', 'unreachable')),
     alert_flags TEXT NOT NULL DEFAULT '[]',
     last_heartbeat_at TEXT,
     capabilities TEXT NOT NULL DEFAULT '[]',
@@ -446,6 +578,13 @@ const schemaStatements = [
     expiry_audited_at TEXT
   )`,
   `
+  CREATE TABLE route_targets (
+    node_id TEXT PRIMARY KEY REFERENCES nodes(node_id),
+    route_target_origin TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `
   CREATE INDEX idx_seen_nonces_created_at ON seen_nonces (created_at)`,
   `
   CREATE INDEX idx_reports_node_uploaded ON reports (node_id, uploaded_at DESC)`,
@@ -518,17 +657,22 @@ export function migrate(db) {
       });
       return;
     }
-    for (let current = version; current < SCHEMA_VERSION; current += 1) {
-      const steps = upgradeSteps[current];
-      if (!steps) {
-        throw new Error(`registry database schema ${current}: no upgrade path to ${SCHEMA_VERSION}`);
-      }
-      withTransaction(db, () => {
-        for (const statement of steps) {
-          db.exec(statement);
+    db.exec("PRAGMA foreign_keys = OFF");
+    try {
+      for (let current = version; current < SCHEMA_VERSION; current += 1) {
+        const steps = upgradeSteps[current];
+        if (!steps) {
+          throw new Error(`registry database schema ${current}: no upgrade path to ${SCHEMA_VERSION}`);
         }
-        db.exec(`PRAGMA user_version = ${current + 1}`);
-      });
+        withTransaction(db, () => {
+          for (const statement of steps) {
+            db.exec(statement);
+          }
+          db.exec(`PRAGMA user_version = ${current + 1}`);
+        });
+      }
+    } finally {
+      db.exec("PRAGMA foreign_keys = ON");
     }
   }
 }

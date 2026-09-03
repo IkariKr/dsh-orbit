@@ -35,6 +35,7 @@ const STATE_TABLES = [
     "browser_sessions",
     "SELECT session_id, operator_principal, created_at, expires_at, idle_until, revoked_at, expiry_audited_at FROM browser_sessions ORDER BY session_id",
   ],
+  ["route_targets", "SELECT * FROM route_targets ORDER BY node_id"],
 ];
 
 function requirePath(path, label) {

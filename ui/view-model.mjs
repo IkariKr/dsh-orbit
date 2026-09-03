@@ -71,6 +71,13 @@ export function mapNodeRow(node) {
       dshVersion: runtime.dshVersion ?? null,
       compatibilityProfile: runtime.compatibilityProfile ?? null,
     },
+    routeTarget: node?.routeTarget
+      ? {
+          origin: node.routeTarget.origin ?? node.routeTarget.routeTargetOrigin ?? null,
+          createdAt: node.routeTarget.createdAt ?? null,
+          updatedAt: node.routeTarget.updatedAt ?? null,
+        }
+      : null,
     tombstonedAt: node?.tombstonedAt ?? null,
     tombstoneReason: node?.tombstoneReason ?? null,
   };

@@ -5,6 +5,7 @@
 import { createCompatibilityReport } from "../compatibility-report.mjs";
 import { deriveCapabilities, deriveDshHealthy, deriveOrbitCompatible, identityMatches, reportIdentity } from "./capabilities.mjs";
 import { deriveKeyId, randomHex, sha256Hex, signSigningString, verifySigningString } from "./crypto.mjs";
+import { validateRouteTargetOrigin } from "./route-target.mjs";
 import {
   AUDIT_RETENTION_MS,
   ENROLLMENT_RESULT_RETENTION_MS,
@@ -743,6 +744,96 @@ export class Registry {
     return { nodeId, state: "tombstoned", idempotentReplay: false };
   }
 
+  // ------------------------------------------------------------------
+  // Route Target persistence (RFC-0010 D2, SOP Stage 1): zero or one
+  // operator-approved server-reachable origin per node. Mutable routing
+  // metadata; changing it preserves node identity, reports, events,
+  // credentials, and leaves reachable = unknown.
+
+  getRouteTarget(nodeId) {
+    const row = this.db
+      .prepare("SELECT node_id, route_target_origin, created_at, updated_at FROM route_targets WHERE node_id = ?")
+      .get(nodeId);
+    if (!row) return null;
+    return {
+      nodeId: row.node_id,
+      origin: row.route_target_origin,
+      routeTargetOrigin: row.route_target_origin,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  setRouteTarget({ actor, nodeId, routeTarget }) {
+    requireString(nodeId, "nodeId");
+    requireString(actor, "actor");
+    const node = this.getNodeRow(nodeId);
+    if (!node) {
+      denied(404, "not-found", "no such node");
+    }
+    if (node.state === "tombstoned") {
+      denied(409, "node-tombstoned", "cannot set route target for a tombstoned node");
+    }
+    let origin;
+    try {
+      origin = validateRouteTargetOrigin(routeTarget);
+    } catch (error) {
+      denied(400, "bad-request", error.message);
+    }
+    return withTransaction(this.db, () => {
+      const existing = this.getRouteTarget(nodeId);
+      const at = nowIso(this.now());
+      if (existing) {
+        this.db
+          .prepare("UPDATE route_targets SET route_target_origin = ?, updated_at = ? WHERE node_id = ?")
+          .run(origin, at, nodeId);
+        this.recordAudit(actor, "hub.route-targets.replace", {
+          nodeId,
+          routeTargetOrigin: origin,
+          previousRouteTargetOrigin: existing.origin,
+        });
+      } else {
+        this.db
+          .prepare(
+            "INSERT INTO route_targets (node_id, route_target_origin, created_at, updated_at) VALUES (?, ?, ?, ?)",
+          )
+          .run(nodeId, origin, at, at);
+        this.recordAudit(actor, "hub.route-targets.create", {
+          nodeId,
+          routeTargetOrigin: origin,
+        });
+      }
+      return {
+        nodeId,
+        routeTarget: this.getRouteTarget(nodeId),
+      };
+    });
+  }
+
+  removeRouteTarget({ actor, nodeId }) {
+    requireString(nodeId, "nodeId");
+    requireString(actor, "actor");
+    const node = this.getNodeRow(nodeId);
+    if (!node) {
+      denied(404, "not-found", "no such node");
+    }
+    return withTransaction(this.db, () => {
+      const existing = this.getRouteTarget(nodeId);
+      if (existing) {
+        this.db.prepare("DELETE FROM route_targets WHERE node_id = ?").run(nodeId);
+        this.recordAudit(actor, "hub.route-targets.remove", {
+          nodeId,
+          previousRouteTargetOrigin: existing.origin,
+        });
+      }
+      return {
+        nodeId,
+        routeTarget: null,
+        removed: existing !== null,
+      };
+    });
+  }
+
   listNodes() {
     return this.db.prepare("SELECT * FROM nodes ORDER BY minted_at").all().map((row) => this.toNodeSummary(row));
   }
@@ -777,12 +868,14 @@ export class Registry {
     } catch {
       // malformed alert_flags -> no flags
     }
+    const routeTarget = this.getRouteTarget(row.node_id);
     return {
       nodeId: row.node_id,
       state: row.state,
       mintedAt: row.minted_at,
       tombstonedAt: row.tombstoned_at,
       tombstoneReason: row.tombstone_reason,
+      routeTarget,
       health: {
         registryContact: row.registry_contact,
         authenticated: row.authenticated,

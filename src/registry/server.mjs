@@ -391,6 +391,15 @@ export function createHubServer({ registry, options = {} }) {
       if (path === "/hub/nodes" || path === "/hub/nodes/") {
         return sendJson(response, 200, { nodes: registry.listNodes() });
       }
+      const routeTargetGetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
+      if (routeTargetGetMatch) {
+        const nodeId = decodeURIComponent(routeTargetGetMatch[1]);
+        const node = registry.getNodeRow(nodeId);
+        if (!node) {
+          return sendJson(response, 404, { error: { code: "not-found", message: "no such node" } });
+        }
+        return sendJson(response, 200, { nodeId, routeTarget: registry.getRouteTarget(nodeId) });
+      }
       const nodeMatch = path.match(/^\/hub\/nodes\/([^/]+)\/?$/);
       if (nodeMatch) {
         return sendJson(response, 200, registry.getNode(decodeURIComponent(nodeMatch[1])));
@@ -402,6 +411,30 @@ export function createHubServer({ registry, options = {} }) {
     }
 
     requireCsrf(request, session);
+
+    const routeTargetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target(?:\/(set|remove))?\/?$/);
+    if (routeTargetMatch) {
+      const nodeId = decodeURIComponent(routeTargetMatch[1]);
+      const action = routeTargetMatch[2];
+      if (request.method === "DELETE" || (request.method === "POST" && action === "remove")) {
+        const result = registry.removeRouteTarget({
+          actor: session.operatorPrincipal,
+          nodeId,
+        });
+        return sendJson(response, 200, result);
+      }
+      if (request.method === "PUT" || request.method === "POST") {
+        const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+        const target = body.routeTarget ?? body.routeTargetOrigin ?? body.origin;
+        const result = registry.setRouteTarget({
+          actor: session.operatorPrincipal,
+          nodeId,
+          routeTarget: target,
+        });
+        return sendJson(response, 200, result);
+      }
+      return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected PUT, POST, or DELETE" } });
+    }
 
     if (path === "/hub/tokens" || path === "/hub/tokens/") {
       if (request.method === "POST") {
