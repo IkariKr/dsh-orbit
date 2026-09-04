@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import https from "node:https";
@@ -206,10 +207,17 @@ async function startGateway(config, fence, fenceSecret) {
         return;
       }
     }
-    socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n");
+    const key = req.headers["sec-websocket-key"] || "";
+    const accept = createHash("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     socket.on("data", (chunk) => {
-      // Echo frame
-      socket.write(chunk);
+      // If client sent Ping frame (opcode 0x09), reply Pong (opcode 0x0a)
+      const opcode = chunk[0] & 0x0f;
+      if (opcode === 0x09) {
+        socket.write(Buffer.from([0x8a, 0x00]));
+      } else {
+        socket.write(chunk);
+      }
     });
   });
   server.listen(0, "127.0.0.1");

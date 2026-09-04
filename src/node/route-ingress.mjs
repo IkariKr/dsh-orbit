@@ -13,6 +13,17 @@ import { formatHttpResponse, sanitizeSetCookieHeader, sendSocketHttpError } from
 
 export class IngressWebSocketTracker {
   constructor({ maxConnections = 50 } = {}) {
+    if (
+      typeof maxConnections !== "number" ||
+      !Number.isInteger(maxConnections) ||
+      !Number.isFinite(maxConnections) ||
+      maxConnections < 1 ||
+      maxConnections > 10000
+    ) {
+      throw new RangeError(
+        `invalid maxConnections limit: ${maxConnections}; expected integer between 1 and 10000`,
+      );
+    }
     this.maxConnections = maxConnections;
     this.count = 0;
     this.activeSockets = new Set();
@@ -72,6 +83,7 @@ export class RouteIngress {
     now = () => Date.now(),
     dshProbeTransport = null,
     forwardHttpEnabled = true,
+    maxWsConnections = undefined,
   }) {
     if (!nodeId) throw new Error("nodeId is required for RouteIngress");
     this.nodeId = nodeId;
@@ -89,7 +101,8 @@ export class RouteIngress {
     this.host = null;
 
     // Stage 4: Ingress WebSocket Connection Tracker
-    const maxWs = process.env.DSH_ORBIT_NODE_WS_LIMIT ? Number(process.env.DSH_ORBIT_NODE_WS_LIMIT) : 50;
+    const maxWsEnv = process.env.DSH_ORBIT_NODE_WS_LIMIT !== undefined ? Number(process.env.DSH_ORBIT_NODE_WS_LIMIT) : undefined;
+    const maxWs = maxWsConnections ?? maxWsEnv ?? 50;
     this.wsTracker = new IngressWebSocketTracker({ maxConnections: maxWs });
 
     const requestListener = (req, res) => this.handleRequest(req, res);
@@ -443,7 +456,7 @@ export class RouteIngress {
       socket.removeListener("close", onClientEarlyAbort);
       socket.removeListener("error", onClientEarlyAbort);
       sendSocketHttpError(socket, 502, "Bad Gateway", {}, {
-        error: { code: "bad-gateway", message: `downstream DSH unavailable: ${err.message}` },
+        error: { code: "bad-gateway", message: "downstream DSH unavailable" },
       });
     });
 

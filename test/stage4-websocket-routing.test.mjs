@@ -18,7 +18,7 @@ import http from "node:http";
 import net from "node:net";
 import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
 import { createHubServer } from "../src/registry/server.mjs";
@@ -31,6 +31,7 @@ import {
 } from "../src/registry/route-proxy.mjs";
 import { RouteIngress, IngressWebSocketTracker } from "../src/node/route-ingress.mjs";
 import { deriveKeyId, generateNodeKeyPair, randomHex } from "../src/registry/crypto.mjs";
+import { RouteNonceCache, signRouteRequest } from "../src/registry/route-auth.mjs";
 
 const ROUTE_DOMAIN = "dsh.example.com";
 
@@ -172,7 +173,18 @@ function performWebSocketUpgrade(socket, {
         if (!parsed) return;
         const expectedLen = parsed.headers["content-length"] ? Number(parsed.headers["content-length"]) : 0;
         const bodyBytes = received.slice(idx + 4);
-        if (parsed.status === 101 || bodyBytes.length >= expectedLen) {
+        if (parsed.status === 101) {
+          const expectedAccept = createHash("sha1").update(secKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+          assert.equal(parsed.headers["sec-websocket-accept"], expectedAccept, "Sec-WebSocket-Accept must match client Sec-WebSocket-Key hash");
+          resolved = true;
+          socket.removeListener("data", onData);
+          resolve({
+            ...parsed,
+            body: bodyBytes.toString("utf8"),
+            socket,
+            remainingBytes: bodyBytes.slice(expectedLen),
+          });
+        } else if (bodyBytes.length >= expectedLen) {
           resolved = true;
           socket.removeListener("data", onData);
           resolve({
@@ -324,10 +336,12 @@ function startMockDshWebSocketServer({
     }
 
     // Default 101 Switching Protocols with echo
+    const clientKey = req.headers["sec-websocket-key"] || "";
+    const acceptVal = createHash("sha1").update(clientKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
     const responseHeaders = {
       Upgrade: "websocket",
       Connection: "Upgrade",
-      "Sec-WebSocket-Accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=",
+      "Sec-WebSocket-Accept": acceptVal,
       "Set-Cookie": "dsh_ws_session=active123; Domain=.dsh.example.com; Path=/; HttpOnly",
       ...headers,
     };
@@ -454,23 +468,51 @@ test("Stage 4 Security Matrix: invalid Host, selector apex, foreign Host, scheme
 // TEST 2: Node Ingress Upgrade Security Matrix (Proofs, Revocation, Limits)
 // ---------------------------------------------------------------------------
 
-test("Stage 4 Node RouteIngress: rejects missing proof, bad sig, revoked key, and scheme-relative target", async () => {
+test("Stage 4 Node RouteIngress: full ORBIT-ROUTE-V1 negative security matrix on WebSocket Upgrade path", async () => {
   const nodeId = "node_" + "42".repeat(16);
   const authority = computeRouteAuthority(nodeId, ROUTE_DOMAIN);
   const dshServer = await startMockDshWebSocketServer();
 
+  const keyPair = generateNodeKeyPair();
+  const keyId = deriveKeyId(keyPair.publicKeyHex);
+  let trustKeys = [
+    {
+      keyId,
+      publicKey: keyPair.publicKeyHex,
+      state: "active",
+    },
+  ];
   let nodeState = "active";
+  const nonceCache = new RouteNonceCache();
+
   const ingress = new RouteIngress({
     nodeId,
     routeDomain: ROUTE_DOMAIN,
     dshTarget: dshServer.target,
     getNodeState: () => nodeState,
-    getTrustKeys: () => [],
+    getTrustKeys: () => trustKeys,
+    nonceCache,
   });
   await ingress.listen(0, "127.0.0.1");
 
   try {
-    // 1. Missing ORBIT-ROUTE-V1 proof rejected with 400 (bad-request)
+    // 1. Positive control: valid signed ORBIT-ROUTE-V1 Upgrade handshake succeeds (101)
+    const validProof = signRouteRequest({
+      privateKeyHex: keyPair.privateKeyHex,
+      keyId,
+      nodeId,
+      routeAuthority: authority,
+      method: "GET",
+      rawTarget: "/ws",
+      nowMs: Date.now(),
+      nonce: randomHex(16),
+    });
+    const socket0 = await connectRawSocket(ingress.port);
+    const res0 = await performWebSocketUpgrade(socket0, { authority, path: "/ws", headers: validProof.headers });
+    assert.equal(res0.status, 101);
+    socket0.destroy();
+
+    // 2. Missing ORBIT-ROUTE-V1 proof rejected with 400 (bad-request)
     const rawSocket1 = await connectRawSocket(ingress.port);
     const res1 = await performWebSocketUpgrade(rawSocket1, { authority, path: "/ws" });
     assert.equal(res1.status, 400);
@@ -478,21 +520,180 @@ test("Stage 4 Node RouteIngress: rejects missing proof, bad sig, revoked key, an
     assert.equal(body1.error.code, "bad-request");
     rawSocket1.destroy();
 
-    // 2. Revoked node rejected with 401
+    // 3. Wrong node: signed for foreign node ID rejected with 401 (node-mismatch)
+    const wrongNodeId = "node_" + "99".repeat(16);
+    const wrongNodeProof = signRouteRequest({
+      privateKeyHex: keyPair.privateKeyHex,
+      keyId,
+      nodeId: wrongNodeId,
+      routeAuthority: authority,
+      method: "GET",
+      rawTarget: "/ws",
+      nowMs: Date.now(),
+      nonce: randomHex(16),
+    });
+    const socketWrongNode = await connectRawSocket(ingress.port);
+    const resWrongNode = await performWebSocketUpgrade(socketWrongNode, { authority, path: "/ws", headers: wrongNodeProof.headers });
+    assert.equal(resWrongNode.status, 401);
+    const bodyWrongNode = JSON.parse(resWrongNode.body);
+    assert.equal(bodyWrongNode.error.code, "node-mismatch");
+    socketWrongNode.destroy();
+
+    // 4. Wrong authority: signed for foreign authority rejected with 401 (authority-mismatch)
+    const wrongAuthProof = signRouteRequest({
+      privateKeyHex: keyPair.privateKeyHex,
+      keyId,
+      nodeId,
+      routeAuthority: "n-wrong." + ROUTE_DOMAIN,
+      method: "GET",
+      rawTarget: "/ws",
+      nowMs: Date.now(),
+      nonce: randomHex(16),
+    });
+    const socketWrongAuth = await connectRawSocket(ingress.port);
+    const resWrongAuth = await performWebSocketUpgrade(socketWrongAuth, {
+      authority: "n-wrong." + ROUTE_DOMAIN,
+      path: "/ws",
+      headers: wrongAuthProof.headers,
+    });
+    assert.equal(resWrongAuth.status, 401);
+    const bodyWrongAuth = JSON.parse(resWrongAuth.body);
+    assert.equal(bodyWrongAuth.error.code, "authority-mismatch");
+    socketWrongAuth.destroy();
+
+    // 5. Bad signature: corrupted signature bits rejected with 401 (signature-invalid)
+    const badSigProof = signRouteRequest({
+      privateKeyHex: keyPair.privateKeyHex,
+      keyId,
+      nodeId,
+      routeAuthority: authority,
+      method: "GET",
+      rawTarget: "/ws",
+      nowMs: Date.now(),
+      nonce: randomHex(16),
+    });
+    const badSigHeaders = { ...badSigProof.headers };
+    badSigHeaders["x-orbit-route-signature"] = (
+      badSigHeaders["x-orbit-route-signature"].slice(0, 10) +
+      "0000" +
+      badSigHeaders["x-orbit-route-signature"].slice(14)
+    );
+    const socketBadSig = await connectRawSocket(ingress.port);
+    const resBadSig = await performWebSocketUpgrade(socketBadSig, { authority, path: "/ws", headers: badSigHeaders });
+    assert.equal(resBadSig.status, 401);
+    const bodyBadSig = JSON.parse(resBadSig.body);
+    assert.equal(bodyBadSig.error.code, "signature-invalid");
+    socketBadSig.destroy();
+
+    // 6. Expired timestamp: outside 30s skew window rejected with 401 (timestamp-out-of-skew)
+    const expiredProof = signRouteRequest({
+      privateKeyHex: keyPair.privateKeyHex,
+      keyId,
+      nodeId,
+      routeAuthority: authority,
+      method: "GET",
+      rawTarget: "/ws",
+      nowMs: Date.now() - 60_000,
+      nonce: randomHex(16),
+    });
+    const socketExpired = await connectRawSocket(ingress.port);
+    const resExpired = await performWebSocketUpgrade(socketExpired, { authority, path: "/ws", headers: expiredProof.headers });
+    assert.equal(resExpired.status, 401);
+    const bodyExpired = JSON.parse(resExpired.body);
+    assert.equal(bodyExpired.error.code, "timestamp-out-of-skew");
+    socketExpired.destroy();
+
+    // 7. Future timestamp skew: > 30s in the future rejected with 401 (timestamp-out-of-skew)
+    const futureProof = signRouteRequest({
+      privateKeyHex: keyPair.privateKeyHex,
+      keyId,
+      nodeId,
+      routeAuthority: authority,
+      method: "GET",
+      rawTarget: "/ws",
+      nowMs: Date.now() + 60_000,
+      nonce: randomHex(16),
+    });
+    const socketFuture = await connectRawSocket(ingress.port);
+    const resFuture = await performWebSocketUpgrade(socketFuture, { authority, path: "/ws", headers: futureProof.headers });
+    assert.equal(resFuture.status, 401);
+    const bodyFuture = JSON.parse(resFuture.body);
+    assert.equal(bodyFuture.error.code, "timestamp-out-of-skew");
+    socketFuture.destroy();
+
+    // 8. Replayed nonce: identical signed Upgrade request submitted second time rejected with 401 (replay)
+    const replayProof = signRouteRequest({
+      privateKeyHex: keyPair.privateKeyHex,
+      keyId,
+      nodeId,
+      routeAuthority: authority,
+      method: "GET",
+      rawTarget: "/ws",
+      nowMs: Date.now(),
+      nonce: randomHex(16),
+    });
+    const socketReplay1 = await connectRawSocket(ingress.port);
+    const resReplay1 = await performWebSocketUpgrade(socketReplay1, { authority, path: "/ws", headers: replayProof.headers });
+    assert.equal(resReplay1.status, 101);
+    socketReplay1.destroy();
+
+    const socketReplay2 = await connectRawSocket(ingress.port);
+    const resReplay2 = await performWebSocketUpgrade(socketReplay2, { authority, path: "/ws", headers: replayProof.headers });
+    assert.equal(resReplay2.status, 401);
+    const bodyReplay2 = JSON.parse(resReplay2.body);
+    assert.equal(bodyReplay2.error.code, "replay");
+    socketReplay2.destroy();
+
+    // 9. Rotating-only key with expired overlap rejected with 401 (key-revoked)
+    trustKeys = [
+      {
+        keyId,
+        publicKey: keyPair.publicKeyHex,
+        state: "rotating",
+        overlapUntil: new Date(Date.now() - 5000).toISOString(),
+      },
+    ];
+    const rotatingExpiredProof = signRouteRequest({
+      privateKeyHex: keyPair.privateKeyHex,
+      keyId,
+      nodeId,
+      routeAuthority: authority,
+      method: "GET",
+      rawTarget: "/ws",
+      nowMs: Date.now(),
+      nonce: randomHex(16),
+    });
+    const socketRotating = await connectRawSocket(ingress.port);
+    const resRotating = await performWebSocketUpgrade(socketRotating, { authority, path: "/ws", headers: rotatingExpiredProof.headers });
+    assert.equal(resRotating.status, 401);
+    const bodyRotating = JSON.parse(resRotating.body);
+    assert.equal(bodyRotating.error.code, "key-revoked");
+    socketRotating.destroy();
+
+    // Restore active trust key
+    trustKeys = [
+      {
+        keyId,
+        publicKey: keyPair.publicKeyHex,
+        state: "active",
+      },
+    ];
+
+    // 10. Revoked node rejected with 401 (revoked)
     nodeState = "revoked";
-    const rawSocket2 = await connectRawSocket(ingress.port);
-    const res2 = await performWebSocketUpgrade(rawSocket2, { authority, path: "/ws" });
-    assert.equal(res2.status, 401);
-    const body2 = JSON.parse(res2.body);
-    assert.equal(body2.error.code, "revoked");
-    rawSocket2.destroy();
+    const socketRevoked = await connectRawSocket(ingress.port);
+    const resRevoked = await performWebSocketUpgrade(socketRevoked, { authority, path: "/ws" });
+    assert.equal(resRevoked.status, 401);
+    const bodyRevoked = JSON.parse(resRevoked.body);
+    assert.equal(bodyRevoked.error.code, "revoked");
+    socketRevoked.destroy();
     nodeState = "active";
 
-    // 3. Scheme-relative target rejected with 400
-    const rawSocket3 = await connectRawSocket(ingress.port);
-    const res3 = await performWebSocketUpgrade(rawSocket3, { authority, path: "//127.0.0.1:9999/ws" });
-    assert.equal(res3.status, 400);
-    rawSocket3.destroy();
+    // 11. Scheme-relative target rejected with 400 (invalid-target)
+    const socketSchemeRel = await connectRawSocket(ingress.port);
+    const resSchemeRel = await performWebSocketUpgrade(socketSchemeRel, { authority, path: "//127.0.0.1:9999/ws" });
+    assert.equal(resSchemeRel.status, 400);
+    socketSchemeRel.destroy();
   } finally {
     await ingress.close();
     await dshServer.close();

@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
 import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
+import { validateWebSocketConfig } from "./config.mjs";
 import {
   classifyHostAuthority,
   evaluateRouteEligibility,
@@ -579,13 +580,19 @@ export function createHubServer({ registry, options = {} }) {
   }
 
   // Stage 4: WebSocket Connection Tracker & Resource Limits
-  const maxWsGlobal = options.maxWsGlobal ?? (process.env.DSH_ORBIT_HUB_WS_GLOBAL_LIMIT ? Number(process.env.DSH_ORBIT_HUB_WS_GLOBAL_LIMIT) : undefined);
-  const maxWsPerNode = options.maxWsPerNode ?? (process.env.DSH_ORBIT_HUB_WS_PER_NODE_LIMIT ? Number(process.env.DSH_ORBIT_HUB_WS_PER_NODE_LIMIT) : undefined);
+  const maxWsGlobal = options.maxWsGlobal ?? (process.env.DSH_ORBIT_HUB_WS_GLOBAL_LIMIT !== undefined ? Number(process.env.DSH_ORBIT_HUB_WS_GLOBAL_LIMIT) : undefined);
+  const maxWsPerNode = options.maxWsPerNode ?? (process.env.DSH_ORBIT_HUB_WS_PER_NODE_LIMIT !== undefined ? Number(process.env.DSH_ORBIT_HUB_WS_PER_NODE_LIMIT) : undefined);
+  const wsHandshakeTimeoutMs = options.wsHandshakeTimeoutMs ?? (process.env.DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS !== undefined ? Number(process.env.DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS) : undefined);
+
+  const wsConfigErrors = validateWebSocketConfig({ maxWsGlobal, maxWsPerNode, wsHandshakeTimeoutMs });
+  if (wsConfigErrors.length > 0) {
+    throw new RangeError(wsConfigErrors[0]);
+  }
+
   const wsTracker = options.wsTracker ?? new HubWebSocketTracker({
     ...(maxWsGlobal !== undefined ? { maxGlobal: maxWsGlobal } : {}),
     ...(maxWsPerNode !== undefined ? { maxPerNode: maxWsPerNode } : {}),
   });
-  const wsHandshakeTimeoutMs = options.wsHandshakeTimeoutMs ?? (process.env.DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS ? Number(process.env.DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS) : undefined);
 
   // Stage 4: Server WebSocket Upgrade Pipeline (RFC-0010 D7)
   server.on("upgrade", (request, socket, head) => {

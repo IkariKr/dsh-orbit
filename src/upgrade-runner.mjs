@@ -658,10 +658,12 @@ export async function runVerificationSequence({
         const wsSmoke = await runCommand(process.execPath, [SMOKE_WEBSOCKET], {
           env: smokeEnv({ DSH_SMOKE_URL: config.candidateEndpoint }),
         });
+        const passMatch = wsSmoke.stdout.trim().match(/^webSocketTransport:\s*pass\s*\((.+)\)$/m);
+        const passDetail = passMatch ? passMatch[1] : "WebSocket 101 upgrade handshake successful";
         record(
           "webSocketTransport",
           wsSmoke.code === 0 ? "pass" : "fail",
-          wsSmoke.code === 0 ? "WebSocket 101 upgrade handshake successful" : failDetail(wsSmoke.stderr, `exit ${wsSmoke.code}`),
+          wsSmoke.code === 0 ? passDetail : failDetail(wsSmoke.stderr, `exit ${wsSmoke.code}`),
         );
       },
     },

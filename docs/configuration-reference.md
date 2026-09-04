@@ -24,9 +24,9 @@ Registry semantics.
 | `DSH_ORBIT_HUB_CA_CERT` | no | unset | Additional operator-managed private-CA PEM or PEM file for HTTPS Node route targets. It extends the runtime default trust set; hostname/SAN validation stays enabled. |
 | `DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS` | no | `60` | Positive route-readiness probe cadence in seconds. Invalid/zero values fail startup. |
 | `DSH_ORBIT_HUB_ROUTE_ROTATION_OVERLAP_DAYS` | no | `14` | Per-node Hub route-key overlap policy, integer 1–30 days. The timer starts only after the Node durably acknowledges the next public key. |
-| `DSH_ORBIT_HUB_WS_GLOBAL_LIMIT` | no | `200` | Global concurrent WebSocket connection limit on the Hub. |
-| `DSH_ORBIT_HUB_WS_PER_NODE_LIMIT` | no | `50` | Per-node concurrent WebSocket connection limit on the Hub. |
-| `DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS` | no | `10000` | WebSocket upstream handshake timeout in milliseconds. Established WebSocket connections do not have an idle timeout. |
+| `DSH_ORBIT_HUB_WS_GLOBAL_LIMIT` | no | `200` | Global concurrent WebSocket connection limit on the Hub, integer 1–100000. Values outside range fail startup closed. |
+| `DSH_ORBIT_HUB_WS_PER_NODE_LIMIT` | no | `50` | Per-node concurrent WebSocket connection limit on the Hub, integer 1–10000 (must not exceed global limit). Values outside range fail startup closed. |
+| `DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS` | no | `10000` | WebSocket upstream handshake timeout in milliseconds, integer 100–120000 ms (rejects 0, negative, NaN, Infinity). Established WebSocket connections do not have an idle timeout. |
 
 The Hub owns the machine and browser APIs. `/api/v1/*` is a private machine
 surface and must not be routed through the browser gateway. See
@@ -52,7 +52,7 @@ surface and must not be routed through the browser gateway. See
 | `DSH_ORBIT_NODE_ROUTE_DOMAIN` | no | `localhost` | Route domain used to verify `ORBIT-ROUTE-V1`; must exactly match the Hub route-domain configuration. |
 | `DSH_ORBIT_NODE_DSH_TARGET` | no | `http://127.0.0.1:3080` | Node-local DSH transport checked by `GET /_orbit/route-ready`. This is liveness only and does not parse DSH APIs. |
 | `DSH_ORBIT_NODE_ROUTE_TLS_KEY` / `DSH_ORBIT_NODE_ROUTE_TLS_CERT` | together | unset | Route-ingress TLS private key and certificate, as PEM values or file paths. Configuring only one fails startup. |
-| `DSH_ORBIT_NODE_WS_LIMIT` | no | `50` | Maximum concurrent WebSocket connections permitted on the Node route ingress. |
+| `DSH_ORBIT_NODE_WS_LIMIT` | no | `50` | Maximum concurrent WebSocket connections permitted on the Node route ingress, integer 1–10000. Out-of-range or non-integer values fail startup closed. |
 | `DSH_ORBIT_REPORT_FILE` | for `upload-report` | none | Path to a validated compatibility report. |
 
 Commands and state semantics are documented in

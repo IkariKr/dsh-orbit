@@ -181,6 +181,16 @@ switch (command) {
       process.exit(2);
     }
 
+    let maxWsConnections = undefined;
+    if (process.env.DSH_ORBIT_NODE_WS_LIMIT !== undefined && process.env.DSH_ORBIT_NODE_WS_LIMIT !== "") {
+      const parsed = Number(process.env.DSH_ORBIT_NODE_WS_LIMIT);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10000) {
+        console.error("dsh-orbit-node: DSH_ORBIT_NODE_WS_LIMIT must be an integer from 1 to 10000");
+        process.exit(2);
+      }
+      maxWsConnections = parsed;
+    }
+
     const tlsKeyConfigured = Boolean(process.env.DSH_ORBIT_NODE_ROUTE_TLS_KEY);
     const tlsCertConfigured = Boolean(process.env.DSH_ORBIT_NODE_ROUTE_TLS_CERT);
     if (tlsKeyConfigured !== tlsCertConfigured) {
@@ -213,6 +223,7 @@ switch (command) {
             routeDomain,
             dshTarget,
             tls,
+            maxWsConnections,
             getTrustKeys: () => client.getHubRouteKeys(),
             getNodeState: () => client.status().state,
           });

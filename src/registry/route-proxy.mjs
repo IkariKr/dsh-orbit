@@ -414,11 +414,26 @@ export class HubWebSocketTracker {
     maxGlobal = DEFAULT_HUB_WS_GLOBAL_LIMIT,
     maxPerNode = DEFAULT_HUB_WS_PER_NODE_LIMIT,
   } = {}) {
-    if (typeof maxGlobal !== "number" || maxGlobal <= 0 || !Number.isInteger(maxGlobal)) {
-      throw new Error(`invalid maxGlobal limit: ${maxGlobal}`);
+    if (
+      typeof maxGlobal !== "number" ||
+      !Number.isInteger(maxGlobal) ||
+      !Number.isFinite(maxGlobal) ||
+      maxGlobal < 1 ||
+      maxGlobal > 100000
+    ) {
+      throw new RangeError(`invalid maxGlobal limit: ${maxGlobal}; expected integer between 1 and 100000`);
     }
-    if (typeof maxPerNode !== "number" || maxPerNode <= 0 || !Number.isInteger(maxPerNode)) {
-      throw new Error(`invalid maxPerNode limit: ${maxPerNode}`);
+    if (
+      typeof maxPerNode !== "number" ||
+      !Number.isInteger(maxPerNode) ||
+      !Number.isFinite(maxPerNode) ||
+      maxPerNode < 1 ||
+      maxPerNode > 10000
+    ) {
+      throw new RangeError(`invalid maxPerNode limit: ${maxPerNode}; expected integer between 1 and 10000`);
+    }
+    if (maxPerNode > maxGlobal) {
+      throw new RangeError(`maxPerNode (${maxPerNode}) cannot exceed maxGlobal (${maxGlobal})`);
     }
     this.maxGlobal = maxGlobal;
     this.maxPerNode = maxPerNode;
@@ -579,7 +594,7 @@ export function proxyWebSocketUpgrade({
   } catch (err) {
     const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
     sendSocketHttpError(socket, 502, "Bad Gateway", {}, {
-      error: { code: "bad-gateway", message: `failed to initiate upstream request: ${err.message}`, selectorUrl },
+      error: { code: "bad-gateway", message: "failed to initiate upstream request", selectorUrl },
     });
     try { socket.end(); } catch {}
     return;
@@ -596,7 +611,7 @@ export function proxyWebSocketUpgrade({
     socket.removeListener("error", onClientEarlyAbort);
     const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
     sendSocketHttpError(socket, 502, "Bad Gateway", {}, {
-      error: { code: "bad-gateway", message: `upstream route target unavailable: ${err.message}`, selectorUrl },
+      error: { code: "bad-gateway", message: "upstream route target unavailable", selectorUrl },
     });
     try {
       socket.end();

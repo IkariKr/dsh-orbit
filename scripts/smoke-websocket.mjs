@@ -1,7 +1,8 @@
 // Real WebSocket transport compatibility smoke for DSH (RFC-0009, Stage 4).
-// Tests HTTP Upgrade -> 101 Switching Protocols -> bidirectional streaming frame.
+// Tests HTTP Upgrade -> 101 Switching Protocols -> Sec-WebSocket-Accept verification
+// -> bidirectional RFC 6455 control/data frame verification (Ping/Pong / downlink frame).
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import http from "node:http";
 import https from "node:https";
 import process from "node:process";
@@ -23,29 +24,85 @@ if (process.env.DSH_SMOKE_BASIC_USER && process.env.DSH_SMOKE_BASIC_PASSWORD) {
     ).toString("base64");
 }
 
-function probeWebSocket() {
+const CANDIDATE_PATHS = process.env.DSH_SMOKE_WS_PATH
+  ? [process.env.DSH_SMOKE_WS_PATH]
+  : ["/api/events.mux", "/api/events.host", "/ws"];
+
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+function computeAccept(key) {
+  return createHash("sha1").update(key + WS_GUID).digest("base64");
+}
+
+function encodeClientControlFrame(opcode, payload = Buffer.alloc(0)) {
+  const len = payload.length;
+  const buf = Buffer.alloc(2 + 4 + len);
+  buf[0] = 0x80 | (opcode & 0x0f);
+  buf[1] = 0x80 | (len & 0x7f);
+  const mask = randomBytes(4);
+  mask.copy(buf, 2);
+  for (let i = 0; i < len; i++) {
+    buf[6 + i] = payload[i] ^ mask[i % 4];
+  }
+  return buf;
+}
+
+function parseFrameHeader(buf) {
+  if (buf.length < 2) return null;
+  const fin = (buf[0] & 0x80) !== 0;
+  const opcode = buf[0] & 0x0f;
+  const hasMask = (buf[1] & 0x80) !== 0;
+  let len = buf[1] & 0x7f;
+  let offset = 2;
+  if (len === 126) {
+    if (buf.length < 4) return null;
+    len = buf.readUInt16BE(offset);
+    offset += 2;
+  } else if (len === 127) {
+    if (buf.length < 10) return null;
+    len = Number(buf.readBigUInt64BE(offset));
+    offset += 8;
+  }
+  let maskKey = null;
+  if (hasMask) {
+    if (buf.length < offset + 4) return null;
+    maskKey = buf.slice(offset, offset + 4);
+    offset += 4;
+  }
+  if (buf.length < offset + len) return null;
+  const payload = Buffer.alloc(len);
+  for (let i = 0; i < len; i++) {
+    payload[i] = hasMask ? buf[offset + i] ^ maskKey[i % 4] : buf[offset + i];
+  }
+  return { fin, opcode, payload, totalLength: offset + len };
+}
+
+function probePath(targetPath) {
   return new Promise((resolve, reject) => {
     let target;
     try {
-      target = new URL("/ws", baseUrl);
+      target = new URL(targetPath, baseUrl);
     } catch (err) {
-      return reject(new Error(`invalid DSH_SMOKE_URL: ${err.message}`));
+      return reject(new Error(`invalid target URL: ${err.message}`));
     }
 
     const transport = target.protocol === "https:" ? https : http;
     const secKey = randomBytes(16).toString("base64");
+    const expectedAccept = computeAccept(secKey);
+
+    const origin = process.env.DSH_SMOKE_ORIGIN || target.origin;
 
     const headers = {
+      host: target.host,
       connection: "Upgrade",
       upgrade: "websocket",
       "sec-websocket-version": "13",
       "sec-websocket-key": secKey,
+      origin,
+      "sec-fetch-site": "same-origin",
     };
     if (authHeader) {
       headers.authorization = authHeader;
-    }
-    if (process.env.DSH_SMOKE_ORIGIN) {
-      headers.origin = process.env.DSH_SMOKE_ORIGIN;
     }
 
     const req = transport.request(
@@ -59,44 +116,119 @@ function probeWebSocket() {
         let body = "";
         res.on("data", (chunk) => (body += chunk));
         res.on("end", () => {
-          if (res.statusCode === 101) {
-            resolve({ ok: true, detail: "HTTP 101 Switching Protocols" });
-          } else {
-            resolve({ ok: false, detail: `HTTP ${res.statusCode} ${body}` });
-          }
+          resolve({ ok: false, statusCode: res.statusCode, detail: `HTTP ${res.statusCode} ${body}` });
         });
       },
     );
 
+    let completed = false;
+    const done = (result) => {
+      if (completed) return;
+      completed = true;
+      resolve(result);
+    };
+
     req.on("upgrade", (res, socket, head) => {
-      // Cleanly terminate socket
-      socket.destroy();
-      resolve({ ok: true, detail: "WebSocket 101 upgrade admitted and transport functional" });
+      const actualAccept = res.headers["sec-websocket-accept"];
+      if (!actualAccept || actualAccept !== expectedAccept) {
+        try { socket.destroy(); } catch {}
+        return done({
+          ok: false,
+          statusCode: 101,
+          detail: `Sec-WebSocket-Accept mismatch: expected ${expectedAccept}, got ${actualAccept ?? "missing"}`,
+        });
+      }
+
+      // Test data plane: send Ping frame and await Pong (or downlink stream frame)
+      const pingPayload = Buffer.from("orbit-dsh-transport-ping");
+      const pingFrame = encodeClientControlFrame(0x09, pingPayload);
+
+      let buf = head && head.length > 0 ? Buffer.from(head) : Buffer.alloc(0);
+
+      const cleanup = () => {
+        try {
+          // Send normal close frame
+          const closeFrame = encodeClientControlFrame(0x08, Buffer.from([0x03, 0xe8]));
+          socket.write(closeFrame);
+        } catch {}
+        try { socket.destroy(); } catch {}
+      };
+
+      const timer = setTimeout(() => {
+        cleanup();
+        done({
+          ok: false,
+          statusCode: 101,
+          detail: `transport data plane verification timed out after ${timeoutMs}ms`,
+        });
+      }, timeoutMs);
+
+      const onData = (chunk) => {
+        buf = Buffer.concat([buf, chunk]);
+        const frame = parseFrameHeader(buf);
+        if (frame) {
+          clearTimeout(timer);
+          socket.removeListener("data", onData);
+          cleanup();
+          const frameType = frame.opcode === 0x0a ? "Pong frame received" : `downlink frame (opcode 0x${frame.opcode.toString(16)}) received`;
+          done({
+            ok: true,
+            statusCode: 101,
+            detail: `WebSocket 101 upgrade on ${targetPath} verified: valid accept, ${frameType}`,
+          });
+        }
+      };
+
+      socket.on("data", onData);
+      socket.on("error", (err) => {
+        clearTimeout(timer);
+        cleanup();
+        done({ ok: false, statusCode: 101, detail: `socket error after upgrade: ${err.message}` });
+      });
+      socket.on("end", () => {
+        clearTimeout(timer);
+        cleanup();
+        done({ ok: false, statusCode: 101, detail: "socket closed prematurely by server before transport verification" });
+      });
+
+      // Write Ping frame to server
+      socket.write(pingFrame);
     });
 
     req.on("error", (err) => {
-      resolve({ ok: false, detail: err.message });
+      done({ ok: false, detail: `request error: ${err.message}` });
     });
 
     req.on("timeout", () => {
       req.destroy();
-      resolve({ ok: false, detail: `timed out after ${timeoutMs}ms` });
+      done({ ok: false, detail: `timed out after ${timeoutMs}ms` });
     });
 
     req.end();
   });
 }
 
-try {
-  const result = await probeWebSocket();
-  if (result.ok) {
-    console.log(`webSocketTransport: pass (${result.detail})`);
-    process.exit(0);
-  } else {
-    console.error(`webSocketTransport: fail (${result.detail})`);
-    process.exit(1);
+async function runSmoke() {
+  const attempts = [];
+  for (const path of CANDIDATE_PATHS) {
+    const res = await probePath(path);
+    if (res.ok) {
+      console.log(`webSocketTransport: pass (${res.detail})`);
+      process.exit(0);
+    }
+    attempts.push(`${path} -> ${res.detail}`);
+    // If not 404 (e.g. auth failed 401 or invalid accept on a real endpoint), don't blindly fall through
+    if (res.statusCode && res.statusCode !== 404 && res.statusCode !== 426) {
+      console.error(`webSocketTransport: fail (${res.detail})`);
+      process.exit(1);
+    }
   }
-} catch (err) {
-  console.error(`webSocketTransport error: ${err.message}`);
+
+  console.error(`webSocketTransport: fail (${attempts.join("; ")})`);
   process.exit(1);
 }
+
+runSmoke().catch((err) => {
+  console.error(`webSocketTransport error: ${err.message}`);
+  process.exit(1);
+});
