@@ -251,9 +251,87 @@ test("Stage 4 Capability Reconciliation: Nodes with no report or mismatched runt
     assert.equal(n2.health.capabilitiesStale, true);
     assert.equal(n2.health.orbitCompatible, "stale");
 
+    // Reconciliation health changes must be recorded as RFC-0009 transition events.
+    const noReportEvents = upgradedDb
+      .prepare(
+        "SELECT dimension, from_value, to_value, source FROM events WHERE node_id = ? ORDER BY id",
+      )
+      .all(nodeNoReport)
+      .map((row) => ({ ...row }));
+    assert.deepEqual(noReportEvents, [
+      {
+        dimension: "orbit_compatible",
+        from_value: "pass",
+        to_value: "unknown",
+        source: "capability-reconciliation",
+      },
+      {
+        dimension: "dsh_healthy",
+        from_value: "ok",
+        to_value: "unknown",
+        source: "capability-reconciliation",
+      },
+    ]);
+
+    const mismatchEvents = upgradedDb
+      .prepare(
+        "SELECT dimension, from_value, to_value, source FROM events WHERE node_id = ? ORDER BY id",
+      )
+      .all(nodeMismatch)
+      .map((row) => ({ ...row }));
+    assert.deepEqual(mismatchEvents, [
+      {
+        dimension: "orbit_compatible",
+        from_value: "pass",
+        to_value: "stale",
+        source: "capability-reconciliation",
+      },
+      {
+        dimension: "dsh_healthy",
+        from_value: "ok",
+        to_value: "unknown",
+        source: "capability-reconciliation",
+      },
+    ]);
+
     // Both must fail route eligibility
     assert.equal(evaluateRouteEligibility(registry, nodeNoReport).eligible, false);
     assert.equal(evaluateRouteEligibility(registry, nodeMismatch).eligible, false);
+
+    // Reconciliation state, transition events, and audit must be atomic.
+    upgradedDb
+      .prepare(
+        "UPDATE nodes SET orbit_compatible = 'pass', dsh_healthy = 'ok', capabilities_stale = 0 WHERE node_id = ?",
+      )
+      .run(nodeMismatch);
+    const eventCountBeforeFailedReconcile = upgradedDb
+      .prepare("SELECT COUNT(*) AS count FROM events WHERE node_id = ?")
+      .get(nodeMismatch).count;
+    const originalRecordAudit = registry.recordAudit;
+    registry.recordAudit = () => {
+      throw new Error("forced-reconciliation-audit-failure");
+    };
+    assert.throws(
+      () => registry.reconcileCapabilities(),
+      /forced-reconciliation-audit-failure/,
+    );
+    registry.recordAudit = originalRecordAudit;
+
+    const afterFailedReconcile = registry.getNodeRow(nodeMismatch);
+    assert.equal(afterFailedReconcile.orbit_compatible, "pass");
+    assert.equal(afterFailedReconcile.dsh_healthy, "ok");
+    assert.equal(afterFailedReconcile.capabilities_stale, 0);
+    const eventCountAfterFailedReconcile = upgradedDb
+      .prepare("SELECT COUNT(*) AS count FROM events WHERE node_id = ?")
+      .get(nodeMismatch).count;
+    assert.equal(eventCountAfterFailedReconcile, eventCountBeforeFailedReconcile);
+
+    // A normal retry commits all three together.
+    registry.reconcileCapabilities();
+    const afterSuccessfulRetry = registry.getNodeRow(nodeMismatch);
+    assert.equal(afterSuccessfulRetry.orbit_compatible, "stale");
+    assert.equal(afterSuccessfulRetry.dsh_healthy, "unknown");
+    assert.equal(afterSuccessfulRetry.capabilities_stale, 1);
 
     upgradedDb.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
     registry.close();

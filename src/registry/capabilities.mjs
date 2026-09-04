@@ -69,7 +69,10 @@ export function identityMatches(reportIdentity, runtimeIdentity) {
 // Re-evaluates materialized node capabilities against the latest uploaded
 // compatibility report using current contract evidence rules (e.g. web.routes
 // requiring webSocketTransport). Reconciles stale, missing, or pre-v0.4 capabilities.
-export function reconcileNodeCapabilities(db, { now = () => new Date(), recordAudit = null } = {}) {
+export function reconcileNodeCapabilities(
+  db,
+  { now = () => new Date(), recordAudit = null, recordTransition = null } = {},
+) {
   const tables = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('nodes', 'reports')")
     .all()
@@ -88,14 +91,56 @@ export function reconcileNodeCapabilities(db, { now = () => new Date(), recordAu
 
   const nowMs = now().getTime();
 
+  const persistReconciledState = (
+    node,
+    { capabilities, capabilitiesStale, orbitCompatible, dshHealthy, auditDetail },
+  ) => {
+    if (recordTransition && node.orbit_compatible !== orbitCompatible) {
+      recordTransition(
+        node.node_id,
+        "orbit_compatible",
+        node.orbit_compatible,
+        orbitCompatible,
+        "capability-reconciliation",
+      );
+    }
+    if (recordTransition && node.dsh_healthy !== dshHealthy) {
+      recordTransition(
+        node.node_id,
+        "dsh_healthy",
+        node.dsh_healthy,
+        dshHealthy,
+        "capability-reconciliation",
+      );
+    }
+    updateNodeStmt.run(
+      JSON.stringify(capabilities),
+      capabilitiesStale,
+      orbitCompatible,
+      dshHealthy,
+      node.node_id,
+    );
+    if (recordAudit) {
+      recordAudit(node.node_id, auditDetail);
+    }
+  };
+
   for (const node of nodes) {
     const latest = getLatestReportStmt.get(node.node_id);
     if (!latest) {
-      if (node.capabilities !== "[]" || node.capabilities_stale === 0) {
-        updateNodeStmt.run("[]", 1, "unknown", "unknown", node.node_id);
-        if (recordAudit) {
-          recordAudit(node.node_id, { previous: node.capabilities, next: [], reason: "no-report" });
-        }
+      if (
+        node.capabilities !== "[]" ||
+        node.capabilities_stale !== 1 ||
+        node.orbit_compatible !== "unknown" ||
+        node.dsh_healthy !== "unknown"
+      ) {
+        persistReconciledState(node, {
+          capabilities: [],
+          capabilitiesStale: 1,
+          orbitCompatible: "unknown",
+          dshHealthy: "unknown",
+          auditDetail: { previous: node.capabilities, next: [], reason: "no-report" },
+        });
       }
       continue;
     }
@@ -104,7 +149,20 @@ export function reconcileNodeCapabilities(db, { now = () => new Date(), recordAu
     try {
       report = JSON.parse(latest.report_json);
     } catch {
-      updateNodeStmt.run("[]", 1, "unknown", "unknown", node.node_id);
+      if (
+        node.capabilities !== "[]" ||
+        node.capabilities_stale !== 1 ||
+        node.orbit_compatible !== "unknown" ||
+        node.dsh_healthy !== "unknown"
+      ) {
+        persistReconciledState(node, {
+          capabilities: [],
+          capabilitiesStale: 1,
+          orbitCompatible: "unknown",
+          dshHealthy: "unknown",
+          auditDetail: { previous: node.capabilities, next: [], reason: "invalid-report" },
+        });
+      }
       continue;
     }
 
@@ -140,16 +198,20 @@ export function reconcileNodeCapabilities(db, { now = () => new Date(), recordAu
     if (
       node.capabilities !== rederivedJson ||
       node.capabilities_stale !== nextStale ||
-      (isFresh === false && (node.orbit_compatible === "pass" || node.dsh_healthy !== "unknown"))
+      node.orbit_compatible !== nextCompatible ||
+      node.dsh_healthy !== nextDshHealthy
     ) {
-      updateNodeStmt.run(rederivedJson, nextStale, nextCompatible, nextDshHealthy, node.node_id);
-      if (recordAudit) {
-        recordAudit(node.node_id, {
+      persistReconciledState(node, {
+        capabilities: rederived,
+        capabilitiesStale: nextStale,
+        orbitCompatible: nextCompatible,
+        dshHealthy: nextDshHealthy,
+        auditDetail: {
           previous: node.capabilities,
           next: rederived,
           stale: nextStale,
-        });
-      }
+        },
+      });
     }
   }
 }

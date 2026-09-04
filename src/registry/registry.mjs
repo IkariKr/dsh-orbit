@@ -136,13 +136,19 @@ export class Registry {
     this.reconcileCapabilities();
   }
 
-  reconcileCapabilities() {
-    reconcileNodeCapabilities(this.db, {
-      now: this.now,
-      recordAudit: (nodeId, detail) => {
-        this.recordAudit(`system:${nodeId}`, "hub.capabilities.reconciled", detail);
-      },
-    });
+  reconcileCapabilities({ transactional = true } = {}) {
+    const reconcile = () =>
+      reconcileNodeCapabilities(this.db, {
+        now: this.now,
+        recordTransition: (nodeId, dimension, fromValue, toValue, source) => {
+          this.recordEvent(nodeId, dimension, String(fromValue), String(toValue), source);
+        },
+        recordAudit: (nodeId, detail) => {
+          this.recordAudit(`system:${nodeId}`, "hub.capabilities.reconciled", detail);
+        },
+      });
+
+    return transactional ? withTransaction(this.db, reconcile) : reconcile();
   }
 
   // ------------------------------------------------------------------
@@ -1373,7 +1379,7 @@ export class Registry {
         }
       }
 
-      this.reconcileCapabilities();
+      this.reconcileCapabilities({ transactional: false });
 
       // Daily rollups for events older than 7 days (RFC-0009): each
       // (node, day, dimension) group becomes one summary row. ONLY
