@@ -1,0 +1,205 @@
+:root {
+  --bg: #101418;
+  --panel: #1a2027;
+  --panel-2: #212a33;
+  --border: #33404d;
+  --text: #e6edf3;
+  --muted: #9aa7b4;
+  --ok: #2ea043;
+  --warn: #d29922;
+  --bad: #f85149;
+  --info: #58a6ff;
+  --focus: #388bfd;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, sans-serif;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 { font-size: 18px; margin: 0; }
+
+.session-status { color: var(--muted); font-size: 13px; }
+.session-status.ok { color: var(--ok); }
+.session-status.bad { color: var(--bad); }
+
+nav {
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+}
+
+.nav-button {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.nav-button:hover { background: var(--panel-2); }
+.nav-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+main {
+  padding: 20px;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+#state-banner { margin-bottom: 16px; }
+.banner {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+}
+.banner.error { border-color: var(--bad); color: var(--bad); background: rgba(248, 81, 73, 0.1); }
+.banner.loading { color: var(--muted); }
+.banner.empty { color: var(--muted); }
+.banner.auth-error { border-color: var(--warn); color: var(--warn); background: rgba(210, 153, 34, 0.1); }
+
+.selector-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.selector-card.eligible { border-left: 4px solid var(--ok); }
+.selector-card.ineligible { border-left: 4px solid var(--border); }
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.node-title {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.node-meta {
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dimension-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 12px;
+}
+.badge .dimension { color: var(--muted); }
+.badge.fresh, .badge.ok, .badge.pass, .badge.active { border-color: var(--ok); color: var(--ok); }
+.badge.stale, .badge.degraded, .badge.warn { border-color: var(--warn); color: var(--warn); }
+.badge.lost, .badge.fail, .badge.revoked, .badge.tombstoned, .badge.unreachable { border-color: var(--bad); color: var(--bad); }
+.badge.unknown, .badge.not_run { border-color: var(--border); color: var(--muted); }
+
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.unavailable-reason {
+  color: var(--muted);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.unavailable-reason::before {
+  content: "•";
+  color: var(--warn);
+}
+
+.open-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ok);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+}
+.open-button:hover { background: #2c973f; }
+.open-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.disabled-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  cursor: not-allowed;
+}
+
+.retry-button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 4px;
+  margin-left: 8px;
+  cursor: pointer;
+}
+.retry-button:hover { background: var(--panel); }
+.retry-button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

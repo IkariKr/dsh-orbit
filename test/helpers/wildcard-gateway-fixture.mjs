@@ -14,20 +14,27 @@ export function startWildcardGateway({
   gatewayToken,
   gatewaySecret = "test-gateway-secret",
   operatorId = "operator",
+  protocol = "https",
+  port = 0,
 }) {
-  const registrationAuthority = `register.${routeDomain}`;
+  const cleanRouteDomain = routeDomain.toLowerCase().split(":")[0].replace(/\.$/, "");
+  const registrationAuthority = `register.${cleanRouteDomain}`;
 
   return new Promise(async (resolve, reject) => {
     try {
-      const key = await readFile(keyPath);
-      const cert = await readFile(certPath);
+      let key = null;
+      let cert = null;
+      if (protocol === "https") {
+        key = await readFile(keyPath);
+        cert = await readFile(certPath);
+      }
 
       function checkHost(incomingHost) {
         const hostWithoutPort = incomingHost.toLowerCase().split(":")[0].replace(/\.$/, "");
         const isRehearsalHost =
-          hostWithoutPort === routeDomain ||
+          hostWithoutPort === cleanRouteDomain ||
           hostWithoutPort === registrationAuthority ||
-          hostWithoutPort.endsWith(`.${routeDomain}`);
+          hostWithoutPort.endsWith(`.${cleanRouteDomain}`);
         return { hostWithoutPort, isRehearsalHost };
       }
 
@@ -36,6 +43,14 @@ export function startWildcardGateway({
         forwardHeaders.host = originalHost;
         delete forwardHeaders["x-gateway-auth"];
         delete forwardHeaders["x-gateway-secret"];
+        if (forwardHeaders.cookie) {
+          forwardHeaders.cookie = forwardHeaders.cookie
+            .split(";")
+            .map((c) => c.trim())
+            .filter((c) => !c.startsWith("gateway-auth="))
+            .join("; ");
+          if (!forwardHeaders.cookie) delete forwardHeaders.cookie;
+        }
         forwardHeaders["x-dsh-authenticated-proxy"] = gatewaySecret;
         forwardHeaders["x-dsh-operator-id"] = operatorId;
 
@@ -157,7 +172,7 @@ export function startWildcardGateway({
         upstreamReq.end();
       }
 
-      const server = https.createServer({ key, cert }, (req, res) => {
+      const requestHandler = (req, res) => {
         const incomingHost = req.headers.host || "";
         const { hostWithoutPort, isRehearsalHost } = checkHost(incomingHost);
 
@@ -177,13 +192,25 @@ export function startWildcardGateway({
           return;
         }
 
-        if (hostWithoutPort === routeDomain) {
-          forwardHttpToHub(req, res, hubPort, incomingHost);
-          return;
+        // Gateway login helper to set edge auth cookie for browser navigation
+        if (req.url.startsWith("/gateway-login")) {
+          const urlObj = new URL(req.url, "http://localhost");
+          const tokenParam = urlObj.searchParams.get("token");
+          if (tokenParam === gatewayToken) {
+            res.writeHead(302, {
+              "set-cookie": `gateway-auth=${gatewayToken}; Domain=.${cleanRouteDomain}; Path=/; SameSite=Lax`,
+              location: urlObj.searchParams.get("return") || "/",
+            });
+            res.end();
+            return;
+          }
         }
 
-        // Enforce outer gateway authentication for routed node traffic
-        const providedGatewayAuth = req.headers["x-gateway-auth"];
+        // Enforce outer gateway authentication for selector authority (routeDomain)
+        // and routed node authorities (*.routeDomain).
+        const cookieHeader = req.headers.cookie || "";
+        const cookieAuth = cookieHeader.match(/(?:^|;\s*)gateway-auth=([^;]+)/)?.[1];
+        const providedGatewayAuth = req.headers["x-gateway-auth"] || cookieAuth;
         if (!providedGatewayAuth || providedGatewayAuth !== gatewayToken) {
           res.writeHead(401, { "content-type": "application/json" });
           res.end(JSON.stringify({ error: { code: "gateway-auth-required", message: "valid outer gateway authentication required" } }));
@@ -191,7 +218,11 @@ export function startWildcardGateway({
         }
 
         forwardHttpToHub(req, res, hubPort, incomingHost);
-      });
+      };
+
+      const server = protocol === "https"
+        ? https.createServer({ key, cert }, requestHandler)
+        : http.createServer(requestHandler);
 
       server.on("upgrade", (req, clientSocket, head) => {
         clientSocket.on("error", () => {});
@@ -224,13 +255,15 @@ export function startWildcardGateway({
           return;
         }
 
-        if (hostWithoutPort === routeDomain) {
+        if (hostWithoutPort === cleanRouteDomain) {
           forwardWsToHub(req, clientSocket, head, hubPort, incomingHost);
           return;
         }
 
         // Enforce outer gateway authentication for WebSocket upgrades
-        const providedGatewayAuth = req.headers["x-gateway-auth"];
+        const cookieHeader = req.headers.cookie || "";
+        const cookieAuth = cookieHeader.match(/(?:^|;\s*)gateway-auth=([^;]+)/)?.[1];
+        const providedGatewayAuth = req.headers["x-gateway-auth"] || cookieAuth;
         if (!providedGatewayAuth || providedGatewayAuth !== gatewayToken) {
           sendSocketError(401, "gateway-auth-required", "valid outer gateway authentication required");
           return;
@@ -239,7 +272,7 @@ export function startWildcardGateway({
         forwardWsToHub(req, clientSocket, head, hubPort, incomingHost);
       });
 
-      server.listen(0, "127.0.0.1", () => {
+      server.listen(port, "127.0.0.1", () => {
         resolve({
           server,
           port: server.address().port,

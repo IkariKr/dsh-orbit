@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DSH Orbit Endpoint Selector</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <h1>DSH Orbit Endpoint Selector</h1>
+    <div id="session-status" class="session-status" role="status" aria-live="polite">connecting&hellip;</div>
+  </header>
+
+  <nav>
+    <button id="nav-refresh" class="nav-button" type="button" aria-label="Refresh node list">Refresh</button>
+    <button id="nav-logout" class="nav-button" type="button" aria-label="Logout operator session">Logout</button>
+  </nav>
+
+  <main id="main">
+    <div id="state-banner" role="status" aria-live="polite"></div>
+    <section id="selector-view" aria-label="Available endpoints">
+      <div id="nodes-list" role="list"></div>
+    </section>
+  </main>
+
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>

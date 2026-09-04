@@ -905,6 +905,7 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   const selectorWsRes = await performWssUpgrade(clientTlsSocket4, {
     authority: REHEARSAL_DOMAIN,
     path: "/ws",
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
   });
   assert.equal(selectorWsRes.status, 404);
   clientTlsSocket4.destroy();

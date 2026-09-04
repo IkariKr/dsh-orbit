@@ -20,6 +20,7 @@ import {
   proxyWebSocketUpgrade,
   sendSocketHttpError,
 } from "./route-proxy.mjs";
+import { buildSelectorReadModel, mapEligibilityReason, isHtmlAccept, renderUnavailableHtml } from "./selector-view.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -157,11 +158,19 @@ export function createHubServer({ registry, options = {} }) {
   }
   const limiter = new SlidingWindowLimiter();
 
-  // Stage 5: the operator UI shell (pure static assets; the API stays
-  // fully behind the RFC-0007 protections). Public by design — these
-  // files hold no data and no secrets.
+  // Operator management UI assets
   const UI_ROOT = new URL("../../ui/", import.meta.url);
   const UI_ASSETS = new Map([
+    ["/", ["index.html", "text/html; charset=utf-8"]],
+    ["/index.html", ["index.html", "text/html; charset=utf-8"]],
+    ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
+    ["/view-model.mjs", ["view-model.mjs", "text/javascript; charset=utf-8"]],
+    ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
+  ]);
+
+  // Stage 5: Independent Selector UI assets (RFC-0011, Stage 5 Guide)
+  const SELECTOR_UI_ROOT = new URL("../../ui/selector/", import.meta.url);
+  const SELECTOR_UI_ASSETS = new Map([
     ["/", ["index.html", "text/html; charset=utf-8"]],
     ["/index.html", ["index.html", "text/html; charset=utf-8"]],
     ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
@@ -202,6 +211,23 @@ export function createHubServer({ registry, options = {} }) {
       const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
       if (!eligibility.eligible) {
         const selectorUrl = getSelectorReturnUrl(registry.routeDomain, registry.trustedScheme || "https");
+        const accept = request.headers.accept || "";
+
+        if (isHtmlAccept(accept)) {
+          const reasonMapping = mapEligibilityReason(eligibility.reason);
+          const html = renderUnavailableHtml({
+            reasonMessage: reasonMapping.message,
+            routeAuthority: hostClass.routeAuthority,
+            selectorUrl,
+          });
+          response.writeHead(503, {
+            "content-type": "text/html; charset=utf-8",
+            "content-length": Buffer.byteLength(html),
+          });
+          response.end(html);
+          return;
+        }
+
         response.writeHead(503, { "content-type": "application/json" });
         response.end(JSON.stringify({
           error: {
@@ -227,23 +253,58 @@ export function createHubServer({ registry, options = {} }) {
       return;
     }
 
-    // Selector apex authority (RFC-0010 D1, D7):
-    // The exact apex of configured routeDomain (e.g. https://dsh.example.com/)
-    // serves the selector return surface (placeholder until Stage 5 UI).
-    // On the selector apex, only browser root/landing paths are served;
-    // Registry machine surface (/api/v1/*) or operator surface (/hub/*)
-    // are NOT exposed through the public selector apex!
     if (hostClass.type === "selector-apex") {
-      const path = (request.url ?? "/").split("?")[0];
-      if (path === "/" || path === "/index.html") {
-        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        response.end(`<!DOCTYPE html><html><head><title>DSH Selector</title></head><body><h1>DSH Orbit Endpoint Selector</h1><p>Selector authority: ${hostClass.authority}</p></body></html>`);
+      let url;
+      try {
+        url = new URL(request.url ?? "/", "http://registry.local");
+      } catch {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed request URL" } });
+      }
+      if (url.searchParams.size > 0) {
+        return sendJson(response, 400, { error: { code: "query-not-allowed", message: "query strings are not part of the registry protocol" } });
+      }
+      const path = url.pathname;
+
+      // Selector-owned static assets
+      if (request.method === "GET" && SELECTOR_UI_ASSETS.has(path)) {
+        const [fileName, contentType] = SELECTOR_UI_ASSETS.get(path);
+        readFile(new URL(fileName, SELECTOR_UI_ROOT))
+          .then((content) => {
+            let body = content;
+            if (fileName === "index.html") {
+              const htmlStr = content.toString("utf8").replace("</head>", `<meta name="selector-authority" content="${hostClass.authority}"></head>`);
+              body = Buffer.from(htmlStr, "utf8");
+            }
+            response.writeHead(200, { "content-type": contentType, "content-length": body.length });
+            response.end(body);
+          })
+          .catch(() => sendJson(response, 404, { error: { code: "not-found", message: "selector asset missing" } }));
         return;
       }
-      // Any other path on selector apex (especially /api/v1/* or /hub/*) is denied
+
+      // Allowlist on selector authority:
+      // 1. POST /hub/session (bootstrap session)
+      // 2. GET /hub/session (verify session)
+      // 3. POST /hub/session/logout (optional logout)
+      // 4. GET /hub/selector/nodes (sanitized selector read model)
+      if (
+        path === "/hub/session" ||
+        path === "/hub/session/" ||
+        path === "/hub/session/logout" ||
+        path === "/hub/session/logout/" ||
+        path === "/hub/selector/nodes" ||
+        path === "/hub/selector/nodes/"
+      ) {
+        handleBrowserRequest(request, response, path).catch((error) => sendError(response, error));
+        return;
+      }
+
+      // Explicitly forbidden on selector authority:
+      // All other /hub/* (management mutations, tokens, route-target, delete, reenroll)
+      // and all /api/v1/* machine routes return 404 on selector authority.
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({
-        error: { code: "not-found", message: "selector authority does not expose API routes" },
+        error: { code: "not-found", message: "selector authority exposes only selector surface" },
       }));
       return;
     }
@@ -489,6 +550,13 @@ export function createHubServer({ registry, options = {} }) {
       return sendJson(response, 200, { ok: true });
     }
     if (request.method === "GET") {
+      if (path === "/hub/selector/nodes" || path === "/hub/selector/nodes/") {
+        const readModel = buildSelectorReadModel(registry, {
+          routeDomain: registry.routeDomain,
+          trustedScheme: registry.trustedScheme || "https",
+        });
+        return sendJson(response, 200, readModel);
+      }
       if (path === "/hub/nodes" || path === "/hub/nodes/") {
         return sendJson(response, 200, { nodes: registry.listNodes() });
       }

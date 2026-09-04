@@ -12,6 +12,7 @@ import { randomHex } from "./crypto.mjs";
 import { computeRouteAuthority, isValidOriginFormTarget, validateRouteDomain } from "./protocol.mjs";
 import { signRouteRequest } from "./route-auth.mjs";
 import { extendDefaultCaCertificates } from "../tls-trust.mjs";
+import { isHtmlAccept, renderUnavailableHtml } from "./selector-view.mjs";
 
 export { isValidOriginFormTarget };
 
@@ -349,6 +350,19 @@ export function proxyHttpRequest({
   upstreamReq.on("error", (err) => {
     if (!res.headersSent) {
       const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
+      if (isHtmlAccept(req.headers?.accept)) {
+        const html = renderUnavailableHtml({
+          reasonMessage: "Route ingress or downstream DSH is unreachable",
+          routeAuthority,
+          selectorUrl,
+        });
+        res.writeHead(503, {
+          "content-type": "text/html; charset=utf-8",
+          "content-length": Buffer.byteLength(html),
+        });
+        res.end(html);
+        return;
+      }
       res.writeHead(503, { "content-type": "application/json" });
       res.end(JSON.stringify({
         error: {
