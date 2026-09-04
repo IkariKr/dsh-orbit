@@ -41,6 +41,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
 import { validReport } from "./helpers/registry-fixture.mjs";
+import { startSupportedDshCandidate } from "./helpers/dsh-candidate-fixture.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -1023,6 +1024,7 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   const dbPath = join(dir, "hub.db");
   const statePathA = join(dir, "node-a.json");
   const statePathB = join(dir, "node-b.json");
+  const statePathC = join(dir, "node-c.json");
   const nodeCertPath = join(dir, "node-cert.pem");
   const nodeKeyPath = join(dir, "node-key.pem");
   const reportPath = join(dir, "report.json");
@@ -1044,12 +1046,16 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   let gateway = null;
   let nodeA = null;
   let nodeB = null;
+  let nodeC = null;
+  let candidateDsh = null;
   let dshA = null;
   let dshB = null;
 
   t.after(async () => {
     await killProcess(nodeA?.child);
     await killProcess(nodeB?.child);
+    await killProcess(nodeC?.child);
+    if (candidateDsh) await candidateDsh.close();
     await killProcess(hub?.child);
     if (gateway) await gateway.close();
     if (dshA) await dshA.close();
@@ -1057,11 +1063,11 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
     await rm(dir, { recursive: true, force: true });
   });
 
-  console.log("\n=== STEP 1: Launch Downstream DSH Servers with Distinct Identifiers & WebSocket Echo ===");
+  console.log("\n=== STEP 1: Launch Downstream Protocol Fixture Servers (A & B) with Distinct Identifiers & WebSocket Echo ===");
   dshA = await startIdentifiedDshServer("fixture-nas-node-A");
   dshB = await startIdentifiedDshServer("fixture-workstation-node-B");
-  console.log(`[Evidence] DSH A running on ${dshA.target} with HTML, static JS, API, and WebSocket echo`);
-  console.log(`[Evidence] DSH B running on ${dshB.target} with HTML, static JS, API, and WebSocket echo`);
+  console.log(`[Protocol Fixture Evidence] Fixture DSH A running on ${dshA.target} with HTML, static JS, API, and WebSocket echo`);
+  console.log(`[Protocol Fixture Evidence] Fixture DSH B running on ${dshB.target} with HTML, static JS, API, and WebSocket echo`);
 
   console.log("\n=== STEP 2: Start Hub Daemon with Route Domain & Private CA ===");
   hub = await startHubProcess({ dbPath, caCertPath: nodeCertPath, routeDomain: REHEARSAL_DOMAIN, cadenceSeconds: 1 });
@@ -1182,8 +1188,8 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   await waitForNodeEligible(hub.baseUrl, opSession, enrollResB.nodeId);
   console.log(`[Evidence] Both nodes satisfied all 5 conditions (active, routeTarget, reachable=ok, activeKey, web.routes)`);
 
-  console.log("\n=== STEP 8: Execute Routed WSS WebSockets via Real WSS Wildcard Gateway ===");
-  // Request 8.1: WSS Connection to Authority A -> Must reach DSH A and return Fixture A WSS Echo
+  console.log("\n=== STEP 8: Execute Routed WSS WebSockets via Real WSS Wildcard Gateway (Protocol Fixtures A & B) ===");
+  // Request 8.1: WSS Connection to Authority A -> Must reach Fixture A and return Fixture A WSS Echo
   const tlsSocketA = await connectGatewayTlsSocket({
     gatewayPort: gateway.port,
     authority: authorityA,
@@ -1235,9 +1241,9 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   });
 
   assert.equal(replyA, `[fixture-nas-node-A] ${msgA}`);
-  console.log(`[Evidence] Authority A WSS connection successfully verified (reached DSH A, echo prefixed '[fixture-nas-node-A]')`);
+  console.log(`[Protocol Fixture Evidence] Authority A WSS connection successfully verified (reached Fixture A, echo prefixed '[fixture-nas-node-A]')`);
 
-  // Request 8.2: WSS Connection to Authority B -> Must reach DSH B and return Fixture B WSS Echo
+  // Request 8.2: WSS Connection to Authority B -> Must reach Fixture B and return Fixture B WSS Echo
   const tlsSocketB = await connectGatewayTlsSocket({
     gatewayPort: gateway.port,
     authority: authorityB,
@@ -1279,25 +1285,88 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   });
 
   assert.equal(replyB, `[fixture-workstation-node-B] ${msgB}`);
-  console.log(`[Evidence] Authority B WSS connection successfully verified (reached DSH B, echo prefixed '[fixture-workstation-node-B]')`);
-  console.log(`[Evidence] Strict fixture isolation proven: A returned Fixture A, B returned Fixture B`);
+  console.log(`[Protocol Fixture Evidence] Authority B WSS connection successfully verified (reached Fixture B, echo prefixed '[fixture-workstation-node-B]')`);
+  console.log(`[Protocol Fixture Evidence] Strict fixture isolation proven: A returned Fixture A, B returned Fixture B`);
 
   safeDestroy(tlsSocketA);
   safeDestroy(tlsSocketB);
 
-  // Request 8.3: Supported DSH 0.1.1-rc.2 Downlink WebSocket Acceptance (/api/events.mux)
-  console.log("\n=== STEP 8.3: Supported DSH 0.1.1-rc.2 Profile Downlink Acceptance (/api/events.mux) ===");
+  // Request 8.3: Real Supported DSH 0.1.1-rc.2 Candidate Acceptance (HTTP Root, Assets, API, and Downlink WebSocket)
+  console.log("\n=== STEP 8.3: Real Supported DSH 0.1.1-rc.2 Candidate Acceptance (HTTP Root, Assets, API, and Downlink WebSocket) ===");
+  const tokenC = await operatorMintToken(hub.baseUrl, opSession);
+  const enrollResC = await runNodeEnroll({ statePath: statePathC, hubUrl: hub.baseUrl, enrollTokenValue: tokenC });
+  await runNodeUploadReport({ statePath: statePathC, hubUrl: hub.baseUrl, reportPath });
+  const authorityC = computeRouteAuthority(enrollResC.nodeId, REHEARSAL_DOMAIN);
+
+  candidateDsh = await startSupportedDshCandidate({
+    trustedHosts: [authorityC],
+  });
+  console.log(`[Candidate Evidence] Real DSH 0.1.1-rc.2 candidate process running on ${candidateDsh.target} (revision ${candidateDsh.revision.slice(0, 8)})`);
+
+  nodeC = await startNodeDaemon({
+    statePath: statePathC,
+    hubUrl: hub.baseUrl,
+    dshTarget: candidateDsh.target,
+    cadence: 30,
+  });
+  await operatorSetRouteTarget(hub.baseUrl, opSession, enrollResC.nodeId, nodeC.ingressOrigin);
+  await waitForNodeEligible(hub.baseUrl, opSession, enrollResC.nodeId);
+  console.log(`[Candidate Evidence] Candidate Node enrolled and verified eligible with authority: ${authorityC}`);
+
+  // Test 8.3.1: Real DSH 0.1.1-rc.2 HTML Root via Wildcard Gateway
+  const candidateRootRes = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: authorityC,
+    path: "/",
+    caCert: wildcardCaCert,
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+  });
+  assert.equal(candidateRootRes.status, 200);
+  assert.equal(candidateRootRes.headers["x-dsh-version"], "0.1.1-rc.2");
+  assert.ok((await candidateRootRes.text()).includes('<div id="root"></div>'));
+  console.log(`[Candidate Evidence] Real DSH 0.1.1-rc.2 HTML root served through wildcard gateway (x-dsh-version 0.1.1-rc.2)`);
+
+  // Test 8.3.2: Real DSH 0.1.1-rc.2 Static Asset via Wildcard Gateway
+  const candidateAssetRes = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: authorityC,
+    path: "/assets/index-CSGf6Qzd.css",
+    caCert: wildcardCaCert,
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+  });
+  assert.equal(candidateAssetRes.status, 200);
+  assert.ok((await candidateAssetRes.text()).length > 1000);
+  console.log(`[Candidate Evidence] Real DSH 0.1.1-rc.2 static CSS asset served through wildcard gateway`);
+
+  // Test 8.3.3: Real DSH 0.1.1-rc.2 API Request via Wildcard Gateway
+  const candidateApiRes = await makeGatewayRequest({
+    gatewayPort: gateway.port,
+    authority: authorityC,
+    path: "/api/session.status",
+    caCert: wildcardCaCert,
+    headers: {
+      "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN,
+      Origin: `https://${authorityC}`,
+    },
+  });
+  assert.equal(candidateApiRes.status, 200);
+  const candidateApiJson = await candidateApiRes.json();
+  assert.equal(candidateApiJson.result.dshVersion, "0.1.1-rc.2");
+  assert.equal(candidateApiJson.result.profile, "dsh-0.1.1-rc.2");
+  console.log(`[Candidate Evidence] Real DSH 0.1.1-rc.2 API RPC verified through wildcard gateway`);
+
+  // Test 8.3.4: Real DSH 0.1.1-rc.2 Downlink WebSocket Acceptance (/api/events.mux)
   const dshTlsSocket = await connectGatewayTlsSocket({
     gatewayPort: gateway.port,
-    authority: authorityA,
+    authority: authorityC,
     caCert: wildcardCaCert,
   });
   const dshWsRes = await performWssUpgrade(dshTlsSocket, {
-    authority: authorityA,
+    authority: authorityC,
     path: "/api/events.mux",
     headers: {
       "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN,
-      Origin: `https://${authorityA}`,
+      Origin: `https://${authorityC}`,
     },
   });
   assert.equal(dshWsRes.status, 101);
@@ -1324,8 +1393,9 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   });
   const parsedEvent = JSON.parse(downlinkFrame.payload.toString("utf8"));
   assert.equal(parsedEvent.type, "server-request");
-  assert.equal(parsedEvent.method, "stream/ready");
-  console.log(`[Evidence] DSH 0.1.1-rc.2 server-to-browser downlink event received on /api/events.mux`);
+  assert.equal(parsedEvent.method, "session/status");
+  assert.equal(parsedEvent.payload.version, "0.1.1-rc.2");
+  console.log(`[Candidate Evidence] Real DSH 0.1.1-rc.2 server-to-browser downlink event received on /api/events.mux`);
 
   // Verify Ping -> Pong control frame
   const pingFrame = Buffer.from([0x89, 0x84, 0x11, 0x22, 0x33, 0x44, 0x70, 0x49, 0x5a, 0x27]); // Ping masked
@@ -1340,7 +1410,7 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
     dshTlsSocket.on("data", onData);
   });
   assert.equal(pongReceived, true);
-  console.log(`[Evidence] DSH 0.1.1-rc.2 control plane Ping/Pong verified over routed WSS`);
+  console.log(`[Candidate Evidence] Real DSH 0.1.1-rc.2 control plane Ping/Pong verified over routed WSS`);
 
   // Verify client message violation triggers 1008 downlink only close
   const clientViolationMessage = encodeFrame("unsupported client message", { isClient: true });
@@ -1361,17 +1431,17 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   });
   assert.equal(closedWith1008.code, 1008);
   assert.equal(closedWith1008.reason, "downlink only");
-  console.log(`[Evidence] DSH 0.1.1-rc.2 downlink-only client message correctly closed with 1008 'downlink only'`);
+  console.log(`[Candidate Evidence] Real DSH 0.1.1-rc.2 downlink-only client message correctly closed with 1008 'downlink only'`);
   safeDestroy(dshTlsSocket);
 
   // Negative test: DSH browser-trust fence denies mismatched Origin on WebSocket upgrade
   const mismatchTlsSocket = await connectGatewayTlsSocket({
     gatewayPort: gateway.port,
-    authority: authorityA,
+    authority: authorityC,
     caCert: wildcardCaCert,
   });
   const mismatchRes = await performWssUpgrade(mismatchTlsSocket, {
-    authority: authorityA,
+    authority: authorityC,
     path: "/api/events.mux",
     headers: {
       "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN,
@@ -1380,7 +1450,10 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   });
   assert.equal(mismatchRes.status, 403);
   safeDestroy(mismatchTlsSocket);
-  console.log(`[Evidence] DSH 0.1.1-rc.2 browser-trust fence verified: mismatched Origin fails closed with 403`);
+  console.log(`[Candidate Evidence] Real DSH 0.1.1-rc.2 browser-trust fence verified: mismatched Origin fails closed with 403`);
+
+  await killProcess(nodeC?.child);
+  if (candidateDsh) await candidateDsh.close();
 
   console.log("\n=== STEP 9: Ingress Fault Isolation (Stop Node A -> Node B WSS Unaffected) ===");
   await killProcess(nodeA.child);
