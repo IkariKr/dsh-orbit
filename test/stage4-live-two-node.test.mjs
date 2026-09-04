@@ -41,6 +41,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
 import { validReport } from "./helpers/registry-fixture.mjs";
+import { startWildcardGateway } from "./helpers/wildcard-gateway-fixture.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -187,240 +188,6 @@ function parseHttpResponse(rawText) {
     }
   }
   return { status, statusLine, headers, body, raw: rawText };
-}
-
-function startWildcardGateway({ keyPath, certPath, hubPort }) {
-  return new Promise(async (resolve, reject) => {
-    const key = await readFile(keyPath);
-    const cert = await readFile(certPath);
-
-    const server = https.createServer({ key, cert }, (req, res) => {
-      handleGatewayHttp(req, res);
-    });
-
-    function checkHost(incomingHost) {
-      const hostWithoutPort = incomingHost.toLowerCase().split(":")[0].replace(/\.$/, "");
-      const isRehearsalHost =
-        hostWithoutPort === REHEARSAL_DOMAIN ||
-        hostWithoutPort === REGISTRATION_AUTHORITY ||
-        hostWithoutPort.endsWith(`.${REHEARSAL_DOMAIN}`);
-      return { hostWithoutPort, isRehearsalHost };
-    }
-
-    function handleGatewayHttp(req, res) {
-      const incomingHost = req.headers.host || "";
-      const { hostWithoutPort, isRehearsalHost } = checkHost(incomingHost);
-
-      if (!isRehearsalHost) {
-        res.writeHead(400, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: { code: "unrelated-host-denied", message: "gateway does not route foreign host" } }));
-        return;
-      }
-
-      if (hostWithoutPort === REGISTRATION_AUTHORITY) {
-        if (req.url.startsWith("/api/v1/")) {
-          res.writeHead(403, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: { code: "machine-ingress-denied", message: "private machine surface" } }));
-          return;
-        }
-        forwardHttpToHub(req, res, hubPort, incomingHost);
-        return;
-      }
-
-      if (hostWithoutPort === REHEARSAL_DOMAIN) {
-        forwardHttpToHub(req, res, hubPort, incomingHost);
-        return;
-      }
-
-      const providedGatewayAuth = req.headers["x-gateway-auth"];
-      if (!providedGatewayAuth || providedGatewayAuth !== REHEARSAL_GATEWAY_TOKEN) {
-        res.writeHead(401, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: { code: "gateway-auth-required", message: "valid outer gateway authentication required" } }));
-        return;
-      }
-
-      forwardHttpToHub(req, res, hubPort, incomingHost);
-    }
-
-    function forwardHttpToHub(req, res, targetPort, originalHost) {
-      const forwardHeaders = { ...req.headers };
-      forwardHeaders.host = originalHost;
-      delete forwardHeaders["x-gateway-auth"];
-      delete forwardHeaders["x-gateway-secret"];
-
-      const upstream = http.request(
-        {
-          hostname: "127.0.0.1",
-          port: targetPort,
-          path: req.url,
-          method: req.method,
-          headers: forwardHeaders,
-        },
-        (upstreamRes) => {
-          res.writeHead(upstreamRes.statusCode, upstreamRes.headers);
-          upstreamRes.pipe(res);
-        },
-      );
-
-      upstream.on("error", (err) => {
-        if (!res.headersSent) {
-          res.writeHead(502, { "content-type": "application/json" });
-          res.end(JSON.stringify({ error: { code: "gateway-upstream-error", message: err.message } }));
-        }
-      });
-
-      req.pipe(upstream);
-    }
-
-    // Server-level WebSocket upgrade handling on HTTPS/WSS gateway
-    server.on("upgrade", (req, clientSocket, head) => {
-      const incomingHost = req.headers.host || "";
-      const { hostWithoutPort, isRehearsalHost } = checkHost(incomingHost);
-
-      const sendSocketError = (status, code, message) => {
-        const body = JSON.stringify({ error: { code, message } });
-        const lines = [
-          `HTTP/1.1 ${status} Error`,
-          "Content-Type: application/json",
-          `Content-Length: ${Buffer.byteLength(body)}`,
-          "Connection: close",
-          "",
-          body,
-        ];
-        try {
-          clientSocket.write(lines.join("\r\n"));
-          clientSocket.destroy();
-        } catch {}
-      };
-
-      if (!isRehearsalHost) {
-        sendSocketError(400, "unrelated-host-denied", "gateway does not route foreign host");
-        return;
-      }
-
-      if (hostWithoutPort === REGISTRATION_AUTHORITY) {
-        sendSocketError(403, "machine-ingress-denied", "WebSocket upgrades not allowed on registration authority");
-        return;
-      }
-
-      if (hostWithoutPort === REHEARSAL_DOMAIN) {
-        // Selector apex does not support WebSockets -> Hub returns 404
-        forwardWsToHub(req, clientSocket, head, hubPort, incomingHost);
-        return;
-      }
-
-      // Check outer gateway authentication gate for WebSocket upgrades
-      const providedGatewayAuth = req.headers["x-gateway-auth"];
-      if (!providedGatewayAuth || providedGatewayAuth !== REHEARSAL_GATEWAY_TOKEN) {
-        sendSocketError(401, "gateway-auth-required", "valid outer gateway authentication required");
-        return;
-      }
-
-      forwardWsToHub(req, clientSocket, head, hubPort, incomingHost);
-    });
-
-    function forwardWsToHub(req, clientSocket, head, targetPort, originalHost) {
-      const forwardHeaders = { ...req.headers };
-      forwardHeaders.host = originalHost;
-      delete forwardHeaders["x-gateway-auth"];
-      delete forwardHeaders["x-gateway-secret"];
-
-      const upstreamReq = http.request({
-        hostname: "127.0.0.1",
-        port: targetPort,
-        path: req.url,
-        method: req.method || "GET",
-        headers: forwardHeaders,
-      });
-
-      upstreamReq.on("error", (err) => {
-        const selectorUrl = `https://${REHEARSAL_DOMAIN}/`;
-        const body = JSON.stringify({ error: { code: "bad-gateway", message: err.message, selectorUrl } });
-        const lines = [
-          "HTTP/1.1 502 Bad Gateway",
-          "Content-Type: application/json",
-          `Content-Length: ${Buffer.byteLength(body)}`,
-          "Connection: close",
-          "",
-          body,
-        ];
-        try {
-          clientSocket.write(lines.join("\r\n"));
-          clientSocket.end();
-        } catch {}
-      });
-
-      upstreamReq.on("upgrade", (upstreamRes, upstreamSocket, upstreamHead) => {
-        upstreamReq.setTimeout(0);
-        upstreamSocket.setTimeout(0);
-        clientSocket.setTimeout(0);
-
-        const responseLines = ["HTTP/1.1 101 Switching Protocols"];
-        for (const [k, v] of Object.entries(upstreamRes.headers)) {
-          if (Array.isArray(v)) {
-            for (const item of v) responseLines.push(`${k}: ${item}`);
-          } else {
-            responseLines.push(`${k}: ${v}`);
-          }
-        }
-        responseLines.push("", "");
-        clientSocket.write(responseLines.join("\r\n"));
-
-        if (upstreamHead && upstreamHead.length > 0) {
-          clientSocket.write(upstreamHead);
-        }
-        if (head && head.length > 0) {
-          upstreamSocket.write(head);
-        }
-
-        clientSocket.pipe(upstreamSocket);
-        upstreamSocket.pipe(clientSocket);
-
-        const cleanup = () => {
-          try { clientSocket.destroy(); } catch {}
-          try { upstreamSocket.destroy(); } catch {}
-        };
-        clientSocket.on("error", cleanup);
-        upstreamSocket.on("error", cleanup);
-        clientSocket.on("close", cleanup);
-        upstreamSocket.on("close", cleanup);
-      });
-
-      // Upstream Hub responded with non-101 (e.g. 502 with selectorUrl)
-      upstreamReq.on("response", (upstreamRes) => {
-        const responseHeaders = { ...upstreamRes.headers };
-        delete responseHeaders["transfer-encoding"];
-        responseHeaders["connection"] = "close";
-
-        const lines = [`HTTP/1.1 ${upstreamRes.statusCode} ${upstreamRes.statusMessage || "Error"}`];
-        for (const [k, v] of Object.entries(responseHeaders)) {
-          if (Array.isArray(v)) {
-            for (const item of v) lines.push(`${k}: ${item}`);
-          } else {
-            lines.push(`${k}: ${v}`);
-          }
-        }
-        lines.push("", "");
-        clientSocket.write(lines.join("\r\n"));
-        upstreamRes.pipe(clientSocket);
-      });
-
-      clientSocket.on("error", () => {
-        try { upstreamReq.destroy(); } catch {}
-      });
-
-      upstreamReq.end();
-    }
-
-    server.listen(0, "127.0.0.1", () => {
-      const port = server.address().port;
-      resolve({
-        server,
-        port,
-        close: () => new Promise((r) => server.close(r)),
-      });
-    });
-  });
 }
 
 function makeGatewayRequest({
@@ -1069,7 +836,13 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   let opSession = await getOperatorSession(hub.baseUrl);
 
   console.log("\n=== STEP 3: Start Rehearsal WSS Wildcard Gateway (*.stage4-test.example) ===");
-  gateway = await startWildcardGateway({ keyPath: gwKeyPath, certPath: gwCertPath, hubPort: hub.port });
+  gateway = await startWildcardGateway({
+    keyPath: gwKeyPath,
+    certPath: gwCertPath,
+    hubPort: hub.port,
+    routeDomain: REHEARSAL_DOMAIN,
+    gatewayToken: REHEARSAL_GATEWAY_TOKEN,
+  });
   console.log(`[Evidence] Rehearsal Wildcard WSS/HTTPS Gateway running on port ${gateway.port}`);
 
   console.log("\n=== STEP 4: Negative Gateway Tests (WSS Auth Gate, Selector Apex Denial, and Invalid Wildcard Host) ===");

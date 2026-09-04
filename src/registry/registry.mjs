@@ -3,7 +3,14 @@
 // exactly them. HTTP transport and rate limiting live in server.mjs.
 
 import { createCompatibilityReport } from "../compatibility-report.mjs";
-import { deriveCapabilities, deriveDshHealthy, deriveOrbitCompatible, identityMatches, reportIdentity } from "./capabilities.mjs";
+import {
+  deriveCapabilities,
+  deriveDshHealthy,
+  deriveOrbitCompatible,
+  identityMatches,
+  reconcileNodeCapabilities,
+  reportIdentity,
+} from "./capabilities.mjs";
 import { deriveKeyId, generateNodeKeyPair, randomHex, sha256Hex, signSigningString, verifySigningString } from "./crypto.mjs";
 import { validateRouteTargetOrigin } from "./route-target.mjs";
 import { validateHubRouteKeySet } from "./hub-route-keys.mjs";
@@ -126,6 +133,16 @@ export class Registry {
     this.routeDomain = validateRouteDomain(routeDomain);
     this.caCertificates = caCertificates;
     this.routeProbeFailures = new Map();
+    this.reconcileCapabilities();
+  }
+
+  reconcileCapabilities() {
+    reconcileNodeCapabilities(this.db, {
+      now: this.now,
+      recordAudit: (nodeId, detail) => {
+        this.recordAudit(`system:${nodeId}`, "hub.capabilities.reconciled", detail);
+      },
+    });
   }
 
   // ------------------------------------------------------------------
@@ -1355,6 +1372,8 @@ export class Registry {
             .run(node.node_id);
         }
       }
+
+      this.reconcileCapabilities();
 
       // Daily rollups for events older than 7 days (RFC-0009): each
       // (node, day, dimension) group becomes one summary row. ONLY

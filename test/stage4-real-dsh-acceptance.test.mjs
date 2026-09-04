@@ -36,6 +36,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
 import { validReport } from "./helpers/registry-fixture.mjs";
+import { startWildcardGateway } from "./helpers/wildcard-gateway-fixture.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
@@ -372,7 +373,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
   const wildcardCaCert = await readFile(gwCertPath);
 
   let hubChild = null;
-  let gatewayServer = null;
+  let gateway = null;
   let nodeChild = null;
   let dshChild = null;
 
@@ -380,7 +381,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
     await killProcess(nodeChild);
     await killProcess(dshChild);
     await killProcess(hubChild);
-    if (gatewayServer) await new Promise((r) => gatewayServer.close(r));
+    if (gateway) await gateway.close();
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -421,62 +422,15 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
   });
   const hubBaseUrl = `http://127.0.0.1:${hubPort}`;
 
-  // Step 2: Start Wildcard Gateway
-  const gatewayPort = await new Promise(async (resolve) => {
-    const gwTlsOptions = {
-      key: await readFile(gwKeyPath),
-      cert: await readFile(gwCertPath),
-    };
-    gatewayServer = https.createServer(gwTlsOptions, (req, res) => {
-      const forwardHeaders = { ...req.headers };
-      forwardHeaders["x-dsh-authenticated-proxy"] = "test-gateway-secret";
-      forwardHeaders["x-dsh-operator-id"] = "operator";
-      const proxyReq = http.request({
-        hostname: "127.0.0.1",
-        port: hubPort,
-        path: req.url,
-        method: req.method,
-        headers: forwardHeaders,
-      }, (proxyRes) => {
-        res.writeHead(proxyRes.statusCode, proxyRes.headers);
-        proxyRes.pipe(res);
-      });
-      req.pipe(proxyReq);
-    });
-
-    gatewayServer.on("upgrade", (req, clientSocket, head) => {
-      clientSocket.on("error", () => {});
-      const providedGatewayAuth = req.headers["x-gateway-auth"];
-      if (providedGatewayAuth !== REHEARSAL_GATEWAY_TOKEN) {
-        clientSocket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-        clientSocket.destroy();
-        return;
-      }
-      const forwardHeaders = { ...req.headers };
-      forwardHeaders["x-dsh-authenticated-proxy"] = "test-gateway-secret";
-      forwardHeaders["x-dsh-operator-id"] = "operator";
-      const upstreamReq = http.request({
-        hostname: "127.0.0.1",
-        port: hubPort,
-        path: req.url,
-        method: req.method || "GET",
-        headers: forwardHeaders,
-      });
-      upstreamReq.on("upgrade", (upstreamRes, upstreamSocket, upstreamHead) => {
-        clientSocket.write("HTTP/1.1 101 Switching Protocols\r\n");
-        for (const [k, v] of Object.entries(upstreamRes.headers)) {
-          clientSocket.write(`${k}: ${v}\r\n`);
-        }
-        clientSocket.write("\r\n");
-        if (upstreamHead?.length) clientSocket.write(upstreamHead);
-        upstreamSocket.pipe(clientSocket);
-        clientSocket.pipe(upstreamSocket);
-      });
-      upstreamReq.end();
-    });
-
-    gatewayServer.listen(0, "127.0.0.1", () => resolve(gatewayServer.address().port));
+  // Step 2: Start Wildcard Gateway using shared authenticated fixture
+  gateway = await startWildcardGateway({
+    keyPath: gwKeyPath,
+    certPath: gwCertPath,
+    hubPort,
+    routeDomain: REHEARSAL_DOMAIN,
+    gatewayToken: REHEARSAL_GATEWAY_TOKEN,
   });
+  const gatewayPort = gateway.port;
 
   // Step 3: Enroll Node
   const opHeaders = {
@@ -668,7 +622,44 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
   }
   console.log(`[Real DSH Acceptance] Routing active and verified 5-condition eligible on Hub (web.routes granted)`);
 
-  // Step 9: Verify Real HTTP Root and Assets over Wildcard Gateway
+  // Step 9: Verify Outer Gateway Authentication Fence (HTTP & WebSocket)
+  const unauthHttpRes = await makeGatewayRequest({
+    gatewayPort,
+    authority,
+    path: "/",
+    caCert: wildcardCaCert,
+  });
+  assert.equal(unauthHttpRes.status, 401, "Wildcard gateway must reject unauthenticated HTTP with 401");
+
+  const wrongAuthHttpRes = await makeGatewayRequest({
+    gatewayPort,
+    authority,
+    path: "/",
+    caCert: wildcardCaCert,
+    headers: { "x-gateway-auth": "invalid-gateway-token" },
+  });
+  assert.equal(wrongAuthHttpRes.status, 401, "Wildcard gateway must reject invalid HTTP gateway auth with 401");
+
+  const unauthTlsSocket = await connectGatewayTlsSocket({ gatewayPort, authority, caCert: wildcardCaCert });
+  const unauthWsRes = await performWssUpgrade(unauthTlsSocket, {
+    authority,
+    path: "/api/events.mux",
+    headers: { Origin: `https://${authority}` },
+  });
+  assert.equal(unauthWsRes.status, 401, "Wildcard gateway must reject unauthenticated WebSocket upgrade with 401");
+  safeDestroy(unauthTlsSocket);
+
+  const wrongAuthTlsSocket = await connectGatewayTlsSocket({ gatewayPort, authority, caCert: wildcardCaCert });
+  const wrongAuthWsRes = await performWssUpgrade(wrongAuthTlsSocket, {
+    authority,
+    path: "/api/events.mux",
+    headers: { "x-gateway-auth": "wrong-token", Origin: `https://${authority}` },
+  });
+  assert.equal(wrongAuthWsRes.status, 401, "Wildcard gateway must reject invalid WebSocket gateway auth with 401");
+  safeDestroy(wrongAuthTlsSocket);
+  console.log(`[Real DSH Acceptance] Outer gateway authentication fence verified (missing/invalid credentials return 401)`);
+
+  // Step 10: Verify Real HTTP Root and Assets over Authenticated Wildcard Gateway
   const rootRes = await makeGatewayRequest({
     gatewayPort,
     authority,
@@ -692,7 +683,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
   assert.ok((await assetRes.text()).length > 100, "Real DSH static CSS asset must have valid content");
   console.log(`[Real DSH Acceptance] Genuine DSH static CSS asset (/assets/index-C6eRlFa6.css) verified through wildcard gateway`);
 
-  // Step 10: Verify Real DSH WebSocket Downlink (/api/events.mux)
+  // Step 11: Verify Real DSH WebSocket Downlink (/api/events.mux)
   const tlsSocket = await connectGatewayTlsSocket({ gatewayPort, authority, caCert: wildcardCaCert });
   const wsRes = await performWssUpgrade(tlsSocket, {
     authority,

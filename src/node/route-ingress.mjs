@@ -101,8 +101,20 @@ export class RouteIngress {
     this.host = null;
 
     // Stage 4: Ingress WebSocket Connection Tracker
-    const maxWsEnv = process.env.DSH_ORBIT_NODE_WS_LIMIT !== undefined ? Number(process.env.DSH_ORBIT_NODE_WS_LIMIT) : undefined;
-    const maxWs = maxWsConnections ?? maxWsEnv ?? 50;
+    let maxWs = maxWsConnections;
+    if (maxWs === undefined && process.env.DSH_ORBIT_NODE_WS_LIMIT !== undefined && process.env.DSH_ORBIT_NODE_WS_LIMIT !== "") {
+      const parsed = Number(process.env.DSH_ORBIT_NODE_WS_LIMIT);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10000) {
+        throw new RangeError(`invalid DSH_ORBIT_NODE_WS_LIMIT: ${process.env.DSH_ORBIT_NODE_WS_LIMIT}; expected integer between 1 and 10000`);
+      }
+      maxWs = parsed;
+    }
+    if (maxWs === undefined || maxWs === null) {
+      maxWs = 50;
+    }
+    if (!Number.isInteger(maxWs) || maxWs < 1 || maxWs > 10000) {
+      throw new RangeError(`invalid maxConnections limit: ${maxWs}; expected integer between 1 and 10000`);
+    }
     this.wsTracker = new IngressWebSocketTracker({ maxConnections: maxWs });
 
     const requestListener = (req, res) => this.handleRequest(req, res);
@@ -286,7 +298,13 @@ export class RouteIngress {
       const lower = k.toLowerCase();
       if (lower.startsWith("x-orbit-route-")) continue;
       // Strip management session and gateway assertion headers defensively
-      if (lower === "x-dsh-authenticated-proxy" || lower === "x-dsh-operator-id" || lower === "x-csrf-token") continue;
+      if (
+        lower === "x-dsh-authenticated-proxy" ||
+        lower === "x-dsh-operator-id" ||
+        lower === "x-csrf-token" ||
+        lower === "x-gateway-auth" ||
+        lower === "x-gateway-secret"
+      ) continue;
       forwardHeaders[k] = v;
     }
 
@@ -424,7 +442,13 @@ export class RouteIngress {
     for (const [k, v] of Object.entries(req.headers)) {
       const lower = k.toLowerCase();
       if (lower.startsWith("x-orbit-route-")) continue;
-      if (lower === "x-dsh-authenticated-proxy" || lower === "x-dsh-operator-id" || lower === "x-csrf-token") continue;
+      if (
+        lower === "x-dsh-authenticated-proxy" ||
+        lower === "x-dsh-operator-id" ||
+        lower === "x-csrf-token" ||
+        lower === "x-gateway-auth" ||
+        lower === "x-gateway-secret"
+      ) continue;
       forwardHeaders[k] = v;
     }
 
