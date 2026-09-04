@@ -172,65 +172,66 @@ function probePath(targetPath) {
         });
       }, timeoutMs);
 
+      let observedDownlinkFrame = null;
+
       const onData = (chunk) => {
         buf = Buffer.concat([buf, chunk]);
-        const frame = parseFrameHeader(buf);
-        if (!frame) return; // Wait for complete frame
+        while (buf.length >= 2) {
+          const frame = parseFrameHeader(buf);
+          if (!frame) break; // Wait for complete frame
+          buf = buf.slice(frame.totalLength);
 
-        // 1. If server sent Close frame (opcode 0x08), it closed before functional transport was verified!
-        if (frame.opcode === 0x08) {
-          clearTimeout(timer);
-          socket.removeListener("data", onData);
-          cleanup();
-          const closeCode = frame.payload.length >= 2 ? frame.payload.readUInt16BE(0) : 1005;
-          return done({
-            ok: false,
-            statusCode: 101,
-            detail: `WebSocket server closed connection immediately (opcode 0x08 Close frame received, code ${closeCode})`,
-          });
-        }
-
-        // 2. Pong frame (opcode 0x0A): strictly require matching client Ping payload!
-        if (frame.opcode === 0x0a) {
-          clearTimeout(timer);
-          socket.removeListener("data", onData);
-          const pongPayload = frame.payload.toString("utf8");
-          cleanClose();
-          if (pongPayload !== "orbit-dsh-transport-ping") {
+          // 1. If server sent Close frame (opcode 0x08), it closed before functional transport was verified!
+          if (frame.opcode === 0x08) {
+            clearTimeout(timer);
+            socket.removeListener("data", onData);
+            cleanup();
+            const closeCode = frame.payload.length >= 2 ? frame.payload.readUInt16BE(0) : 1005;
             return done({
               ok: false,
               statusCode: 101,
-              detail: `WebSocket Pong payload mismatch (expected 'orbit-dsh-transport-ping', got '${pongPayload}')`,
+              detail: `WebSocket server closed connection immediately (opcode 0x08 Close frame received, code ${closeCode})`,
             });
           }
-          return done({
-            ok: true,
-            statusCode: 101,
-            detail: `WebSocket 101 upgrade on ${targetPath} verified: valid accept, matching Pong frame received`,
-          });
-        }
 
-        // 3. Application data frame (opcode 0x01 text or 0x02 binary downlink)
-        if (frame.opcode === 0x01 || frame.opcode === 0x02) {
+          // 2. Application data frame (opcode 0x01 text or 0x02 binary downlink):
+          // Record transport activity (server -> browser confirmed), but keep waiting for matching Pong (browser -> server -> browser confirmed)!
+          if (frame.opcode === 0x01 || frame.opcode === 0x02) {
+            observedDownlinkFrame = `downlink frame (opcode 0x${frame.opcode.toString(16)}, ${frame.payload.length} bytes)`;
+            continue;
+          }
+
+          // 3. Pong frame (opcode 0x0A): strictly require matching client Ping payload!
+          if (frame.opcode === 0x0a) {
+            clearTimeout(timer);
+            socket.removeListener("data", onData);
+            const pongPayload = frame.payload.toString("utf8");
+            cleanClose();
+            if (pongPayload !== "orbit-dsh-transport-ping") {
+              return done({
+                ok: false,
+                statusCode: 101,
+                detail: `WebSocket Pong payload mismatch (expected 'orbit-dsh-transport-ping', got '${pongPayload}')`,
+              });
+            }
+            const activityNote = observedDownlinkFrame ? `${observedDownlinkFrame} + matching Pong frame received` : "matching Pong frame received";
+            return done({
+              ok: true,
+              statusCode: 101,
+              detail: `WebSocket 101 upgrade on ${targetPath} verified: valid accept, ${activityNote}`,
+            });
+          }
+
+          // 4. Unexpected control or reserved frame
           clearTimeout(timer);
           socket.removeListener("data", onData);
-          cleanClose();
+          cleanup();
           return done({
-            ok: true,
+            ok: false,
             statusCode: 101,
-            detail: `WebSocket 101 upgrade on ${targetPath} verified: valid accept, downlink frame (opcode 0x${frame.opcode.toString(16)}, ${frame.payload.length} bytes) received`,
+            detail: `Unexpected WebSocket frame opcode: 0x${frame.opcode.toString(16)}`,
           });
         }
-
-        // 4. Unexpected control or reserved frame
-        clearTimeout(timer);
-        socket.removeListener("data", onData);
-        cleanup();
-        return done({
-          ok: false,
-          statusCode: 101,
-          detail: `Unexpected WebSocket frame opcode: 0x${frame.opcode.toString(16)}`,
-        });
       };
 
       socket.on("data", onData);
