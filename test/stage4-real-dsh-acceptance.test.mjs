@@ -1,21 +1,24 @@
 // Stage 4 Acceptance Test: True Supported DSH 0.1.1-rc.2 Process End-to-End Acceptance
 //
 // This test runs only when DSH_ACCEPTANCE_ROOT points to a valid DeepSeek Harness
-// checkout (or auto-detected DSH workspace). When DSH_ACCEPTANCE_ROOT is not provided,
-// the test self-skips cleanly, ensuring that standard CI and clean-clone test runs
-// are 100% self-contained without machine-specific or hardcoded directory bindings.
+// checkout. When DSH_ACCEPTANCE_ROOT is not provided, the test self-skips cleanly,
+// ensuring that standard CI and clean-clone test runs are 100% self-contained without
+// machine-specific or hardcoded directory bindings.
 //
-// When DSH_ACCEPTANCE_ROOT is available, it:
-// 1. Validates provenance dynamically via `git rev-parse HEAD` and `package.json`
-// 2. Starts a REAL DSH process: `node apps/cli/lib/bin.js web --no-open --host 127.0.0.1 --port 0 --trusted-host <authority>`
-// 3. Connects an Orbit Node RouteIngress daemon to that real DSH process
-// 4. Routes traffic through a Wildcard TLS Rehearsal Gateway (*.stage4-test.example)
-// 5. Validates:
+// When DSH_ACCEPTANCE_ROOT is explicitly configured:
+// 1. Validates checkout path existence, package.json version ("0.1.1-rc.2"), and exact Git SHA
+//    - Failing closed with clear assertion errors if the configured path is invalid or unbuilt
+// 2. Starts a REAL DSH process with an isolated temporary DSH_HOME:
+//    `node apps/cli/lib/bin.js web --no-open --host 127.0.0.1 --port 0 --trusted-host <authority>`
+// 3. Executes production `scripts/smoke-websocket.mjs` against the live DSH process to generate
+//    verifiable pass evidence, and uploads that real evidence in the node compatibility report
+// 4. Connects an Orbit Node RouteIngress daemon to the genuine DSH process
+// 5. Routes traffic through a Wildcard TLS Rehearsal Gateway (*.stage4-test.example)
+// 6. Validates:
 //    - Real HTTP root index.html (`<title>DSH Local Build</title>` / `<div id="root"></div>`)
-//    - Real static assets (`/assets/*.js` / `/assets/*.css`)
-//    - Real API bridge (`/api/events.mux` upgrade requires websocket)
+//    - Real static assets (`/assets/index-C6eRlFa6.css`)
 //    - Real DSH WebSocket downlink (`/api/events.mux`) with dynamic `Sec-WebSocket-Accept`
-//    - Real Ping -> Pong frame roundtrip
+//    - Real Ping -> Pong frame roundtrip with matching payload
 //    - Real client violation close: 1008 "downlink only"
 //    - Real DSH browser-trust fence rejection on mismatched Origin: 403 Forbidden
 
@@ -326,8 +329,11 @@ function makeGatewayRequest({ gatewayPort, authority, path = "/", headers = {}, 
 
 function resolveDshCheckout() {
   const envPath = process.env.DSH_ACCEPTANCE_ROOT;
-  if (envPath && existsSync(envPath)) return envPath;
-  return null;
+  if (!envPath) return null;
+  if (!existsSync(envPath)) {
+    throw new Error(`DSH_ACCEPTANCE_ROOT is configured as ${envPath}, but directory does not exist`);
+  }
+  return envPath;
 }
 
 test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptance", async (t) => {
@@ -339,9 +345,11 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
 
   const pkgFile = join(dshRoot, "package.json");
   const binFile = join(dshRoot, "apps/cli/lib/bin.js");
-  if (!existsSync(pkgFile) || !existsSync(binFile)) {
-    t.skip(`DSH checkout at ${dshRoot} does not have built CLI artifacts; skipping real DSH process acceptance`);
-    return;
+  if (!existsSync(pkgFile)) {
+    throw new Error(`DSH checkout at ${dshRoot} does not contain package.json`);
+  }
+  if (!existsSync(binFile)) {
+    throw new Error(`DSH checkout at ${dshRoot} does not have built CLI artifacts (missing ${binFile}); run 'pnpm build' in DSH root first`);
   }
 
   const pkgJson = JSON.parse(readFileSync(pkgFile, "utf8"));
@@ -353,8 +361,10 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
   console.log(`[Real DSH Provenance] Exact Package Version: ${exactVersion}`);
 
   assert.equal(exactVersion, "0.1.1-rc.2", "Target supported profile must be 0.1.1-rc.2");
+  assert.equal(exactGitSha, "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e", "Git commit must match exact 0.1.1-rc.2 tree");
 
   const dir = await mkdtemp(join(tmpdir(), "orbit-stage4-real-dsh-"));
+  const dshHomeDir = join(dir, "isolated-dsh-home");
   const dbPath = join(dir, "hub.db");
   const statePath = join(dir, "node.json");
   const reportPath = join(dir, "report.json");
@@ -468,7 +478,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
     gatewayServer.listen(0, "127.0.0.1", () => resolve(gatewayServer.address().port));
   });
 
-  // Step 3: Enroll Node & Get Authority
+  // Step 3: Enroll Node
   const opHeaders = {
     "x-dsh-authenticated-proxy": "test-gateway-secret",
     "x-dsh-operator-id": "operator",
@@ -507,38 +517,30 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
   await new Promise((r) => enrollChild.on("exit", r));
   const nodeId = enrollOut.match(/enrolled: (node_[0-9a-f]{32})/)?.[1];
   assert.ok(nodeId, "Node must enroll successfully");
-
-  await writeFile(reportPath, JSON.stringify(validReport({
-    orbitVersion: "0.4.0",
-    dshVersion: exactVersion,
-    profile: "dsh-0.1.1-rc.2",
-  })), "utf8");
-
-  const reportChild = spawn(process.execPath, ["bin/dsh-orbit-node.mjs", "upload-report"], {
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      DSH_ORBIT_NODE_STATE: statePath,
-      DSH_ORBIT_HUB_URL: hubBaseUrl,
-      DSH_ORBIT_REPORT_FILE: reportPath,
-    },
-  });
-  await new Promise((r) => reportChild.on("exit", r));
-
   const authority = computeRouteAuthority(nodeId, REHEARSAL_DOMAIN);
   console.log(`[Real DSH Acceptance] Provisioned deterministic authority: ${authority}`);
 
-  // Step 4: Launch Real DSH CLI Web Process
+  // Step 4: Launch Real DSH CLI Web Process with Isolated DSH_HOME
   const dshPort = await new Promise((resolve, reject) => {
+    // Sanitized environment: strip developer's host-level DSH and editor settings, isolate DSH_HOME
+    const cleanDshEnv = {
+      PATH: process.env.PATH,
+      SYSTEMROOT: process.env.SYSTEMROOT,
+      HOMEDRIVE: process.env.HOMEDRIVE,
+      HOMEPATH: process.env.HOMEPATH,
+      USERPROFILE: process.env.USERPROFILE,
+      TMP: process.env.TMP,
+      TEMP: process.env.TEMP,
+      NODE_ENV: "production",
+      DSH_HOME: dshHomeDir,
+      DEEPSEEK_API_KEY: "keyless-acceptance-no-llm",
+    };
     dshChild = spawn(
       process.execPath,
       [binFile, "web", "--no-open", "--host", "127.0.0.1", "--port", "0", "--trusted-host", authority],
       {
         cwd: dshRoot,
-        env: {
-          ...process.env,
-          NODE_ENV: "production",
-        },
+        env: cleanDshEnv,
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -556,9 +558,51 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
       }
     });
   });
-  console.log(`[Real DSH Acceptance] Genuine DSH web process active on http://127.0.0.1:${dshPort}`);
+  console.log(`[Real DSH Acceptance] Genuine DSH web process active on http://127.0.0.1:${dshPort} (isolated DSH_HOME: ${dshHomeDir})`);
 
-  // Step 5: Start Node Route Ingress
+  // Step 5: Execute Production smoke-websocket.mjs to generate authentic capability evidence
+  const smokeChild = spawn(process.execPath, ["scripts/smoke-websocket.mjs"], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      DSH_SMOKE_URL: `http://127.0.0.1:${dshPort}`,
+      DSH_SMOKE_TIMEOUT_MS: "3000",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let smokeStdout = "";
+  let smokeStderr = "";
+  smokeChild.stdout.on("data", (c) => (smokeStdout += c.toString()));
+  smokeChild.stderr.on("data", (c) => (smokeStderr += c.toString()));
+  const smokeExitCode = await new Promise((r) => smokeChild.on("exit", r));
+  assert.equal(smokeExitCode, 0, `Production smoke-websocket.mjs must pass on real DSH: ${smokeStderr}`);
+  assert.match(smokeStdout, /webSocketTransport: pass/);
+  console.log(`[Real DSH Acceptance] Production smoke-websocket.mjs verified against real DSH: ${smokeStdout.trim()}`);
+
+  // Step 6: Upload Compatibility Report containing authentic webSocketTransport pass evidence
+  const reportPayload = validReport({
+    orbitVersion: "0.4.0",
+    dshVersion: exactVersion,
+    profile: "dsh-0.1.1-rc.2",
+  });
+  reportPayload.checks.webSocketTransport = {
+    status: "pass",
+    detail: smokeStdout.trim(),
+  };
+  await writeFile(reportPath, JSON.stringify(reportPayload), "utf8");
+
+  const reportChild = spawn(process.execPath, ["bin/dsh-orbit-node.mjs", "upload-report"], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      DSH_ORBIT_NODE_STATE: statePath,
+      DSH_ORBIT_HUB_URL: hubBaseUrl,
+      DSH_ORBIT_REPORT_FILE: reportPath,
+    },
+  });
+  await new Promise((r) => reportChild.on("exit", r));
+
+  // Step 7: Start Node Route Ingress
   const node = await new Promise((resolve, reject) => {
     nodeChild = spawn(
       process.execPath,
@@ -606,7 +650,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
     body: JSON.stringify({ routeTarget: node.ingressOrigin }),
   });
 
-  // Wait for 5-condition eligibility
+  // Step 8: Verify 5-condition routing eligibility on Hub (webSocketTransport pass -> web.routes granted)
   const startWait = Date.now();
   while (Date.now() - startWait < 15000) {
     const nodeRes = await fetch(`${hubBaseUrl}/hub/nodes/${nodeId}`, { headers: authHeaders });
@@ -622,9 +666,9 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
     }
     await sleep(200);
   }
-  console.log(`[Real DSH Acceptance] Routing active and verified 5-condition eligible on Hub`);
+  console.log(`[Real DSH Acceptance] Routing active and verified 5-condition eligible on Hub (web.routes granted)`);
 
-  // Step 6: Verify Real HTTP Root and Assets over Wildcard Gateway
+  // Step 9: Verify Real HTTP Root and Assets over Wildcard Gateway
   const rootRes = await makeGatewayRequest({
     gatewayPort,
     authority,
@@ -637,7 +681,18 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
   assert.ok(rootHtml.includes('<div id="root"></div>'), "Real DSH HTML must contain root container");
   console.log(`[Real DSH Acceptance] Genuine DSH HTML root served through wildcard gateway`);
 
-  // Step 7: Verify Real DSH WebSocket Downlink (/api/events.mux)
+  const assetRes = await makeGatewayRequest({
+    gatewayPort,
+    authority,
+    path: "/assets/index-C6eRlFa6.css",
+    caCert: wildcardCaCert,
+    headers: { "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN },
+  });
+  assert.equal(assetRes.status, 200, "Real DSH static CSS asset must be served through gateway with HTTP 200");
+  assert.ok((await assetRes.text()).length > 100, "Real DSH static CSS asset must have valid content");
+  console.log(`[Real DSH Acceptance] Genuine DSH static CSS asset (/assets/index-C6eRlFa6.css) verified through wildcard gateway`);
+
+  // Step 10: Verify Real DSH WebSocket Downlink (/api/events.mux)
   const tlsSocket = await connectGatewayTlsSocket({ gatewayPort, authority, caCert: wildcardCaCert });
   const wsRes = await performWssUpgrade(tlsSocket, {
     authority,
