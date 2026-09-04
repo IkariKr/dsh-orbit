@@ -5,6 +5,7 @@
 import http from "node:http";
 import https from "node:https";
 import net from "node:net";
+import tls from "node:tls";
 import { URL } from "node:url";
 import { RouteNonceCache, verifyRouteRequest } from "../registry/route-auth.mjs";
 import { computeRouteAuthority, isValidOriginFormTarget, validateRouteDomain } from "../registry/protocol.mjs";
@@ -432,7 +433,15 @@ export class RouteIngress {
 
     const upstreamReq = clientMod.request(reqOptions);
 
+    const onClientEarlyAbort = () => {
+      try { upstreamReq.destroy(); } catch {}
+    };
+    socket.once("close", onClientEarlyAbort);
+    socket.once("error", onClientEarlyAbort);
+
     upstreamReq.on("error", (err) => {
+      socket.removeListener("close", onClientEarlyAbort);
+      socket.removeListener("error", onClientEarlyAbort);
       sendSocketHttpError(socket, 502, "Bad Gateway", {}, {
         error: { code: "bad-gateway", message: `downstream DSH unavailable: ${err.message}` },
       });
@@ -443,6 +452,8 @@ export class RouteIngress {
     });
 
     upstreamReq.on("upgrade", (upstreamRes, upstreamSocket, upstreamHead) => {
+      socket.removeListener("close", onClientEarlyAbort);
+      socket.removeListener("error", onClientEarlyAbort);
       upstreamReq.setTimeout(0);
       upstreamSocket.setTimeout(0);
       socket.setTimeout(0);
@@ -494,6 +505,8 @@ export class RouteIngress {
     });
 
     upstreamReq.on("response", (upstreamRes) => {
+      socket.removeListener("close", onClientEarlyAbort);
+      socket.removeListener("error", onClientEarlyAbort);
       upstreamReq.setTimeout(0);
       const responseHeaders = { ...upstreamRes.headers };
       delete responseHeaders["transfer-encoding"];

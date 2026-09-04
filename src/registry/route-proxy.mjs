@@ -585,7 +585,15 @@ export function proxyWebSocketUpgrade({
     return;
   }
 
+  const onClientEarlyAbort = () => {
+    try { upstreamReq.destroy(); } catch {}
+  };
+  socket.once("close", onClientEarlyAbort);
+  socket.once("error", onClientEarlyAbort);
+
   upstreamReq.on("error", (err) => {
+    socket.removeListener("close", onClientEarlyAbort);
+    socket.removeListener("error", onClientEarlyAbort);
     const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
     sendSocketHttpError(socket, 502, "Bad Gateway", {}, {
       error: { code: "bad-gateway", message: `upstream route target unavailable: ${err.message}`, selectorUrl },
@@ -601,6 +609,8 @@ export function proxyWebSocketUpgrade({
 
   // Handle successful 101 Switching Protocols
   upstreamReq.on("upgrade", (upstreamRes, upstreamSocket, upstreamHead) => {
+    socket.removeListener("close", onClientEarlyAbort);
+    socket.removeListener("error", onClientEarlyAbort);
     // Handshake successful: clear timeout and prevent idle timeout on both sockets
     upstreamReq.setTimeout(0);
     upstreamSocket.setTimeout(0);
@@ -660,6 +670,8 @@ export function proxyWebSocketUpgrade({
 
   // Transparently pass non-101 responses (e.g. 401, 403, 500)
   upstreamReq.on("response", (upstreamRes) => {
+    socket.removeListener("close", onClientEarlyAbort);
+    socket.removeListener("error", onClientEarlyAbort);
     upstreamReq.setTimeout(0);
     const responseHeaders = { ...upstreamRes.headers };
     delete responseHeaders["transfer-encoding"];
