@@ -255,12 +255,8 @@ export function startWildcardGateway({
           return;
         }
 
-        if (hostWithoutPort === cleanRouteDomain) {
-          forwardWsToHub(req, clientSocket, head, hubPort, incomingHost);
-          return;
-        }
-
-        // Enforce outer gateway authentication for WebSocket upgrades
+        // Enforce outer gateway authentication for WebSocket upgrades across
+        // both selector apex authority (cleanRouteDomain) and routed node authorities (*.cleanRouteDomain)
         const cookieHeader = req.headers.cookie || "";
         const cookieAuth = cookieHeader.match(/(?:^|;\s*)gateway-auth=([^;]+)/)?.[1];
         const providedGatewayAuth = req.headers["x-gateway-auth"] || cookieAuth;

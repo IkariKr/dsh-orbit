@@ -401,6 +401,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
           DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS: "1",
           DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
           DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+          DSH_ORBIT_HUB_TRUSTED_SCHEME: "https",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -436,7 +437,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
   const opHeaders = {
     "x-dsh-authenticated-proxy": "test-gateway-secret",
     "x-dsh-operator-id": "operator",
-    origin: hubBaseUrl,
+    origin: hubBaseUrl.replace(/^http:/, "https:"),
     "sec-fetch-site": "same-origin",
   };
   const sessRes = await fetch(`${hubBaseUrl}/hub/session`, { method: "POST", headers: opHeaders });

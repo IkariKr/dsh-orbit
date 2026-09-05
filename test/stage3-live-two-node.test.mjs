@@ -250,6 +250,7 @@ function startHubProcess({ dbPath, port = 0, caCertPath, routeDomain = REHEARSAL
         DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS: String(cadenceSeconds),
         DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
         DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+        DSH_ORBIT_HUB_TRUSTED_SCHEME: "https",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -457,11 +458,12 @@ const GATEWAY_HEADERS = {
 };
 
 async function getOperatorSession(hubBaseUrl) {
+  const origin = hubBaseUrl.replace(/^http:/, "https:");
   const res = await fetch(`${hubBaseUrl}/hub/session`, {
     method: "POST",
     headers: {
       ...GATEWAY_HEADERS,
-      origin: hubBaseUrl,
+      origin,
       "sec-fetch-site": "same-origin",
     },
   });
@@ -472,6 +474,7 @@ async function getOperatorSession(hubBaseUrl) {
 }
 
 async function operatorMintToken(hubBaseUrl, session) {
+  const origin = hubBaseUrl.replace(/^http:/, "https:");
   const res = await fetch(`${hubBaseUrl}/hub/tokens`, {
     method: "POST",
     headers: {
@@ -479,7 +482,7 @@ async function operatorMintToken(hubBaseUrl, session) {
       "content-type": "application/json",
       cookie: `dsh-orbit-hub-session=${session.cookie}`,
       "x-csrf-token": session.csrfToken,
-      origin: hubBaseUrl,
+      origin,
       "sec-fetch-site": "same-origin",
     },
     body: JSON.stringify({ purpose: "enroll" }),
@@ -490,6 +493,7 @@ async function operatorMintToken(hubBaseUrl, session) {
 }
 
 async function operatorSetRouteTarget(hubBaseUrl, session, nodeId, routeTarget) {
+  const origin = hubBaseUrl.replace(/^http:/, "https:");
   const res = await fetch(`${hubBaseUrl}/hub/nodes/${nodeId}/route-target`, {
     method: "PUT",
     headers: {
@@ -497,7 +501,7 @@ async function operatorSetRouteTarget(hubBaseUrl, session, nodeId, routeTarget) 
       "content-type": "application/json",
       cookie: `dsh-orbit-hub-session=${session.cookie}`,
       "x-csrf-token": session.csrfToken,
-      origin: hubBaseUrl,
+      origin,
       "sec-fetch-site": "same-origin",
     },
     body: JSON.stringify({ routeTarget }),
@@ -507,12 +511,13 @@ async function operatorSetRouteTarget(hubBaseUrl, session, nodeId, routeTarget) 
 }
 
 async function operatorGetNode(hubBaseUrl, session, nodeId) {
+  const origin = hubBaseUrl.replace(/^http:/, "https:");
   const res = await fetch(`${hubBaseUrl}/hub/nodes/${nodeId}`, {
     method: "GET",
     headers: {
       ...GATEWAY_HEADERS,
       cookie: `dsh-orbit-hub-session=${session.cookie}`,
-      origin: hubBaseUrl,
+      origin,
       "sec-fetch-site": "same-origin",
     },
   });
@@ -887,7 +892,7 @@ test("Live Two-Node Stage 3 Evidence: Rehearsal HTTPS Wildcard Gateway, Independ
   assert.equal(failResA.status, 503);
   const failDataA = await failResA.json();
   assert.equal(failDataA.error.code, "node-unavailable");
-  assert.ok(failDataA.error.selectorUrl.endsWith(`://${REHEARSAL_DOMAIN}/`));
+  assert.equal(failDataA.error.selectorUrl, `https://${REHEARSAL_DOMAIN}/`);
   console.log(`[Evidence] Authority A failed closed with 503 and selectorUrl (no fallback to Node B)`);
 
   // Request through Authority B -> Must remain 100% operational

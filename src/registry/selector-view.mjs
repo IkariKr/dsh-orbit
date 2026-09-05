@@ -100,7 +100,7 @@ export function buildSelectorNodeRow(registry, nodeRow, { routeDomain, trustedSc
   };
 }
 
-// RFC 9110 compliant Accept header parser with q-value weights
+// q-aware HTML vs JSON Accept negotiation with q-value weights
 export function isHtmlAccept(acceptHeader) {
   if (typeof acceptHeader !== "string" || !acceptHeader.trim()) return false;
 
