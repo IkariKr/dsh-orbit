@@ -14,9 +14,16 @@ export function validateStage6Manifest(manifest) {
   assert.equal(manifest.schemaVersion, 2, "schemaVersion must be 2");
   assert.ok(manifest.stage && manifest.stage.includes("Stage 6"), "stage must reference Stage 6");
   assert.equal(manifest.branch, "feat/v0.4-stage6-mounted-e2e", "branch must match Stage 6 branch");
-  assert.equal(manifest.scope, "local-multi-process-rehearsal", "scope must describe the executed rehearsal, not the pending physical E2E");
-  assert.equal(manifest.reviewGate, "HOLD", "local rehearsal evidence must keep Review Gate B on HOLD");
-  assert.equal(manifest.physicalTwoHostE2E, "NOT_EXECUTED", "physical two-host E2E must not be claimed before it is executed");
+  assert.ok(
+    ["local-multi-process-rehearsal", "physical-two-host-mounted-e2e"].includes(manifest.scope),
+    "scope must describe either local-multi-process-rehearsal or physical-two-host-mounted-e2e",
+  );
+  assert.equal(manifest.reviewGate, "HOLD", "rehearsal evidence must keep Review Gate B on HOLD until independent review");
+  if (manifest.scope === "physical-two-host-mounted-e2e") {
+    assert.equal(manifest.physicalTwoHostE2E, "PASS", "physical two-host E2E must be PASS when scope is physical-two-host-mounted-e2e");
+  } else {
+    assert.equal(manifest.physicalTwoHostE2E, "NOT_EXECUTED", "physical two-host E2E must not be claimed before it is executed");
+  }
   assert.match(manifest.testedCommit, /^[0-9a-f]{40}$/, "testedCommit must be a 40-character git SHA");
   assert.ok(!Number.isNaN(Date.parse(manifest.timestamp)), "timestamp must be valid ISO date");
 
@@ -125,10 +132,14 @@ export function validateStage6Manifest(manifest) {
   }
 
   const cookieAutomated = manifest.scenarios.find((s) => s.id === "cookie-credential-isolation-automated");
-  assert.equal(cookieAutomated.result, "PASS", "automated cookie/credential boundary coverage must pass for this local rehearsal");
+  assert.equal(cookieAutomated.result, "PASS", "automated cookie/credential boundary coverage must pass");
 
   const cookieBrowser = manifest.scenarios.find((s) => s.id === "cookie-browser-jar-isolation");
-  assert.equal(cookieBrowser.result, "NOT_EXECUTED", "physical/browser Cookie Jar drill must remain NOT_EXECUTED in the local rehearsal manifest");
+  if (manifest.scope === "physical-two-host-mounted-e2e") {
+    assert.equal(cookieBrowser.result, "PASS", "physical/browser Cookie Jar drill must pass in physical two-host manifest");
+  } else {
+    assert.equal(cookieBrowser.result, "NOT_EXECUTED", "physical/browser Cookie Jar drill must remain NOT_EXECUTED in the local rehearsal manifest");
+  }
 
   return true;
 }
@@ -216,7 +227,7 @@ test("Stage 6 Mounted Contract: sample valid manifest passes validation and reje
     });
   });
 
-  // Negative: the unexecuted browser Cookie Jar drill cannot be relabeled PASS.
+  // Negative: the unexecuted browser Cookie Jar drill cannot be relabeled PASS in local scope.
   assert.throws(() => {
     validateStage6Manifest({
       ...sample,
@@ -224,6 +235,23 @@ test("Stage 6 Mounted Contract: sample valid manifest passes validation and reje
         scenario.id === "cookie-browser-jar-isolation" ? { ...scenario, result: "PASS" } : scenario,
       ),
     });
+  });
+
+  // Positive: physical two-host manifest passes validation with HOLD gate
+  const physicalSample = {
+    ...sample,
+    scope: "physical-two-host-mounted-e2e",
+    physicalTwoHostE2E: "PASS",
+    reviewGate: "HOLD",
+    scenarios: sample.scenarios.map((scenario) =>
+      scenario.id === "cookie-browser-jar-isolation" ? { ...scenario, result: "PASS" } : scenario,
+    ),
+  };
+  assert.equal(validateStage6Manifest(physicalSample), true);
+
+  // Negative: physical two-host manifest cannot claim Review Gate B PASS prematurely
+  assert.throws(() => {
+    validateStage6Manifest({ ...physicalSample, reviewGate: "PASS" });
   });
 });
 
