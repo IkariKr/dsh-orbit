@@ -100,13 +100,21 @@ export function validateStage6Manifest(manifest) {
     assert.ok(presentIds.has(reqId), `Scenario '${reqId}' must be present in manifest`);
   }
 
-  const allowedResults = new Set(["PASS", "FAIL", "NOT_EXECUTED", "BLOCKED"]);
+  const isPhysical = manifest.scope === "physical-two-host-mounted-e2e";
+  const allowedResults = isPhysical
+    ? new Set(["PASS"])
+    : new Set(["PASS", "FAIL", "NOT_EXECUTED", "BLOCKED"]);
+
   for (const s of manifest.scenarios) {
     assert.ok(s.id, "scenario id required");
     assert.ok(s.name, "scenario name required");
     assert.ok(s.expected, "scenario expected required");
     assert.ok(s.actual, "scenario actual required");
-    assert.ok(allowedResults.has(s.result), `Scenario ${s.id} result must be PASS, FAIL, NOT_EXECUTED, or BLOCKED`);
+    if (isPhysical) {
+      assert.equal(s.result, "PASS", `In physical two-host scope, all required scenarios must be PASS (got ${s.result} for '${s.id}')`);
+    } else {
+      assert.ok(allowedResults.has(s.result), `Scenario ${s.id} result must be PASS, FAIL, NOT_EXECUTED, or BLOCKED`);
+    }
     if (s.result !== "PASS") {
       assert.equal(Boolean(s.file), false, `Scenario ${s.id} must not attach PASS-style screenshot evidence when result is ${s.result}`);
     }
@@ -135,10 +143,22 @@ export function validateStage6Manifest(manifest) {
   assert.equal(cookieAutomated.result, "PASS", "automated cookie/credential boundary coverage must pass");
 
   const cookieBrowser = manifest.scenarios.find((s) => s.id === "cookie-browser-jar-isolation");
-  if (manifest.scope === "physical-two-host-mounted-e2e") {
+  if (isPhysical) {
     assert.equal(cookieBrowser.result, "PASS", "physical/browser Cookie Jar drill must pass in physical two-host manifest");
+    assert.ok(cookieBrowser.file, "physical cookie-browser-jar-isolation must attach structured evidence file");
+    assert.ok(cookieBrowser.bytes > 0, "physical cookie-browser-jar-isolation bytes must be positive");
+    assert.match(cookieBrowser.sha256, /^[0-9a-f]{64}$/, "physical cookie-browser-jar-isolation sha256 must be valid hex hash");
   } else {
     assert.equal(cookieBrowser.result, "NOT_EXECUTED", "physical/browser Cookie Jar drill must remain NOT_EXECUTED in the local rehearsal manifest");
+  }
+
+  // Transport evidence artifacts required in physical scope
+  if (isPhysical) {
+    assert.ok(manifest.artifacts, "manifest.artifacts must exist in physical scope");
+    assert.ok(manifest.artifacts.nodeATransport, "manifest.artifacts.nodeATransport required in physical scope");
+    assert.match(manifest.artifacts.nodeATransport.sha256, /^[0-9a-f]{64}$/, "nodeATransport sha256 must be valid");
+    assert.ok(manifest.artifacts.nodeBTransport, "manifest.artifacts.nodeBTransport required in physical scope");
+    assert.match(manifest.artifacts.nodeBTransport.sha256, /^[0-9a-f]{64}$/, "nodeBTransport sha256 must be valid");
   }
 
   return true;
@@ -243,8 +263,20 @@ test("Stage 6 Mounted Contract: sample valid manifest passes validation and reje
     scope: "physical-two-host-mounted-e2e",
     physicalTwoHostE2E: "PASS",
     reviewGate: "HOLD",
+    artifacts: {
+      nodeATransport: { file: "node-a-transport.json", bytes: 100, sha256: "0".repeat(64) },
+      nodeBTransport: { file: "node-b-transport.json", bytes: 100, sha256: "0".repeat(64) },
+    },
     scenarios: sample.scenarios.map((scenario) =>
-      scenario.id === "cookie-browser-jar-isolation" ? { ...scenario, result: "PASS" } : scenario,
+      scenario.id === "cookie-browser-jar-isolation"
+        ? {
+            ...scenario,
+            result: "PASS",
+            file: "cookie-browser-isolation.json",
+            bytes: 100,
+            sha256: "0".repeat(64),
+          }
+        : scenario,
     ),
   };
   assert.equal(validateStage6Manifest(physicalSample), true);
@@ -253,6 +285,26 @@ test("Stage 6 Mounted Contract: sample valid manifest passes validation and reje
   assert.throws(() => {
     validateStage6Manifest({ ...physicalSample, reviewGate: "PASS" });
   });
+
+  // Negative: physical two-host manifest fails closed if any required scenario is FAIL
+  assert.throws(() => {
+    validateStage6Manifest({
+      ...physicalSample,
+      scenarios: physicalSample.scenarios.map((s) =>
+        s.id === "drill-dsh-outage" ? { ...s, result: "FAIL", file: undefined, bytes: undefined, sha256: undefined } : s,
+      ),
+    });
+  }, /In physical two-host scope, all required scenarios must be PASS/);
+
+  // Negative: physical two-host manifest fails closed if cookie-browser-jar-isolation lacks structured evidence file
+  assert.throws(() => {
+    validateStage6Manifest({
+      ...physicalSample,
+      scenarios: physicalSample.scenarios.map((s) =>
+        s.id === "cookie-browser-jar-isolation" ? { ...s, file: undefined, bytes: undefined, sha256: undefined } : s,
+      ),
+    });
+  }, /physical cookie-browser-jar-isolation must attach structured evidence file/);
 });
 
 test("Stage 6 Mounted Contract: live manifest verification if manifest is present", () => {
@@ -274,6 +326,19 @@ test("Stage 6 Mounted Contract: live manifest verification if manifest is presen
       assert.equal(fileBuf.length, s.bytes, `File size mismatch for ${s.file}`);
       const computedHash = crypto.createHash("sha256").update(fileBuf).digest("hex");
       assert.equal(computedHash, s.sha256, `SHA256 hash mismatch for ${s.file}`);
+    }
+  }
+
+  if (manifest.artifacts) {
+    for (const [artKey, art] of Object.entries(manifest.artifacts)) {
+      if (art && art.file) {
+        const filePath = join(evidenceDir, art.file);
+        assert.ok(existsSync(filePath), `Artifact file '${art.file}' must exist on disk`);
+        const fileBuf = readFileSync(filePath);
+        assert.equal(fileBuf.length, art.bytes, `File size mismatch for artifact ${artKey}`);
+        const computedHash = crypto.createHash("sha256").update(fileBuf).digest("hex");
+        assert.equal(computedHash, art.sha256, `SHA256 hash mismatch for artifact ${artKey}`);
+      }
     }
   }
 });
