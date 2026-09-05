@@ -1,7 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "stage": "DSH Orbit v0.4 Stage 6 Local Multi-Process Rehearsal (Physical E2E Pending / Gate B HOLD)",
   "branch": "feat/v0.4-stage6-mounted-e2e",
+  "scope": "local-multi-process-rehearsal",
+  "reviewGate": "HOLD",
+  "physicalTwoHostE2E": "NOT_EXECUTED",
   "testedCommit": "3e1e7cbe27deedb05e090c9ac6b40ecc48c6764e",
   "timestamp": "2026-09-05T10:59:00.000Z",
   "browser": {
@@ -23,6 +26,8 @@
     "nodeId": "node_661015f16d03eaae6f60d1f9e7ba84be",
     "authority": "n-661015f16d03eaae6f60d1f9e7ba84be.stage6.localhost:51558",
     "routeTargetClass": "nas-class",
+    "routeTargetScheme": "https",
+    "tlsMode": "private-ca",
     "tlsVerified": true,
     "dshIdentity": "DSH 0.1.1-rc.2 (b150a551b8d465e31e418e1b2eaf5e79bbb7d28e) NAS node"
   },
@@ -30,7 +35,9 @@
     "nodeId": "node_aa9764eb01b4e8a2e4b0d9906b0f9c6f",
     "authority": "n-aa9764eb01b4e8a2e4b0d9906b0f9c6f.stage6.localhost:51558",
     "routeTargetClass": "workstation-class",
-    "tlsVerified": true,
+    "routeTargetScheme": "http",
+    "tlsMode": "none",
+    "tlsVerified": null,
     "dshIdentity": "DSH 0.1.1-rc.2 (b150a551b8d465e31e418e1b2eaf5e79bbb7d28e) Workstation node"
   },
   "scenarios": [
@@ -75,11 +82,18 @@
       "sha256": "db062d006978ac3226ce19de417694b04cbcd77b0afdcf61e0670914d83cd389"
     },
     {
-      "id": "cookie-credential-isolation",
-      "name": "Cookie and Gateway Credential Stripping",
-      "expected": "Outer gateway-auth cookie stripped before RouteIngress and downstream DSH; downstream cookies scoped host-only",
-      "actual": "Gateway cookie stripped before reaching route ingress; downstream cookies restricted from leaking to sibling subdomains (live browser jar drill across 3 authorities not executed; Gate B HOLD)",
+      "id": "cookie-credential-isolation-automated",
+      "name": "Automated Cookie and Gateway Credential Boundary",
+      "expected": "Automated route/gateway coverage proves outer gateway credentials are stripped and downstream Domain attributes are removed",
+      "actual": "Automated security-boundary coverage passed for gateway credential stripping and host-only downstream cookie normalization",
       "result": "PASS"
+    },
+    {
+      "id": "cookie-browser-jar-isolation",
+      "name": "Mounted Browser Cookie Jar Isolation",
+      "expected": "A controlled parent-domain cookie is present only on Authority A and absent on the Selector and Authority B; gateway and Hub credentials are absent downstream",
+      "actual": "Not executed in the local multi-process rehearsal; reserved for the physical two-host Stage 6 rerun",
+      "result": "NOT_EXECUTED"
     },
     {
       "id": "drill-route-outage",
