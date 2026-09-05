@@ -2,31 +2,34 @@
   "schemaVersion": 1,
   "stage": "v0.4 Stage 5 Endpoint Selector UI",
   "branch": "feat/v0.4-stage5-endpoint-selector-ui",
-  "baseCommit": "6383a600f08d8129850a7425998c99b52e8de88e",
-  "timestamp": "2026-09-05T03:30:00.000Z",
+  "testedCommit": "4cea88c19c33226c2e8fb8b728a06d83d00843cd",
+  "timestamp": "2026-09-05T03:58:00.000Z",
   "browser": {
-    "name": "ZCode In-app Browser (Chromium / IAB)",
+    "name": "ZCode In-app Browser",
+    "version": "3.11.2",
+    "engine": "Chromium 146.0.7680.80 / Electron 41.0.3",
     "backend": "iab",
     "provider": "zcode-desktop-iab",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCode/3.11.2 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
     "viewport": {
       "width": 1280,
       "height": 720
     }
   },
-  "selectorAuthority": "stage5.localhost:54752",
+  "selectorAuthority": "stage5.localhost:62804",
   "rehearsalTopology": {
-    "routeDomain": "stage5.localhost:54752",
-    "gatewayPort": 54752,
+    "routeDomain": "stage5.localhost:62804",
+    "gatewayPort": 62804,
     "trustedExternalScheme": "http",
     "nodeA": {
-      "nodeId": "node_aaaccfc3cbbae114650f23438a307375",
-      "authority": "n-aaaccfc3cbbae114650f23438a307375.stage5.localhost:54752",
+      "nodeId": "node_273c618f3608ffa1d84caee64da86c7c",
+      "authority": "n-273c618f3608ffa1d84caee64da86c7c.stage5.localhost:62804",
       "initialState": "active",
       "failureCondition": "Route ingress or downstream DSH is unreachable"
     },
     "nodeB": {
-      "nodeId": "node_7cef96cf36c275cd0895ae4ccb6d1462",
-      "authority": "n-7cef96cf36c275cd0895ae4ccb6d1462.stage5.localhost:54752",
+      "nodeId": "node_1089693baeeb07998d699f455bc480a8",
+      "authority": "n-1089693baeeb07998d699f455bc480a8.stage5.localhost:62804",
       "initialState": "active",
       "status": "healthy"
     }
@@ -37,8 +40,8 @@
       "name": "Selector initial shell",
       "description": "Initial load of authoritative selector shell showing registered nodes with ACTIVE pills and dimension badges",
       "file": "scenario-a-selector-shell.png",
-      "bytes": 130927,
-      "sha256": "c121ba01e4456dec7f5c874c4793553bf9030b06dbd8f3e025e82b0910a66bb3"
+      "bytes": 131418,
+      "sha256": "471a388b30c97061136c3686bfd4591a893c6d127558b4bf3d02e17669f3c95c"
     },
     {
       "id": "scenario-b-tab1",
@@ -61,40 +64,40 @@
       "name": "Tab 1 remains on Node A",
       "description": "Switching back to Tab 1 confirms no target retargeting across browser tabs",
       "file": "scenario-b-tab1-remains-nodeA.png",
-      "bytes": 64168,
-      "sha256": "4e0978a9d0a8ca79151fe34b6a2f2a4cb434d95095295c4e2a40c2acc31c2cb2"
+      "bytes": 40128,
+      "sha256": "2783b72fd2fe9c815fb204b39ac5ec4cb22ea510e5d70a5179173034f869fe87"
     },
     {
       "id": "scenario-c-503",
       "name": "Node A unavailable 503",
       "description": "Stopping Node A route ingress causes Tab 1 refresh to return 503 HTML return page with selector link",
       "file": "scenario-c-nodeA-unavailable-503.png",
-      "bytes": 52760,
-      "sha256": "cd744227825727c4e8bf098ced38bcd7d659862327ece418517d9cf7b5d039bb"
+      "bytes": 47998,
+      "sha256": "875c2b75995d220852d37250ecdb82d34b1be4312730146db8f59655e4674455"
     },
     {
       "id": "scenario-c-tab2-healthy",
       "name": "Tab 2 Node B remains healthy",
       "description": "Tab 2 to Node B remains unaffected and operational during Node A outage",
       "file": "scenario-c-tab2-nodeB-healthy.png",
-      "bytes": 71115,
-      "sha256": "72e529dac109a147d0539775275ebfff437f25669cb5659861193439f536a23c"
+      "bytes": 46362,
+      "sha256": "9cb497089139492c9a68c7eb168cb43c0af6512b59442d2723bb2c2d6e03d650"
     },
     {
       "id": "scenario-d-ineligible",
       "name": "Selector shows Node A ineligible",
       "description": "Clicking return link displays Selector with Node A marked unreachable/unavailable and Node B available",
       "file": "scenario-d-selector-nodeA-ineligible.png",
-      "bytes": 177369,
-      "sha256": "7e1201666338dc7ebb986329a9cad376e2013b9d3461fcef0843163641750cb7"
+      "bytes": 141802,
+      "sha256": "3cc8aebc975fbee769a5bdd8b9402c605054f44233fabd1c44db95607aa5dff1"
     },
     {
       "id": "scenario-d-switched",
       "name": "Tab 1 switched to Node B",
       "description": "Operator clicks Open on Node B, switching Tab 1 to Node B successfully",
       "file": "scenario-d-tab1-switched-to-nodeB.png",
-      "bytes": 71067,
-      "sha256": "4b0233523b81df17fc2fe4e0397f22c2c86c58cbddddf9ff822f0bf671b9bdf5"
+      "bytes": 46362,
+      "sha256": "9cb497089139492c9a68c7eb168cb43c0af6512b59442d2723bb2c2d6e03d650"
     },
     {
       "id": "scenario-e-bookmark",
