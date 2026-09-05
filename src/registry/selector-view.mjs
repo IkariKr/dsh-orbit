@@ -100,12 +100,51 @@ export function buildSelectorNodeRow(registry, nodeRow, { routeDomain, trustedSc
   };
 }
 
+// RFC 9110 compliant Accept header parser with q-value weights
 export function isHtmlAccept(acceptHeader) {
-  if (typeof acceptHeader !== "string") return false;
-  const lower = acceptHeader.toLowerCase();
-  if (!lower.includes("text/html")) return false;
-  if (!lower.includes("application/json")) return true;
-  return lower.indexOf("text/html") < lower.indexOf("application/json");
+  if (typeof acceptHeader !== "string" || !acceptHeader.trim()) return false;
+
+  let htmlQ = 0;
+  let jsonQ = 0;
+  let htmlIndex = -1;
+  let jsonIndex = -1;
+
+  const entries = acceptHeader.split(",").map((s) => s.trim()).filter(Boolean);
+  for (let i = 0; i < entries.length; i++) {
+    const parts = entries[i].split(";").map((p) => p.trim());
+    const mediaRange = parts[0].toLowerCase();
+    let q = 1.0;
+    for (let j = 1; j < parts.length; j++) {
+      const param = parts[j].toLowerCase();
+      if (param.startsWith("q=")) {
+        const parsedQ = parseFloat(param.slice(2).trim());
+        if (!Number.isNaN(parsedQ)) {
+          q = Math.max(0, Math.min(1, parsedQ));
+        }
+      }
+    }
+
+    if (mediaRange === "text/html" && htmlIndex === -1) {
+      htmlQ = q;
+      htmlIndex = i;
+    } else if (mediaRange === "application/json" && jsonIndex === -1) {
+      jsonQ = q;
+      jsonIndex = i;
+    }
+  }
+
+  // HTML explicitly disallowed (q=0) or not present
+  if (htmlIndex === -1 || htmlQ === 0) return false;
+
+  // JSON not present and HTML allowed
+  if (jsonIndex === -1) return true;
+
+  // Both present: higher q-factor wins
+  if (htmlQ > jsonQ) return true;
+  if (htmlQ < jsonQ) return false;
+
+  // Equal positive q-factor: appearance order wins
+  return htmlIndex < jsonIndex;
 }
 
 function escapeHtml(str) {

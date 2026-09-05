@@ -322,7 +322,7 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
   });
 
   // 3. Start Hub Server with HTTP routing enabled
-  const { server: hubServer } = createHubServer({ registry });
+  const { server: hubServer } = createHubServer({ registry, options: { trustedExternalScheme: "https" } });
   await new Promise((resolve) => hubServer.listen(0, "127.0.0.1", resolve));
   const hubPort = hubServer.address().port;
 

@@ -77,6 +77,7 @@ test("Selector UI view-model: createSelectorRowElement renders eligible row with
   assert.ok(el.innerHTML.includes('href="https://n-11112222333344445555666677778888.stage5-test.example/"'));
   assert.ok(el.innerHTML.includes('class="open-button"'));
   assert.ok(el.innerHTML.includes("node_11112222333344445555666677778888"));
+  assert.ok(el.innerHTML.includes('data-state="active"'));
   assert.ok(el.innerHTML.includes("0.1.1-rc.2"));
 });
 
@@ -108,4 +109,36 @@ test("Selector UI view-model: createSelectorRowElement renders ineligible row wi
   assert.ok(!el.innerHTML.includes('class="open-button"'));
   assert.ok(el.innerHTML.includes('class="disabled-button"'));
   assert.ok(el.innerHTML.includes("Route ingress or downstream DSH is unreachable"));
+  assert.ok(el.innerHTML.includes('data-state="active"'));
+});
+
+test("Selector UI view-model: createSelectorRowElement renders tombstoned node with explicit state and unavailable controls", () => {
+  const node = {
+    nodeId: "node_aaaa0000bbbb1111cccc2222dddd3333",
+    state: "tombstoned",
+    runtimeIdentity: {
+      dshVersion: "0.1.1-rc.2",
+      orbitVersion: "0.4.0",
+    },
+    health: {
+      registryContact: "stale",
+      reachable: "unreachable",
+      orbitCompatible: "pass",
+      capabilities: [],
+      capabilitiesStale: true,
+    },
+    route: {
+      eligible: false,
+      reasonCode: "node-inactive",
+      reason: "Node is not active",
+      openUrl: null,
+    },
+  };
+
+  const el = createSelectorRowElement(node);
+  assert.ok(el.className.includes("ineligible"));
+  assert.ok(el.innerHTML.includes('data-state="tombstoned"'));
+  assert.ok(el.innerHTML.includes(">tombstoned</span>"));
+  assert.ok(el.innerHTML.includes('class="disabled-button"'));
+  assert.ok(el.innerHTML.includes("Node is not active"));
 });

@@ -122,6 +122,7 @@ const registry = new Registry({
   rotationOverlapHours,
   hubRouteOverlapDays,
   routeDomain,
+  trustedExternalScheme,
   caCertificates,
   ...(drillContactNow ? { registryContactNow: drillContactNow } : {}),
 });

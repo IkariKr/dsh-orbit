@@ -39,9 +39,11 @@ export function createSelectorRowElement(node) {
   card.setAttribute("aria-label", `Endpoint ${node.nodeId}`);
 
   const safeNodeId = escapeHtml(node.nodeId);
+  const nodeState = escapeHtml(node.state || "unknown");
   const dshVer = escapeHtml(node.runtimeIdentity?.dshVersion || "unknown");
   const orbitVer = escapeHtml(node.runtimeIdentity?.orbitVersion || "unknown");
 
+  const stateBadge = formatBadge("state", node.state);
   const contactBadge = formatBadge("contact", node.health?.registryContact);
   const reachBadge = formatBadge("reach", node.health?.reachable);
   const compatBadge = formatBadge("compat", node.health?.orbitCompatible);
@@ -66,13 +68,17 @@ export function createSelectorRowElement(node) {
 
   card.innerHTML = `
     <div class="card-header">
-      <span class="node-title">${safeNodeId}</span>
+      <div class="node-title-group">
+        <span class="node-title">${safeNodeId}</span>
+        <span class="node-state-pill" data-state="${nodeState}">${nodeState}</span>
+      </div>
       <div class="node-meta">
         <span>DSH: <strong>${dshVer}</strong></span>
         <span>Orbit: <strong>${orbitVer}</strong></span>
       </div>
     </div>
     <div class="dimension-badges">
+      ${stateBadge}
       ${contactBadge}
       ${reachBadge}
       ${compatBadge}

@@ -151,7 +151,7 @@ export function createHubServer({ registry, options = {} }) {
     // scheme from the socket (plain http from the gateway) and must not
     // trust client-supplied X-Forwarded-Proto. The operator pins the
     // trusted external scheme explicitly (P1-09).
-    trustedExternalScheme = "http",
+    trustedExternalScheme = options.trustedExternalScheme ?? registry.trustedExternalScheme ?? "http",
   } = options;
   if (trustedExternalScheme !== "http" && trustedExternalScheme !== "https") {
     throw new Error(`trustedExternalScheme must be http or https (got ${JSON.stringify(trustedExternalScheme)})`);
@@ -210,7 +210,7 @@ export function createHubServer({ registry, options = {} }) {
       // Check 5-condition eligibility
       const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
       if (!eligibility.eligible) {
-        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, registry.trustedScheme || "https");
+        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
         const accept = request.headers.accept || "";
 
         if (isHtmlAccept(accept)) {
@@ -246,7 +246,7 @@ export function createHubServer({ registry, options = {} }) {
         snapshot: eligibility.snapshot,
         routeAuthority: hostClass.routeAuthority,
         configuredRouteDomain: registry.routeDomain,
-        trustedScheme: registry.trustedScheme || "https",
+        trustedScheme: trustedExternalScheme,
         caCertificates: registry.caCertificates,
         nowMs: registry.now().getTime(),
       });
@@ -282,25 +282,25 @@ export function createHubServer({ registry, options = {} }) {
         return;
       }
 
-      // Allowlist on selector authority:
+      // Strict (method, path) tuple allowlist on selector authority:
       // 1. POST /hub/session (bootstrap session)
       // 2. GET /hub/session (verify session)
       // 3. POST /hub/session/logout (optional logout)
       // 4. GET /hub/selector/nodes (sanitized selector read model)
-      if (
-        path === "/hub/session" ||
-        path === "/hub/session/" ||
-        path === "/hub/session/logout" ||
-        path === "/hub/session/logout/" ||
-        path === "/hub/selector/nodes" ||
-        path === "/hub/selector/nodes/"
-      ) {
+      const method = request.method;
+      const isAllowedSelectorApi =
+        (method === "POST" && (path === "/hub/session" || path === "/hub/session/")) ||
+        (method === "GET" && (path === "/hub/session" || path === "/hub/session/")) ||
+        (method === "POST" && (path === "/hub/session/logout" || path === "/hub/session/logout/")) ||
+        (method === "GET" && (path === "/hub/selector/nodes" || path === "/hub/selector/nodes/"));
+
+      if (isAllowedSelectorApi) {
         handleBrowserRequest(request, response, path).catch((error) => sendError(response, error));
         return;
       }
 
       // Explicitly forbidden on selector authority:
-      // All other /hub/* (management mutations, tokens, route-target, delete, reenroll)
+      // All other methods, all other /hub/* (management mutations, tokens, route-target, delete, reenroll)
       // and all /api/v1/* machine routes return 404 on selector authority.
       response.writeHead(404, { "content-type": "application/json" });
       response.end(JSON.stringify({
@@ -541,19 +541,22 @@ export function createHubServer({ registry, options = {} }) {
 
     const session = validateSessionOnly(request);
 
-    if (path === "/hub/session" || path === "/hub/session/") {
+    if (request.method === "GET" && (path === "/hub/session" || path === "/hub/session/")) {
       return sendJson(response, 200, { principal: session.operatorPrincipal, csrfToken: session.csrfToken, expiresAt: session.expiresAt });
     }
-    if (path === "/hub/session/logout" || path === "/hub/session/logout/") {
+    if (request.method === "POST" && (path === "/hub/session/logout" || path === "/hub/session/logout/")) {
       requireCsrf(request, session);
       registry.endSession({ sessionId: session.sessionId, actor: session.operatorPrincipal });
       return sendJson(response, 200, { ok: true });
+    }
+    if (path === "/hub/session" || path === "/hub/session/" || path === "/hub/session/logout" || path === "/hub/session/logout/") {
+      return sendJson(response, 405, { error: { code: "method-not-allowed", message: "method not supported for session endpoint" } });
     }
     if (request.method === "GET") {
       if (path === "/hub/selector/nodes" || path === "/hub/selector/nodes/") {
         const readModel = buildSelectorReadModel(registry, {
           routeDomain: registry.routeDomain,
-          trustedScheme: registry.trustedScheme || "https",
+          trustedScheme: trustedExternalScheme,
         });
         return sendJson(response, 200, readModel);
       }
@@ -696,7 +699,7 @@ export function createHubServer({ registry, options = {} }) {
       // Check Hub WebSocket capacity limits
       const capacityCheck = wsTracker.canAccept(hostClass.nodeId);
       if (!capacityCheck.allowed) {
-        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, registry.trustedScheme || "https");
+        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
         sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
           error: { code: "capacity-exhausted", message: "Hub WebSocket capacity limit reached", selectorUrl },
         });
@@ -706,7 +709,7 @@ export function createHubServer({ registry, options = {} }) {
       // Check 5-condition eligibility
       const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
       if (!eligibility.eligible) {
-        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, registry.trustedScheme || "https");
+        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
         sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
           error: {
             code: "node-unavailable",
@@ -726,7 +729,7 @@ export function createHubServer({ registry, options = {} }) {
         routeAuthority: hostClass.routeAuthority,
         tracker: wsTracker,
         configuredRouteDomain: registry.routeDomain,
-        trustedScheme: registry.trustedScheme || "https",
+        trustedScheme: trustedExternalScheme,
         caCertificates: registry.caCertificates,
         ...(wsHandshakeTimeoutMs !== undefined ? { handshakeTimeoutMs: wsHandshakeTimeoutMs } : {}),
         nowMs: registry.now().getTime(),

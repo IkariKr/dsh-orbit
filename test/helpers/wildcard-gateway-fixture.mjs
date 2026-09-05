@@ -38,8 +38,8 @@ export function startWildcardGateway({
         return { hostWithoutPort, isRehearsalHost };
       }
 
-      function forwardHttpToHub(req, res, targetPort, originalHost) {
-        const forwardHeaders = { ...req.headers };
+      function sanitizeGatewayForwardHeaders(incomingHeaders, originalHost) {
+        const forwardHeaders = { ...incomingHeaders };
         forwardHeaders.host = originalHost;
         delete forwardHeaders["x-gateway-auth"];
         delete forwardHeaders["x-gateway-secret"];
@@ -53,6 +53,11 @@ export function startWildcardGateway({
         }
         forwardHeaders["x-dsh-authenticated-proxy"] = gatewaySecret;
         forwardHeaders["x-dsh-operator-id"] = operatorId;
+        return forwardHeaders;
+      }
+
+      function forwardHttpToHub(req, res, targetPort, originalHost) {
+        const forwardHeaders = sanitizeGatewayForwardHeaders(req.headers, originalHost);
 
         const upstream = http.request(
           {
@@ -79,12 +84,7 @@ export function startWildcardGateway({
       }
 
       function forwardWsToHub(req, clientSocket, head, targetPort, originalHost) {
-        const forwardHeaders = { ...req.headers };
-        forwardHeaders.host = originalHost;
-        delete forwardHeaders["x-gateway-auth"];
-        delete forwardHeaders["x-gateway-secret"];
-        forwardHeaders["x-dsh-authenticated-proxy"] = gatewaySecret;
-        forwardHeaders["x-dsh-operator-id"] = operatorId;
+        const forwardHeaders = sanitizeGatewayForwardHeaders(req.headers, originalHost);
 
         const upstreamReq = http.request({
           hostname: "127.0.0.1",

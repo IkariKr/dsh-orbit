@@ -7,6 +7,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { randomBytes, createHash } from "node:crypto";
+import tls from "node:tls";
 import { validReport } from "./helpers/registry-fixture.mjs";
 import { startWildcardGateway } from "./helpers/wildcard-gateway-fixture.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
@@ -64,6 +66,7 @@ function generateWildcardCertificate(dir) {
 function startIdentifiedDshServer(fixtureId) {
   let alive = true;
   const activeSockets = new Set();
+  let lastReceivedWsHeaders = null;
 
   const server = http.createServer((req, res) => {
     if (!alive) {
@@ -93,6 +96,7 @@ function startIdentifiedDshServer(fixtureId) {
   });
 
   server.on("upgrade", (req, socket) => {
+    lastReceivedWsHeaders = { ...req.headers };
     socket.on("error", () => {});
     activeSockets.add(socket);
     socket.once("close", () => activeSockets.delete(socket));
@@ -114,6 +118,7 @@ function startIdentifiedDshServer(fixtureId) {
         port,
         target: `http://127.0.0.1:${port}`,
         setAlive: (v) => (alive = v),
+        getLastWsHeaders: () => lastReceivedWsHeaders,
         close: () => new Promise((r) => {
           for (const s of activeSockets) {
             try { s.destroy(); } catch {}
@@ -126,7 +131,34 @@ function startIdentifiedDshServer(fixtureId) {
   });
 }
 
-function makeGatewayRequest({ gatewayPort, authority, path = "/", headers = {}, caCert }) {
+function makeDirectHubRequest({ port, path, method = "GET", headers = {}, body = null }) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: "127.0.0.1",
+      port,
+      path,
+      method,
+      headers,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          text: async () => raw,
+          json: async () => JSON.parse(raw),
+        });
+      });
+    });
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+function makeGatewayRequest({ gatewayPort, authority, path = "/", method = "GET", headers = {}, caCert, body = null }) {
   return new Promise((resolve, reject) => {
     const forwardHeaders = {
       ...headers,
@@ -136,7 +168,7 @@ function makeGatewayRequest({ gatewayPort, authority, path = "/", headers = {}, 
       hostname: "127.0.0.1",
       port: gatewayPort,
       path,
-      method: "GET",
+      method,
       headers: forwardHeaders,
       ca: caCert,
       servername: authority.split(":")[0],
@@ -154,7 +186,49 @@ function makeGatewayRequest({ gatewayPort, authority, path = "/", headers = {}, 
       });
     });
     req.on("error", reject);
+    if (body) req.write(body);
     req.end();
+  });
+}
+
+function performWssUpgrade(tlsSocket, { authority, path = "/ws", headers = {} }) {
+  return new Promise((resolve, reject) => {
+    const secKey = randomBytes(16).toString("base64");
+    const reqHeaders = {
+      Host: authority,
+      Upgrade: "websocket",
+      Connection: "Upgrade",
+      "Sec-WebSocket-Version": "13",
+      "Sec-WebSocket-Key": secKey,
+      ...headers,
+    };
+
+    const lines = [`GET ${path} HTTP/1.1`];
+    for (const [k, v] of Object.entries(reqHeaders)) {
+      lines.push(`${k}: ${v}`);
+    }
+    lines.push("", "");
+    const rawReq = lines.join("\r\n");
+
+    let received = Buffer.alloc(0);
+    let resolved = false;
+
+    const onData = (chunk) => {
+      received = Buffer.concat([received, chunk]);
+      const idx = received.indexOf("\r\n\r\n");
+      if (idx !== -1 && !resolved) {
+        resolved = true;
+        tlsSocket.removeListener("data", onData);
+        const headerText = received.slice(0, idx + 4).toString("utf8");
+        const statusMatch = headerText.match(/^HTTP\/1\.1 (\d+)/i);
+        const status = statusMatch ? Number(statusMatch[1]) : 0;
+        resolve({ status, headerText });
+      }
+    };
+
+    tlsSocket.on("data", onData);
+    tlsSocket.on("error", reject);
+    tlsSocket.write(rawReq);
   });
 }
 
@@ -205,6 +279,7 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
           DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS: "1",
           DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
           DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+          DSH_ORBIT_HUB_TRUSTED_SCHEME: "https",
         },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -235,17 +310,25 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
     gatewayToken: REHEARSAL_GATEWAY_TOKEN,
   });
   const gatewayPort = gateway.port;
+  const mgmtHost = `127.0.0.1:${hubPort}`;
 
   // Step 4: Enroll Node A & Node B
   const opHeaders = {
     "x-dsh-authenticated-proxy": "test-gateway-secret",
     "x-dsh-operator-id": "operator",
-    origin: hubBaseUrl,
+    origin: `https://${mgmtHost}`,
     "sec-fetch-site": "same-origin",
+    host: mgmtHost,
   };
-  const sessRes = await fetch(`${hubBaseUrl}/hub/session`, { method: "POST", headers: opHeaders });
-  const sessionCookie = sessRes.headers.get("set-cookie")?.match(/dsh-orbit-hub-session=([^;]+)/)?.[1];
-  const { csrfToken } = await sessRes.json();
+  const sessRes = await makeDirectHubRequest({
+    port: hubPort,
+    path: "/hub/session",
+    method: "POST",
+    headers: opHeaders,
+  });
+  assert.equal(sessRes.status, 200);
+  const sessionCookie = sessRes.headers["set-cookie"]?.[0]?.match(/dsh-orbit-hub-session=([^;]+)/)?.[1];
+  const { csrfToken } = JSON.parse(await sessRes.text());
   const authHeaders = {
     ...opHeaders,
     "content-type": "application/json",
@@ -253,19 +336,25 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
     "x-csrf-token": csrfToken,
   };
 
-  const tokResA = await fetch(`${hubBaseUrl}/hub/tokens`, {
+  const tokResA = await makeDirectHubRequest({
+    port: hubPort,
+    path: "/hub/tokens",
     method: "POST",
     headers: authHeaders,
     body: JSON.stringify({ purpose: "enroll" }),
   });
-  const { token: tokenA } = await tokResA.json();
+  assert.equal(tokResA.status, 200);
+  const { token: tokenA } = JSON.parse(await tokResA.text());
 
-  const tokResB = await fetch(`${hubBaseUrl}/hub/tokens`, {
+  const tokResB = await makeDirectHubRequest({
+    port: hubPort,
+    path: "/hub/tokens",
     method: "POST",
     headers: authHeaders,
     body: JSON.stringify({ purpose: "enroll" }),
   });
-  const { token: tokenB } = await tokResB.json();
+  assert.equal(tokResB.status, 200);
+  const { token: tokenB } = JSON.parse(await tokResB.text());
 
   // Enroll A
   const enrollChildA = spawn(process.execPath, ["bin/dsh-orbit-node.mjs", "enroll"], {
@@ -368,12 +457,16 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
   });
 
   // Set route targets
-  await fetch(`${hubBaseUrl}/hub/nodes/${nodeIdA}/route-target`, {
+  await makeDirectHubRequest({
+    port: hubPort,
+    path: `/hub/nodes/${nodeIdA}/route-target`,
     method: "PUT",
     headers: authHeaders,
     body: JSON.stringify({ routeTarget: nodeInfoA.origin }),
   });
-  await fetch(`${hubBaseUrl}/hub/nodes/${nodeIdB}/route-target`, {
+  await makeDirectHubRequest({
+    port: hubPort,
+    path: `/hub/nodes/${nodeIdB}/route-target`,
     method: "PUT",
     headers: authHeaders,
     body: JSON.stringify({ routeTarget: nodeInfoB.origin }),
@@ -387,8 +480,10 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
   let lastNodeA = null;
   let lastNodeB = null;
   while (Date.now() - startWait < 15000) {
-    lastNodeA = await (await fetch(`${hubBaseUrl}/hub/nodes/${nodeIdA}`, { headers: authHeaders })).json();
-    lastNodeB = await (await fetch(`${hubBaseUrl}/hub/nodes/${nodeIdB}`, { headers: authHeaders })).json();
+    const resA = await makeDirectHubRequest({ port: hubPort, path: `/hub/nodes/${nodeIdA}`, headers: authHeaders });
+    const resB = await makeDirectHubRequest({ port: hubPort, path: `/hub/nodes/${nodeIdB}`, headers: authHeaders });
+    lastNodeA = JSON.parse(await resA.text());
+    lastNodeB = JSON.parse(await resB.text());
     const okA = lastNodeA.state === "active" && lastNodeA.health?.reachable === "ok" && (lastNodeA.health?.capabilities || []).some((c) => c.name === "web.routes");
     const okB = lastNodeB.state === "active" && lastNodeB.health?.reachable === "ok" && (lastNodeB.health?.capabilities || []).some((c) => c.name === "web.routes");
     if (okA && okB) break;
@@ -418,6 +513,76 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
   assert.equal(authSel.status, 200);
   const selHtml = await authSel.text();
   assert.ok(selHtml.includes("DSH Orbit Endpoint Selector"));
+
+  // 6.2.1 Gateway-level session bootstrap + /hub/selector/nodes read model verification
+  const gwSessRes = await makeGatewayRequest({
+    gatewayPort,
+    authority: REHEARSAL_DOMAIN,
+    path: "/hub/session",
+    method: "POST",
+    headers: {
+      "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN,
+      origin: `https://${REHEARSAL_DOMAIN}`,
+      "sec-fetch-site": "same-origin",
+    },
+    caCert: wildcardCaCert,
+  });
+  assert.equal(gwSessRes.status, 200);
+  const gwSessionCookie = gwSessRes.headers["set-cookie"]?.[0]?.match(/dsh-orbit-hub-session=([^;]+)/)?.[1];
+  assert.ok(gwSessionCookie, "Gateway selector session bootstrap must return session cookie");
+
+  const gwNodesRes = await makeGatewayRequest({
+    gatewayPort,
+    authority: REHEARSAL_DOMAIN,
+    path: "/hub/selector/nodes",
+    method: "GET",
+    headers: {
+      "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN,
+      cookie: `dsh-orbit-hub-session=${gwSessionCookie}`,
+      "sec-fetch-site": "same-origin",
+    },
+    caCert: wildcardCaCert,
+  });
+  assert.equal(gwNodesRes.status, 200);
+  const gwNodesData = await gwNodesRes.json();
+  assert.equal(gwNodesData.nodes.length, 2);
+  const selNodeA = gwNodesData.nodes.find((n) => n.nodeId === nodeIdA);
+  const selNodeB = gwNodesData.nodes.find((n) => n.nodeId === nodeIdB);
+  assert.equal(selNodeA.route.eligible, true);
+  assert.equal(selNodeA.route.openUrl, `https://${authorityA}/`);
+  assert.equal(selNodeB.route.eligible, true);
+  assert.equal(selNodeB.route.openUrl, `https://${authorityB}/`);
+
+  // 6.2.2 WebSocket Upgrade Credential Stripping: verify outer credentials (header + cookie) stripped before DSH
+  const clientTlsSocket = tls.connect({
+    host: "127.0.0.1",
+    port: gatewayPort,
+    ca: wildcardCaCert,
+    servername: authorityB.split(":")[0],
+    rejectUnauthorized: true,
+  });
+  await new Promise((r, e) => { clientTlsSocket.on("secureConnect", r); clientTlsSocket.on("error", e); });
+
+  const wsUpgradeRes = await performWssUpgrade(clientTlsSocket, {
+    authority: authorityB,
+    path: "/ws",
+    headers: {
+      "x-gateway-auth": REHEARSAL_GATEWAY_TOKEN,
+      Cookie: "gateway-auth=secret-outer-cookie; dsh-session=user123",
+    },
+  });
+  assert.equal(wsUpgradeRes.status, 101, "WebSocket upgrade must succeed");
+  clientTlsSocket.destroy();
+
+  // Assert in downstream DSH B that gateway-auth Cookie, x-gateway-auth, and x-gateway-secret never reached DSH
+  const downstreamWsHeaders = dshB.getLastWsHeaders();
+  assert.ok(downstreamWsHeaders, "Downstream DSH must have received WS upgrade headers");
+  assert.equal(downstreamWsHeaders["x-gateway-auth"], undefined, "x-gateway-auth must be stripped");
+  assert.equal(downstreamWsHeaders["x-gateway-secret"], undefined, "x-gateway-secret must be stripped");
+  if (downstreamWsHeaders.cookie) {
+    assert.equal(downstreamWsHeaders.cookie.includes("gateway-auth="), false, "gateway-auth Cookie must be stripped before DSH");
+    assert.ok(downstreamWsHeaders.cookie.includes("dsh-session=user123"), "Legitimate downstream cookie preserved");
+  }
 
   // 6.3 Open Node A through Gateway -> Reaches downstream A exclusively
   const openResA = await makeGatewayRequest({

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
 import { createHubServer } from "../src/registry/server.mjs";
-import { buildSelectorReadModel, mapEligibilityReason } from "../src/registry/selector-view.mjs";
+import { buildSelectorReadModel, mapEligibilityReason, isHtmlAccept } from "../src/registry/selector-view.mjs";
 import { validReport } from "./helpers/registry-fixture.mjs";
 import { createCompatibilityReport } from "../src/compatibility-report.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
@@ -281,8 +281,170 @@ test("Stage 5 Selector API & Read Model Security: privacy, allowlist, and server
     const unavailJson = await unavailJsonRes.json();
     assert.equal(unavailJson.error.code, "node-unavailable");
     assert.equal(unavailJson.error.selectorUrl, `https://${ROUTE_DOMAIN}/`);
+
+    // Test 11: Method allowlist hardening on Selector Authority
+    const invalidMethodRes = await makeHttpRequest({
+      port,
+      path: "/hub/session",
+      method: "PUT",
+      headers: apiHeaders,
+    });
+    assert.equal(invalidMethodRes.status, 404, "PUT /hub/session on selector authority must return 404");
+
+    const invalidLogoutMethodRes = await makeHttpRequest({
+      port,
+      path: "/hub/session/logout",
+      method: "GET",
+      headers: apiHeaders,
+    });
+    assert.equal(invalidLogoutMethodRes.status, 404, "GET /hub/session/logout on selector authority must return 404");
+
+    const invalidNodesMethodRes = await makeHttpRequest({
+      port,
+      path: "/hub/selector/nodes",
+      method: "POST",
+      headers: apiHeaders,
+    });
+    assert.equal(invalidNodesMethodRes.status, 404, "POST /hub/selector/nodes on selector authority must return 404");
   } finally {
     if (server) await new Promise((r) => server.close(r));
+    if (db) db.close();
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});
+
+test("Stage 5 Selector Unit: mapEligibilityReason complete matrix & isHtmlAccept q-value negotiation", () => {
+  // 1. mapEligibilityReason unit coverage
+  assert.deepEqual(mapEligibilityReason("node-not-active"), {
+    code: "node-inactive",
+    message: "Node is not active",
+  });
+  assert.deepEqual(mapEligibilityReason("no-route-target"), {
+    code: "no-route-target",
+    message: "Route target is not configured",
+  });
+  assert.deepEqual(mapEligibilityReason("node-not-reachable: unknown"), {
+    code: "route-reachability-unverified",
+    message: "Route reachability is not verified yet",
+  });
+  assert.deepEqual(mapEligibilityReason("node-not-reachable: unreachable"), {
+    code: "route-unreachable",
+    message: "Route ingress or downstream DSH is unreachable",
+  });
+  assert.deepEqual(mapEligibilityReason("no-active-hub-route-key"), {
+    code: "hub-route-identity-unavailable",
+    message: "Hub route identity is not active",
+  });
+  assert.deepEqual(mapEligibilityReason("compatibility-evidence-stale"), {
+    code: "compatibility-evidence-stale",
+    message: "Compatibility evidence is stale",
+  });
+  assert.deepEqual(mapEligibilityReason("web-routes-capability-missing"), {
+    code: "web-routes-unavailable",
+    message: "Web routing compatibility evidence is unavailable",
+  });
+  assert.deepEqual(mapEligibilityReason("custom-unknown-reason"), {
+    code: "unavailable",
+    message: "Node is currently unavailable for routing",
+  });
+  assert.deepEqual(mapEligibilityReason(null), {
+    code: null,
+    message: null,
+  });
+
+  // 2. isHtmlAccept q-value RFC-9110 parsing & counter-examples
+  // Counter-example 1: application/json higher priority than text/html
+  assert.equal(isHtmlAccept("application/json;q=0.9, text/html;q=0.1"), false);
+  // Counter-example 2: text/html higher priority than application/json
+  assert.equal(isHtmlAccept("application/json;q=0.1, text/html;q=0.9"), true);
+  // Counter-example 3: text/html explicitly forbidden with q=0
+  assert.equal(isHtmlAccept("text/html;q=0, application/json;q=1"), false);
+  // Default equal weights: first in order wins
+  assert.equal(isHtmlAccept("text/html, application/json"), true);
+  assert.equal(isHtmlAccept("application/json, text/html"), false);
+  // Browser standard accepts
+  assert.equal(isHtmlAccept("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"), true);
+  assert.equal(isHtmlAccept("*/*"), false);
+  assert.equal(isHtmlAccept(""), false);
+  assert.equal(isHtmlAccept(undefined), false);
+});
+
+test("Stage 5 Selector Integration: Scheme wiring regression (trustedExternalScheme http vs https)", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-stage5-scheme-"));
+  const dbPath = join(dir, "hub.db");
+  let db = null;
+  let serverHttp = null;
+
+  try {
+    db = openRegistryDatabase(dbPath);
+    const registry = new Registry({ db, routeDomain: "scheme-test.example" });
+
+    // Node fixture
+    const nodeId = "node_cccccccccccccccccccccccccccccccc";
+    db.prepare("INSERT INTO nodes (node_id, state, minted_at) VALUES (?, ?, ?)").run(
+      nodeId,
+      "active",
+      new Date().toISOString(),
+    );
+
+    // Create Hub server explicitly configured with trustedExternalScheme="http"
+    const hubInstance = createHubServer({
+      registry,
+      options: {
+        gatewayAssertionSecret: GATEWAY_SECRET,
+        operatorPrincipal: { mode: "single", principal: OPERATOR_ID },
+        trustedExternalScheme: "http",
+      },
+    });
+    serverHttp = hubInstance.server;
+
+    const port = await new Promise((r) => serverHttp.listen(0, "127.0.0.1", () => r(serverHttp.address().port)));
+
+    // Bootstrap session
+    const sessRes = await makeHttpRequest({
+      port,
+      path: "/hub/session",
+      method: "POST",
+      headers: {
+        host: "scheme-test.example",
+        origin: "http://scheme-test.example",
+        "sec-fetch-site": "same-origin",
+        "x-dsh-authenticated-proxy": GATEWAY_SECRET,
+        "x-dsh-operator-id": OPERATOR_ID,
+      },
+    });
+    assert.equal(sessRes.status, 200);
+    const cookie = sessRes.headers["set-cookie"]?.[0]?.match(/dsh-orbit-hub-session=([^;]+)/)?.[1];
+
+    // Read model on http
+    const nodesRes = await makeHttpRequest({
+      port,
+      path: "/hub/selector/nodes",
+      headers: {
+        host: "scheme-test.example",
+        cookie: `dsh-orbit-hub-session=${cookie}`,
+        "sec-fetch-site": "same-origin",
+        "x-dsh-authenticated-proxy": GATEWAY_SECRET,
+        "x-dsh-operator-id": OPERATOR_ID,
+      },
+    });
+    assert.equal(nodesRes.status, 200);
+    const nodes = await nodesRes.json();
+    assert.equal(nodes.nodes.length, 1);
+    // Node is inactive / no target, so openUrl is null, but we test 503 Return selectorUrl
+    const nodeAuth = computeRouteAuthority(nodeId, "scheme-test.example");
+    const unavailRes = await makeHttpRequest({
+      port,
+      path: "/",
+      headers: { host: nodeAuth, accept: "text/html" },
+    });
+    assert.equal(unavailRes.status, 503);
+    const html = await unavailRes.text();
+    // Return button MUST use http:// because trustedExternalScheme is http!
+    assert.ok(html.includes('href="http://scheme-test.example/"'), `Expected http scheme in return link, got: ${html}`);
+    assert.equal(html.includes("https://scheme-test.example/"), false);
+  } finally {
+    if (serverHttp) await new Promise((r) => serverHttp.close(r));
     if (db) db.close();
     await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }

@@ -415,7 +415,7 @@ test("Stage 4 Security Matrix: invalid Host, selector apex, foreign Host, scheme
   const nodeId = "node_" + "41".repeat(16);
   const authority = computeRouteAuthority(nodeId, ROUTE_DOMAIN);
 
-  const { server: hubServer } = createHubServer({ registry });
+  const { server: hubServer } = createHubServer({ registry, options: { trustedExternalScheme: "https" } });
   await new Promise((r) => hubServer.listen(0, "127.0.0.1", r));
   const hubPort = hubServer.address().port;
 
