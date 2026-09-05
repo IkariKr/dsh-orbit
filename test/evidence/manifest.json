@@ -3,7 +3,7 @@
   "stage": "v0.4 Stage 5 Endpoint Selector UI",
   "branch": "feat/v0.4-stage5-endpoint-selector-ui",
   "testedCommit": "4cea88c19c33226c2e8fb8b728a06d83d00843cd",
-  "timestamp": "2026-09-05T03:58:00.000Z",
+  "timestamp": "2026-09-05T05:15:00.000Z",
   "browser": {
     "name": "ZCode In-app Browser",
     "version": "3.11.2",
@@ -16,20 +16,21 @@
       "height": 720
     }
   },
-  "selectorAuthority": "stage5.localhost:62804",
+  "selectorAuthority": "stage5.localhost:57546",
   "rehearsalTopology": {
-    "routeDomain": "stage5.localhost:62804",
-    "gatewayPort": 62804,
+    "routeDomain": "stage5.localhost:57546",
+    "gatewayPort": 57546,
     "trustedExternalScheme": "http",
     "nodeA": {
-      "nodeId": "node_273c618f3608ffa1d84caee64da86c7c",
-      "authority": "n-273c618f3608ffa1d84caee64da86c7c.stage5.localhost:62804",
+      "nodeId": "node_963d2e5277862851207189f82cb22dfd",
+      "authority": "n-963d2e5277862851207189f82cb22dfd.stage5.localhost:57546",
       "initialState": "active",
-      "failureCondition": "Route ingress or downstream DSH is unreachable"
+      "failureCondition": "Route ingress or downstream DSH is unreachable",
+      "restoredState": "active"
     },
     "nodeB": {
-      "nodeId": "node_1089693baeeb07998d699f455bc480a8",
-      "authority": "n-1089693baeeb07998d699f455bc480a8.stage5.localhost:62804",
+      "nodeId": "node_52dec71a3d942ce0164c370507baa12f",
+      "authority": "n-52dec71a3d942ce0164c370507baa12f.stage5.localhost:57546",
       "initialState": "active",
       "status": "healthy"
     }
@@ -40,24 +41,24 @@
       "name": "Selector initial shell",
       "description": "Initial load of authoritative selector shell showing registered nodes with ACTIVE pills and dimension badges",
       "file": "scenario-a-selector-shell.png",
-      "bytes": 131418,
-      "sha256": "471a388b30c97061136c3686bfd4591a893c6d127558b4bf3d02e17669f3c95c"
+      "bytes": 130839,
+      "sha256": "b8e192d5277178907ecbd9e3b5ac2f2b9bbd15068db627a397f04df6522d5473"
     },
     {
       "id": "scenario-b-tab1",
       "name": "Open Node A in Tab 1",
       "description": "Operator selects Node A; browser navigates to Node A deterministic authority",
       "file": "scenario-b-tab1-nodeA.png",
-      "bytes": 64143,
-      "sha256": "56000580001596206097aae3fcde50c05d6cc85ed6a1458bec7e3e2584d8d0f6"
+      "bytes": 40128,
+      "sha256": "2783b72fd2fe9c815fb204b39ac5ec4cb22ea510e5d70a5179173034f869fe87"
     },
     {
       "id": "scenario-b-tab2",
       "name": "Open Node B in Tab 2",
       "description": "Operator opens Selector in second tab and selects Node B",
       "file": "scenario-b-tab2-nodeB.png",
-      "bytes": 71067,
-      "sha256": "4b0233523b81df17fc2fe4e0397f22c2c86c58cbddddf9ff822f0bf671b9bdf5"
+      "bytes": 46362,
+      "sha256": "9cb497089139492c9a68c7eb168cb43c0af6512b59442d2723bb2c2d6e03d650"
     },
     {
       "id": "scenario-b-tab1-remains",
@@ -72,8 +73,8 @@
       "name": "Node A unavailable 503",
       "description": "Stopping Node A route ingress causes Tab 1 refresh to return 503 HTML return page with selector link",
       "file": "scenario-c-nodeA-unavailable-503.png",
-      "bytes": 47998,
-      "sha256": "875c2b75995d220852d37250ecdb82d34b1be4312730146db8f59655e4674455"
+      "bytes": 48389,
+      "sha256": "1eef4512b2b40e72261374934758b014ceee9591910d0d1f4adb78f1437e574d"
     },
     {
       "id": "scenario-c-tab2-healthy",
@@ -88,8 +89,8 @@
       "name": "Selector shows Node A ineligible",
       "description": "Clicking return link displays Selector with Node A marked unreachable/unavailable and Node B available",
       "file": "scenario-d-selector-nodeA-ineligible.png",
-      "bytes": 141802,
-      "sha256": "3cc8aebc975fbee769a5bdd8b9402c605054f44233fabd1c44db95607aa5dff1"
+      "bytes": 141342,
+      "sha256": "81941770a3263cd741fbbcce6415e69d96bf66be7e8e45973671c4ef9f77dd03"
     },
     {
       "id": "scenario-d-switched",
@@ -106,6 +107,14 @@
       "file": "scenario-e-direct-bookmark-nodeB.png",
       "bytes": 46362,
       "sha256": "9cb497089139492c9a68c7eb168cb43c0af6512b59442d2723bb2c2d6e03d650"
+    },
+    {
+      "id": "scenario-f-restored",
+      "name": "Restore Node A and verify recovery",
+      "description": "Node A route ingress and DSH restored; authoritative eligibility recovers to reachable=ok; selector refresh restores Open button; clicking Open successfully opens Node A",
+      "file": "scenario-f-nodeA-restored.png",
+      "bytes": 40128,
+      "sha256": "2783b72fd2fe9c815fb204b39ac5ec4cb22ea510e5d70a5179173034f869fe87"
     }
   ]
 }
