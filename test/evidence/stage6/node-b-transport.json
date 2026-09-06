@@ -1,9 +1,9 @@
 {
-  "nodeId": "node_bd3987f70bdc9ed721c8c8b16b0ccd12",
-  "authority": "n-bd3987f70bdc9ed721c8c8b16b0ccd12.stage6.localhost:51558",
+  "nodeId": "node_d9691694f26067d59f41d1dc2fb48ead",
+  "authority": "n-d9691694f26067d59f41d1dc2fb48ead.stage6.localhost:51558",
   "role": "Workstation Host (127.0.0.1:50085)",
   "tlsMode": "none",
-  "executedAt": "2026-09-06T07:32:47.346Z",
+  "executedAt": "2026-09-06T13:41:49.792Z",
   "runtimeIdentity": {
     "dshVersion": "0.1.1-rc.2",
     "compatibilityProfile": "dsh-0.1.1-rc.2",
@@ -39,13 +39,13 @@
       "result": "PASS"
     },
     "pingPong": {
-      "pingPayload": "orbit-stage6-ping-node_bd3",
-      "pongPayload": "orbit-stage6-ping-node_bd3",
+      "pingPayload": "orbit-stage6-ping-node_d96",
+      "pongPayload": "orbit-stage6-ping-node_d96",
       "roundTripMs": 1,
       "result": "PASS"
     },
     "longLivedTransport": {
-      "idleDurationMs": 31507,
+      "idleDurationMs": 31510,
       "postIdlePingPong": "PASS",
       "retainedOpen": true,
       "result": "PASS"

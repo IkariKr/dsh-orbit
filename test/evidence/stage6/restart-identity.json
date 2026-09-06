@@ -1,15 +1,15 @@
 {
   "beforeRestart": {
-    "nodeIdA": "node_a2fd6f2036d97d95fba24e6064a6f1af",
-    "nodeIdB": "node_bd3987f70bdc9ed721c8c8b16b0ccd12",
-    "authorityB": "n-bd3987f70bdc9ed721c8c8b16b0ccd12.stage6.localhost:51558",
+    "nodeIdA": "node_5fcfcc140e38944a9143dfd2a6a4f673",
+    "nodeIdB": "node_d9691694f26067d59f41d1dc2fb48ead",
+    "authorityB": "n-d9691694f26067d59f41d1dc2fb48ead.stage6.localhost:51558",
     "routeTargetB": "http://127.0.0.1:50085",
     "stateB": "active",
     "reachableB": "ok"
   },
   "afterRestart": {
-    "nodeIdB": "node_bd3987f70bdc9ed721c8c8b16b0ccd12",
-    "authorityB": "n-bd3987f70bdc9ed721c8c8b16b0ccd12.stage6.localhost:51558",
+    "nodeIdB": "node_d9691694f26067d59f41d1dc2fb48ead",
+    "authorityB": "n-d9691694f26067d59f41d1dc2fb48ead.stage6.localhost:51558",
     "routeTargetB": "http://127.0.0.1:50085",
     "stateB": "active",
     "reachableB": "ok",

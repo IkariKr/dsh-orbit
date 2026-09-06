@@ -1,9 +1,9 @@
 {
-  "nodeId": "node_a2fd6f2036d97d95fba24e6064a6f1af",
-  "authority": "n-a2fd6f2036d97d95fba24e6064a6f1af.stage6.localhost:51558",
+  "nodeId": "node_5fcfcc140e38944a9143dfd2a6a4f673",
+  "authority": "n-5fcfcc140e38944a9143dfd2a6a4f673.stage6.localhost:51558",
   "role": "NAS Physical Host (port 50081)",
   "tlsMode": "private-ca",
-  "executedAt": "2026-09-06T07:32:15.814Z",
+  "executedAt": "2026-09-06T13:41:18.232Z",
   "runtimeIdentity": {
     "dshVersion": "0.1.1-rc.2",
     "compatibilityProfile": "dsh-0.1.1-rc.2",
@@ -39,13 +39,13 @@
       "result": "PASS"
     },
     "pingPong": {
-      "pingPayload": "orbit-stage6-ping-node_a2f",
-      "pongPayload": "orbit-stage6-ping-node_a2f",
-      "roundTripMs": 3,
+      "pingPayload": "orbit-stage6-ping-node_5fc",
+      "pongPayload": "orbit-stage6-ping-node_5fc",
+      "roundTripMs": 6,
       "result": "PASS"
     },
     "longLivedTransport": {
-      "idleDurationMs": 31509,
+      "idleDurationMs": 31508,
       "postIdlePingPong": "PASS",
       "retainedOpen": true,
       "result": "PASS"
