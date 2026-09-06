@@ -3,8 +3,20 @@ import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 
 const MANIFEST_PATH = join(process.cwd(), "test", "evidence", "stage6", "manifest.json");
+const ACCEPTED_DSH_VERSION = "0.1.1-rc.2";
+const ACCEPTED_DSH_COMMIT_SHA = "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e";
+const ACCEPTED_DSH_CLI_BINARY_SHA256 = "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62";
+
+function assertGitCommitExists(commitSha) {
+  assert.match(commitSha, /^[0-9a-f]{40}$/, "git commit identity must be a full 40-character SHA");
+  assert.doesNotThrow(
+    () => execFileSync("git", ["cat-file", "-e", `${commitSha}^{commit}`], { cwd: process.cwd(), stdio: "ignore" }),
+    `testedCommit must resolve to a real git commit (${commitSha})`,
+  );
+}
 
 export function validateStage6Manifest(manifest) {
   assert.equal(typeof manifest, "object", "manifest must be an object");
@@ -101,6 +113,28 @@ export function validateStage6Manifest(manifest) {
   }
 
   const isPhysical = manifest.scope === "physical-two-host-mounted-e2e";
+  if (isPhysical) {
+    assert.ok(manifest.candidate, "manifest.candidate required in physical scope");
+    assert.match(manifest.candidate.orbitRevision, /^[0-9a-f]{40}$/, "candidate.orbitRevision must be a full 40-character git SHA");
+    assert.equal(
+      manifest.testedCommit,
+      manifest.candidate.orbitRevision,
+      "testedCommit must exactly match candidate.orbitRevision in physical scope",
+    );
+    assertGitCommitExists(manifest.testedCommit);
+    assert.equal(manifest.candidate.dshVersion, ACCEPTED_DSH_VERSION, `candidate.dshVersion must be ${ACCEPTED_DSH_VERSION}`);
+    assert.equal(
+      manifest.candidate.dshCommitSha,
+      ACCEPTED_DSH_COMMIT_SHA,
+      `candidate.dshCommitSha must be the accepted Stage 6 DSH commit ${ACCEPTED_DSH_COMMIT_SHA}`,
+    );
+    assert.equal(
+      manifest.candidate.dshCliBinarySha256,
+      ACCEPTED_DSH_CLI_BINARY_SHA256,
+      "candidate.dshCliBinarySha256 must match the accepted Stage 6 DSH CLI binary",
+    );
+  }
+
   const allowedResults = isPhysical
     ? new Set(["PASS"])
     : new Set(["PASS", "FAIL", "NOT_EXECUTED", "BLOCKED"]);
@@ -364,6 +398,13 @@ test("Stage 6 Mounted Contract: sample valid manifest passes validation and reje
     scope: "physical-two-host-mounted-e2e",
     physicalTwoHostE2E: "PASS",
     reviewGate: "HOLD",
+    candidate: {
+      orbitVersion: "0.4.0",
+      orbitRevision: sample.testedCommit,
+      dshVersion: ACCEPTED_DSH_VERSION,
+      dshCommitSha: ACCEPTED_DSH_COMMIT_SHA,
+      dshCliBinarySha256: ACCEPTED_DSH_CLI_BINARY_SHA256,
+    },
     artifacts: {
       nodeATransport: { file: "node-a-transport.json", bytes: 100, sha256: "0".repeat(64) },
       nodeBTransport: { file: "node-b-transport.json", bytes: 100, sha256: "0".repeat(64) },
@@ -387,6 +428,47 @@ test("Stage 6 Mounted Contract: sample valid manifest passes validation and reje
   assert.throws(() => {
     validateStage6Manifest({ ...physicalSample, reviewGate: "PASS" });
   });
+
+  // Negative: physical two-host manifest rejects a shortened candidate revision.
+  assert.throws(() => {
+    validateStage6Manifest({
+      ...physicalSample,
+      candidate: { ...physicalSample.candidate, orbitRevision: physicalSample.candidate.orbitRevision.slice(0, 7) },
+    });
+  }, /candidate.orbitRevision must be a full 40-character git SHA/);
+
+  // Negative: physical two-host manifest rejects testedCommit / candidate.orbitRevision mismatch.
+  assert.throws(() => {
+    validateStage6Manifest({
+      ...physicalSample,
+      candidate: { ...physicalSample.candidate, orbitRevision: "1".repeat(40) },
+    });
+  }, /testedCommit must exactly match candidate.orbitRevision/);
+
+  // Negative: an internally consistent but nonexistent candidate SHA is rejected by Git object verification.
+  assert.throws(() => {
+    validateStage6Manifest({
+      ...physicalSample,
+      testedCommit: "0".repeat(40),
+      candidate: { ...physicalSample.candidate, orbitRevision: "0".repeat(40) },
+    });
+  }, /testedCommit must resolve to a real git commit/);
+
+  // Negative: an internally consistent fake DSH commit is still rejected against the accepted Stage 6 pin.
+  assert.throws(() => {
+    validateStage6Manifest({
+      ...physicalSample,
+      candidate: { ...physicalSample.candidate, dshCommitSha: "0".repeat(40) },
+    });
+  }, /candidate.dshCommitSha must be the accepted Stage 6 DSH commit/);
+
+  // Negative: an internally consistent fake DSH CLI hash is still rejected against the accepted Stage 6 pin.
+  assert.throws(() => {
+    validateStage6Manifest({
+      ...physicalSample,
+      candidate: { ...physicalSample.candidate, dshCliBinarySha256: "0".repeat(64) },
+    });
+  }, /candidate.dshCliBinarySha256 must match the accepted Stage 6 DSH CLI binary/);
 
   // Negative: physical two-host manifest fails closed if any required scenario is FAIL
   assert.throws(() => {
