@@ -1,0 +1,24 @@
+{
+  "authorityA": {
+    "url": "https://n-86a76a1fd73f692298c38b58c33d6f4f.stage6.localhost:51558/",
+    "probeCookiePresent": true,
+    "cookieName": "orbit-stage6-probe",
+    "cookieDomain": "n-86a76a1fd73f692298c38b58c33d6f4f.stage6.localhost",
+    "hostOnly": true
+  },
+  "selector": {
+    "url": "https://stage6.localhost:51558/",
+    "probeCookiePresent": false
+  },
+  "authorityB": {
+    "url": "https://n-3474e2a9ae02a1e76e6d952598880bee.stage6.localhost:51558/",
+    "probeCookiePresent": false
+  },
+  "downstreamHeaders": {
+    "gatewayAuthCookiePresent": false,
+    "gatewayAuthHeaderPresent": false,
+    "hubSessionPresent": false,
+    "managementCredentialPresent": false
+  },
+  "result": "PASS"
+}

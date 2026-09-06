@@ -1,0 +1,16 @@
+{
+  "beforeRestart": {
+    "nodeIdA": "node_86a76a1fd73f692298c38b58c33d6f4f",
+    "nodeIdB": "node_3474e2a9ae02a1e76e6d952598880bee",
+    "stateB": "active",
+    "reachableB": "ok"
+  },
+  "afterRestart": {
+    "nodeIdB": "node_3474e2a9ae02a1e76e6d952598880bee",
+    "stateB": "active",
+    "reachableB": "ok",
+    "eligibleB": true,
+    "identityPreserved": true
+  },
+  "result": "PASS"
+}
