@@ -1,9 +1,9 @@
 {
   "authorityA": {
-    "url": "https://n-86a76a1fd73f692298c38b58c33d6f4f.stage6.localhost:51558/",
+    "url": "https://n-23c227820eec4dd858c9326e5f9dda71.stage6.localhost:51558/",
     "probeCookiePresent": true,
     "cookieName": "orbit-stage6-probe",
-    "cookieDomain": "n-86a76a1fd73f692298c38b58c33d6f4f.stage6.localhost",
+    "cookieDomain": "n-23c227820eec4dd858c9326e5f9dda71.stage6.localhost",
     "hostOnly": true
   },
   "selector": {
@@ -11,9 +11,12 @@
     "probeCookiePresent": false
   },
   "authorityB": {
-    "url": "https://n-3474e2a9ae02a1e76e6d952598880bee.stage6.localhost:51558/",
+    "url": "https://n-8ac6f4217b582d798ba9518c74b235b8.stage6.localhost:51558/",
     "probeCookiePresent": false
   },
+  "sourceParentDomainAttempt": true,
+  "sourceDomain": ".stage6.localhost",
+  "proxiedDomainAttributePresent": false,
   "downstreamHeaders": {
     "gatewayAuthCookiePresent": false,
     "gatewayAuthHeaderPresent": false,

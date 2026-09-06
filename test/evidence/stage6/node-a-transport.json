@@ -1,10 +1,17 @@
 {
-  "nodeId": "node_86a76a1fd73f692298c38b58c33d6f4f",
-  "authority": "n-86a76a1fd73f692298c38b58c33d6f4f.stage6.localhost:51558",
+  "nodeId": "node_23c227820eec4dd858c9326e5f9dda71",
+  "authority": "n-23c227820eec4dd858c9326e5f9dda71.stage6.localhost:51558",
   "role": "NAS Physical Host (port 50081)",
   "tlsMode": "private-ca",
-  "dshVersion": "0.1.1-rc.2",
-  "executedAt": "2026-09-06T00:47:00.768Z",
+  "executedAt": "2026-09-06T03:56:26.139Z",
+  "runtimeIdentity": {
+    "dshVersion": "0.1.1-rc.2",
+    "compatibilityProfile": "dsh-0.1.1-rc.2",
+    "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "cliBinarySha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62",
+    "containerImageDigest": "sha256:ad3a966f19b273c9f918e074111e92c3aaeaca66960701f447438d4e9f71dfc5",
+    "processRole": "nas-containerized-dsh"
+  },
   "checks": {
     "htmlRoot": {
       "status": 200,
@@ -32,21 +39,28 @@
       "result": "PASS"
     },
     "pingPong": {
-      "pingPayload": "orbit-stage6-ping-node_86a",
-      "pongPayload": "orbit-stage6-ping-node_86a",
-      "roundTripMs": 4,
+      "pingPayload": "orbit-stage6-ping-node_23c",
+      "pongPayload": "orbit-stage6-ping-node_23c",
+      "roundTripMs": 12,
       "result": "PASS"
     },
     "longLivedTransport": {
-      "durationMs": 3000,
-      "pingFramesExchanged": 2,
+      "idleDurationMs": 31500,
+      "postIdlePingPong": "PASS",
       "retainedOpen": true,
       "result": "PASS"
     },
     "compatibilityReport": {
       "schemaVersion": 2,
+      "profile": "dsh-0.1.1-rc.2",
       "outcome": "pass",
+      "webSocketTransport": "pass",
       "webRoutesCapability": true,
+      "checks": {
+        "runtimeReadiness": "pass",
+        "webPluginRoutes": "pass",
+        "webSocketTransport": "pass"
+      },
       "result": "PASS"
     }
   }

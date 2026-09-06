@@ -5,8 +5,8 @@
   "scope": "physical-two-host-mounted-e2e",
   "reviewGate": "HOLD",
   "physicalTwoHostE2E": "PASS",
-  "testedCommit": "45b439ebdef310ab42a4c19d089d40910e5e857a",
-  "timestamp": "2026-09-06T00:15:00.000Z",
+  "testedCommit": "a34b4080bcba19ed5d165488c1d172e5f2dc18fd",
+  "timestamp": "2026-09-06T03:57:12.983Z",
   "browser": {
     "name": "Microsoft Edge Headless / CDP",
     "version": "152.0.4191.62",
@@ -23,8 +23,8 @@
     "tlsState": "verified"
   },
   "nodeA": {
-    "nodeId": "node_86a76a1fd73f692298c38b58c33d6f4f",
-    "authority": "n-86a76a1fd73f692298c38b58c33d6f4f.stage6.localhost:51558",
+    "nodeId": "node_23c227820eec4dd858c9326e5f9dda71",
+    "authority": "n-23c227820eec4dd858c9326e5f9dda71.stage6.localhost:51558",
     "routeTargetClass": "nas-class",
     "routeTargetScheme": "https",
     "tlsMode": "private-ca",
@@ -32,8 +32,8 @@
     "dshIdentity": "physical-nas-node-A"
   },
   "nodeB": {
-    "nodeId": "node_3474e2a9ae02a1e76e6d952598880bee",
-    "authority": "n-3474e2a9ae02a1e76e6d952598880bee.stage6.localhost:51558",
+    "nodeId": "node_8ac6f4217b582d798ba9518c74b235b8",
+    "authority": "n-8ac6f4217b582d798ba9518c74b235b8.stage6.localhost:51558",
     "routeTargetClass": "workstation-class",
     "routeTargetScheme": "http",
     "tlsMode": "none",
@@ -42,7 +42,7 @@
   },
   "candidate": {
     "orbitVersion": "0.4.0",
-    "orbitRevision": "45b439e",
+    "orbitRevision": "a34b408",
     "dshVersion": "0.1.1-rc.2",
     "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
     "dshCliBinarySha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
@@ -50,18 +50,18 @@
   "artifacts": {
     "nodeATransport": {
       "file": "node-a-transport.json",
-      "bytes": 1339,
-      "sha256": "58d35e9d5bb46bdff6b5598fec3ca806b115f4941d4b8401faefab11ef4a83ec"
+      "bytes": 1930,
+      "sha256": "5ee1e1a5706f00743e34774768a1d60a99b0d7c4a9840daedb10ef47b1c5f963"
     },
     "nodeBTransport": {
       "file": "node-b-transport.json",
-      "bytes": 1337,
-      "sha256": "293b57e033d1dce4218b32f503b2e9ec17e4f47880e6d14885a041b5a7e50411"
+      "bytes": 1857,
+      "sha256": "f56ecdae8e95a2c7ebdff65d6240a8d2256f1f3bd41533b509fef17fbb2f68c0"
     },
     "restartIdentity": {
       "file": "restart-identity.json",
-      "bytes": 390,
-      "sha256": "ff397f169c6dcae12e097a8d4d76b93a9ad5f5cfcaf1a10b1551a091ceaac1d3"
+      "bytes": 640,
+      "sha256": "5b52b62bfc42f960f2289be3604576647cc4fe658bd1c11c47d2aa01e7d3cb5f"
     }
   },
   "scenarios": [
@@ -72,8 +72,8 @@
       "actual": "Both physical nodes achieved active=true, reachable=ok, activeHubRouteKey, and web.routes capability; Selector shows Open for both",
       "result": "PASS",
       "file": "selector-both-eligible.png",
-      "bytes": 35466,
-      "sha256": "c2b62ad37cfc2dfb2c0e4810ba2ae3b747218648cb9386f99ab0ef2af7b6bfb0"
+      "bytes": 35031,
+      "sha256": "ce066c5588e9f57cb568a7fb8f9f543cecf37f3b9fb637b3efabfeace173c3b6"
     },
     {
       "id": "scenario-2-open-a",
@@ -102,8 +102,8 @@
       "actual": "Node A and Node B authorities verify independent identities and Tab 1 remains connected to Node A",
       "result": "PASS",
       "file": "tab1-remains-node-a.png",
-      "bytes": 75945,
-      "sha256": "c21e84e59ee9dccb98998e4e4a4de6dd516ba6276ced9da28d189c63ec623c03"
+      "bytes": 76289,
+      "sha256": "bb15f1de864616e5cb74f2731efcb2e1ecdb83ebd9f7694f3e692b463720873b"
     },
     {
       "id": "cookie-credential-isolation-automated",
@@ -119,8 +119,8 @@
       "actual": "Cookie jar isolation verified: Domain stripping enforced, probe cookie confined to Node A host-only scope and absent on selector/B",
       "result": "PASS",
       "file": "cookie-browser-isolation.json",
-      "bytes": 711,
-      "sha256": "09f40ae393f154edb0ae909e8e6bea18ace8be17bb7a92ab5722062ef5dbb942"
+      "bytes": 829,
+      "sha256": "1984200b55060beba580aada9ef8913b9790f0091ec3096512308ad46944a59a"
     },
     {
       "id": "drill-route-outage",
@@ -129,8 +129,8 @@
       "actual": "Node A RouteIngress stopped on NAS; Tab 1 renders Selected Endpoint Unavailable (503); Node B remains fully operational",
       "result": "PASS",
       "file": "a-route-outage-b-healthy.png",
-      "bytes": 15482,
-      "sha256": "7a4daa85c0650089f5e710e9d74b95999e62abae1c079f78aa0460abcd82a5b2"
+      "bytes": 15480,
+      "sha256": "a330db82fa3fcfca62b5c7f5093ea26085a92817137735724dc8b3821eb3b63f"
     },
     {
       "id": "drill-dsh-outage",
@@ -139,8 +139,8 @@
       "actual": "NAS DSH stopped; RouteIngress returns 502/bad-gateway; Hub marks unreachable; Node B healthy",
       "result": "PASS",
       "file": "a-dsh-down.png",
-      "bytes": 15482,
-      "sha256": "7a4daa85c0650089f5e710e9d74b95999e62abae1c079f78aa0460abcd82a5b2"
+      "bytes": 15480,
+      "sha256": "a330db82fa3fcfca62b5c7f5093ea26085a92817137735724dc8b3821eb3b63f"
     },
     {
       "id": "drill-recovery",
@@ -159,8 +159,8 @@
       "actual": "Node A deleted via Hub API; tombstoned; Selector removes Node A and bookmark returns not found",
       "result": "PASS",
       "file": "a-deleted.png",
-      "bytes": 38620,
-      "sha256": "95141642da7b7bc4e92dc553a03a9a9a42e4317fb9f59825364b4a2d8a1e6504"
+      "bytes": 38201,
+      "sha256": "8735669f3d69bb08ff309a8d2855e159f3e048cec5fd3c68f46d7ac1252caff7"
     },
     {
       "id": "drill-restart",
@@ -169,8 +169,8 @@
       "actual": "Hub and nodes survived restart; database state restored; surviving Node B remained eligible",
       "result": "PASS",
       "file": "restart-stability.png",
-      "bytes": 38620,
-      "sha256": "95141642da7b7bc4e92dc553a03a9a9a42e4317fb9f59825364b4a2d8a1e6504"
+      "bytes": 38201,
+      "sha256": "8735669f3d69bb08ff309a8d2855e159f3e048cec5fd3c68f46d7ac1252caff7"
     }
   ]
 }
