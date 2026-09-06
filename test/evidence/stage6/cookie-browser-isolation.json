@@ -1,9 +1,9 @@
 {
   "authorityA": {
-    "url": "https://n-23c227820eec4dd858c9326e5f9dda71.stage6.localhost:51558/",
+    "url": "https://n-a2fd6f2036d97d95fba24e6064a6f1af.stage6.localhost:51558/",
     "probeCookiePresent": true,
     "cookieName": "orbit-stage6-probe",
-    "cookieDomain": "n-23c227820eec4dd858c9326e5f9dda71.stage6.localhost",
+    "cookieDomain": "n-a2fd6f2036d97d95fba24e6064a6f1af.stage6.localhost",
     "hostOnly": true
   },
   "selector": {
@@ -11,7 +11,7 @@
     "probeCookiePresent": false
   },
   "authorityB": {
-    "url": "https://n-8ac6f4217b582d798ba9518c74b235b8.stage6.localhost:51558/",
+    "url": "https://n-bd3987f70bdc9ed721c8c8b16b0ccd12.stage6.localhost:51558/",
     "probeCookiePresent": false
   },
   "sourceParentDomainAttempt": true,
