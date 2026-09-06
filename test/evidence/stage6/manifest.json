@@ -47,6 +47,18 @@
     "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
     "dshCliBinarySha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
   },
+  "revalidation": {
+    "kind": "post-review-physical-recovery",
+    "candidateCommit": "eed17af172e725c87d6923b416391a5caf0af907",
+    "startTime": "2026-09-06T14:48:31.273Z",
+    "completionTime": "2026-09-06T14:51:59.088Z",
+    "gatewayTlsVerified": true,
+    "hostnameValidation": true,
+    "tlsBypass": false,
+    "nodeA": "node_cf75069a705898a43da2a7caedf455a8",
+    "nodeB": "node_88f5fe031a2bfea7ecb2f1e0c4de4114",
+    "result": "PASS"
+  },
   "artifacts": {
     "nodeATransport": {
       "file": "node-a-transport.json",
@@ -67,6 +79,11 @@
       "file": "restart-identity.json",
       "bytes": 640,
       "sha256": "388df47ca6aa7c028e328e27d474d6b57cf89e8fdf87ee9854a82b25a81cc6f1"
+    },
+    "recoveryRevalidation": {
+      "file": "recovery.json",
+      "bytes": 1639,
+      "sha256": "9edb6551edf348f91f9e0b2484e2604d515c59162f4d7e57f3f2443c2dc2f0e3"
     }
   },
   "scenarios": [
@@ -151,11 +168,11 @@
       "id": "drill-recovery",
       "name": "Recovery Drill",
       "expected": "When NAS DSH restarts, reachability restores to ok and Open link returns",
-      "actual": "NAS DSH restored; health returned to ok; Tab 1 reload restored DSH interface",
+      "actual": "Post-review physical revalidation against the same C6.6 candidate proved Node A root=200, route-ready=200/ready=true, reachable=ok and eligible=true while Node B remained reachable/eligible; trusted gateway TLS hostname validation was enabled with no TLS bypass",
       "result": "PASS",
-      "file": "a-restored.png",
-      "bytes": 15507,
-      "sha256": "582c8cac759ad8e3056f6e5a43a7e0b1d962dde70b1fcea67e4505b616eb9822"
+      "file": "recovery.json",
+      "bytes": 1639,
+      "sha256": "9edb6551edf348f91f9e0b2484e2604d515c59162f4d7e57f3f2443c2dc2f0e3"
     },
     {
       "id": "drill-delete",
