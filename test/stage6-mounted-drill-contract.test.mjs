@@ -152,21 +152,33 @@ export function validateStage6Manifest(manifest) {
     assert.equal(cookieBrowser.result, "NOT_EXECUTED", "physical/browser Cookie Jar drill must remain NOT_EXECUTED in the local rehearsal manifest");
   }
 
-  // Transport evidence artifacts required in physical scope
+  // Transport and session-resume evidence artifacts required in physical scope
   if (isPhysical) {
     assert.ok(manifest.artifacts, "manifest.artifacts must exist in physical scope");
     assert.ok(manifest.artifacts.nodeATransport, "manifest.artifacts.nodeATransport required in physical scope");
     assert.match(manifest.artifacts.nodeATransport.sha256, /^[0-9a-f]{64}$/, "nodeATransport sha256 must be valid");
     assert.ok(manifest.artifacts.nodeBTransport, "manifest.artifacts.nodeBTransport required in physical scope");
     assert.match(manifest.artifacts.nodeBTransport.sha256, /^[0-9a-f]{64}$/, "nodeBTransport sha256 must be valid");
+    assert.ok(manifest.artifacts.sessionResume, "manifest.artifacts.sessionResume required in physical scope");
+    assert.match(manifest.artifacts.sessionResume.sha256, /^[0-9a-f]{64}$/, "sessionResume sha256 must be valid");
   }
 
   return true;
 }
 
-export function validateTransportArtifactSemantics(doc, { expectedRole } = {}) {
+export function validateTransportArtifactSemantics(
+  doc,
+  { expectedRole, expectedNodeId, expectedAuthority, expectedDshCommitSha, expectedCliBinarySha256 } = {},
+) {
   assert.equal(typeof doc, "object", "transport doc must be an object");
   assert.ok(doc.checks, "transport doc.checks required");
+
+  if (expectedNodeId) {
+    assert.equal(doc.nodeId, expectedNodeId, `doc.nodeId must match expected ${expectedNodeId}`);
+  }
+  if (expectedAuthority) {
+    assert.equal(doc.authority, expectedAuthority, `doc.authority must match expected ${expectedAuthority}`);
+  }
 
   assert.equal(doc.checks.htmlRoot?.result, "PASS", "htmlRoot check result must be PASS");
   assert.equal(doc.checks.asset?.result, "PASS", "asset check result must be PASS");
@@ -191,12 +203,39 @@ export function validateTransportArtifactSemantics(doc, { expectedRole } = {}) {
   assert.match(doc.runtimeIdentity.dshCommitSha, /^[0-9a-f]{40}$/, "dshCommitSha must be a 40-character hex string");
   assert.match(doc.runtimeIdentity.cliBinarySha256, /^[0-9a-f]{64}$/, "cliBinarySha256 must be a 64-character hex string");
 
+  if (expectedDshCommitSha) {
+    assert.equal(doc.runtimeIdentity.dshCommitSha, expectedDshCommitSha, `doc.runtimeIdentity.dshCommitSha must match expected ${expectedDshCommitSha}`);
+  }
+  if (expectedCliBinarySha256) {
+    assert.equal(doc.runtimeIdentity.cliBinarySha256, expectedCliBinarySha256, `doc.runtimeIdentity.cliBinarySha256 must match expected ${expectedCliBinarySha256}`);
+  }
+
   if (expectedRole === "nas") {
     assert.ok(doc.runtimeIdentity.containerImageDigest, "NAS runtimeIdentity must contain containerImageDigest");
     assert.match(doc.runtimeIdentity.containerImageDigest, /^sha256:[0-9a-f]{64}$/, "containerImageDigest must be sha256:hex");
   } else if (expectedRole === "workstation") {
     assert.ok(doc.runtimeIdentity.processRole, "Workstation runtimeIdentity must declare processRole");
   }
+  return true;
+}
+
+export function validateSessionResumeArtifactSemantics(doc, { expectedNodeA, expectedNodeB } = {}) {
+  assert.equal(typeof doc, "object", "session resume doc must be an object");
+  assert.ok(doc.nodeA, "sessionResume.nodeA required");
+  assert.ok(doc.nodeB, "sessionResume.nodeB required");
+
+  if (expectedNodeA?.authority) {
+    assert.equal(doc.nodeA.authority, expectedNodeA.authority, "nodeA authority mismatch");
+  }
+  if (expectedNodeB?.authority) {
+    assert.equal(doc.nodeB.authority, expectedNodeB.authority, "nodeB authority mismatch");
+  }
+
+  assert.equal(doc.nodeA.sessionResume, "PASS", "nodeA sessionResume must be PASS");
+  assert.equal(doc.nodeB.sessionResume, "PASS", "nodeB sessionResume must be PASS");
+  assert.equal(doc.nodeA.modelReselected, true, "nodeA modelReselected must be true");
+  assert.equal(doc.nodeB.modelReselected, true, "nodeB modelReselected must be true");
+  assert.equal(doc.result, "PASS", "overall session resume result must be PASS");
   return true;
 }
 
@@ -328,6 +367,7 @@ test("Stage 6 Mounted Contract: sample valid manifest passes validation and reje
     artifacts: {
       nodeATransport: { file: "node-a-transport.json", bytes: 100, sha256: "0".repeat(64) },
       nodeBTransport: { file: "node-b-transport.json", bytes: 100, sha256: "0".repeat(64) },
+      sessionResume: { file: "session-resume.json", bytes: 100, sha256: "0".repeat(64) },
     },
     scenarios: sample.scenarios.map((scenario) =>
       scenario.id === "cookie-browser-jar-isolation"
@@ -408,16 +448,51 @@ test("Stage 6 Mounted Contract: sample valid manifest passes validation and reje
     });
   }, /idleDurationMs must be >= 31000ms/);
 
-  // Negative: validateTransportArtifactSemantics rejects missing webSocketTransport
+  // Negative: validateTransportArtifactSemantics rejects mismatched nodeId or authority
   assert.throws(() => {
-    validateTransportArtifactSemantics({
-      ...sampleTransport,
-      checks: {
-        ...sampleTransport.checks,
-        compatibilityReport: { webRoutesCapability: true },
-      },
+    validateTransportArtifactSemantics(sampleTransport, {
+      expectedRole: "nas",
+      expectedNodeId: "node_mismatched_0000000000000000",
     });
-  }, /compatibilityReport webSocketTransport must be pass/);
+  }, /must match expected/);
+
+  // Negative: validateTransportArtifactSemantics rejects mismatched DSH commit SHA
+  assert.throws(() => {
+    validateTransportArtifactSemantics(sampleTransport, {
+      expectedRole: "nas",
+      expectedDshCommitSha: "0".repeat(40),
+    });
+  }, /must match expected/);
+
+  // Positive: validateSessionResumeArtifactSemantics accepts valid session resume doc
+  const sampleResume = {
+    nodeA: {
+      authority: "n-nodeA.stage6.localhost:51558",
+      sessionResume: "PASS",
+      modelReselected: true,
+    },
+    nodeB: {
+      authority: "n-nodeB.stage6.localhost:51558",
+      sessionResume: "PASS",
+      modelReselected: true,
+    },
+    result: "PASS",
+  };
+  assert.equal(
+    validateSessionResumeArtifactSemantics(sampleResume, {
+      expectedNodeA: { authority: "n-nodeA.stage6.localhost:51558" },
+      expectedNodeB: { authority: "n-nodeB.stage6.localhost:51558" },
+    }),
+    true,
+  );
+
+  // Negative: validateSessionResumeArtifactSemantics rejects failed resume
+  assert.throws(() => {
+    validateSessionResumeArtifactSemantics({
+      ...sampleResume,
+      nodeA: { ...sampleResume.nodeA, sessionResume: "FAIL" },
+    });
+  }, /sessionResume must be PASS/);
 });
 
 test("Stage 6 Mounted Contract: live manifest verification if manifest is present", () => {
@@ -455,9 +530,26 @@ test("Stage 6 Mounted Contract: live manifest verification if manifest is presen
         if (manifest.scope === "physical-two-host-mounted-e2e") {
           const doc = JSON.parse(fileBuf.toString("utf8"));
           if (artKey === "nodeATransport") {
-            validateTransportArtifactSemantics(doc, { expectedRole: "nas" });
+            validateTransportArtifactSemantics(doc, {
+              expectedRole: "nas",
+              expectedNodeId: manifest.nodeA?.nodeId,
+              expectedAuthority: manifest.nodeA?.authority,
+              expectedDshCommitSha: manifest.candidate?.dshCommitSha,
+              expectedCliBinarySha256: manifest.candidate?.dshCliBinarySha256,
+            });
           } else if (artKey === "nodeBTransport") {
-            validateTransportArtifactSemantics(doc, { expectedRole: "workstation" });
+            validateTransportArtifactSemantics(doc, {
+              expectedRole: "workstation",
+              expectedNodeId: manifest.nodeB?.nodeId,
+              expectedAuthority: manifest.nodeB?.authority,
+              expectedDshCommitSha: manifest.candidate?.dshCommitSha,
+              expectedCliBinarySha256: manifest.candidate?.dshCliBinarySha256,
+            });
+          } else if (artKey === "sessionResume") {
+            validateSessionResumeArtifactSemantics(doc, {
+              expectedNodeA: manifest.nodeA,
+              expectedNodeB: manifest.nodeB,
+            });
           } else if (artKey === "restartIdentity") {
             validateRestartArtifactSemantics(doc);
           }
