@@ -164,6 +164,68 @@ export function validateStage6Manifest(manifest) {
   return true;
 }
 
+export function validateTransportArtifactSemantics(doc, { expectedRole } = {}) {
+  assert.equal(typeof doc, "object", "transport doc must be an object");
+  assert.ok(doc.checks, "transport doc.checks required");
+
+  assert.equal(doc.checks.htmlRoot?.result, "PASS", "htmlRoot check result must be PASS");
+  assert.equal(doc.checks.asset?.result, "PASS", "asset check result must be PASS");
+  assert.equal(doc.checks.routeReadyApi?.result, "PASS", "routeReadyApi check result must be PASS");
+  assert.equal(doc.checks.webSocket101?.result, "PASS", "webSocket101 check result must be PASS");
+  assert.equal(doc.checks.pingPong?.result, "PASS", "pingPong check result must be PASS");
+  assert.equal(doc.checks.longLivedTransport?.result, "PASS", "longLivedTransport check result must be PASS");
+
+  assert.ok(
+    Number(doc.checks.longLivedTransport?.idleDurationMs) >= 31000,
+    `longLivedTransport idleDurationMs must be >= 31000ms (got ${doc.checks.longLivedTransport?.idleDurationMs})`,
+  );
+  assert.equal(doc.checks.longLivedTransport?.postIdlePingPong, "PASS", "postIdlePingPong must be PASS");
+  assert.equal(doc.checks.longLivedTransport?.retainedOpen, true, "retainedOpen must be true");
+
+  assert.ok(doc.checks.compatibilityReport, "compatibilityReport required");
+  assert.equal(doc.checks.compatibilityReport?.webSocketTransport, "pass", "compatibilityReport webSocketTransport must be pass");
+  assert.equal(doc.checks.compatibilityReport?.webRoutesCapability, true, "compatibilityReport webRoutesCapability must be true");
+
+  assert.ok(doc.runtimeIdentity, "runtimeIdentity required");
+  assert.equal(doc.runtimeIdentity.dshVersion, "0.1.1-rc.2", "dshVersion must be 0.1.1-rc.2");
+  assert.match(doc.runtimeIdentity.dshCommitSha, /^[0-9a-f]{40}$/, "dshCommitSha must be a 40-character hex string");
+  assert.match(doc.runtimeIdentity.cliBinarySha256, /^[0-9a-f]{64}$/, "cliBinarySha256 must be a 64-character hex string");
+
+  if (expectedRole === "nas") {
+    assert.ok(doc.runtimeIdentity.containerImageDigest, "NAS runtimeIdentity must contain containerImageDigest");
+    assert.match(doc.runtimeIdentity.containerImageDigest, /^sha256:[0-9a-f]{64}$/, "containerImageDigest must be sha256:hex");
+  } else if (expectedRole === "workstation") {
+    assert.ok(doc.runtimeIdentity.processRole, "Workstation runtimeIdentity must declare processRole");
+  }
+  return true;
+}
+
+export function validateCookieJarArtifactSemantics(doc) {
+  assert.equal(typeof doc, "object", "cookie jar doc must be an object");
+  assert.equal(doc.authorityA?.probeCookiePresent, true, "authorityA probeCookiePresent must be true");
+  assert.equal(doc.selector?.probeCookiePresent, false, "selector probeCookiePresent must be false");
+  assert.equal(doc.authorityB?.probeCookiePresent, false, "authorityB probeCookiePresent must be false");
+  assert.equal(doc.downstreamHeaders?.gatewayAuthCookiePresent, false, "gatewayAuthCookiePresent must be false");
+  assert.equal(doc.downstreamHeaders?.gatewayAuthHeaderPresent, false, "gatewayAuthHeaderPresent must be false");
+  assert.equal(doc.downstreamHeaders?.hubSessionPresent, false, "hubSessionPresent must be false");
+  assert.equal(doc.downstreamHeaders?.managementCredentialPresent, false, "managementCredentialPresent must be false");
+  assert.equal(doc.result, "PASS", "cookie jar result must be PASS");
+  return true;
+}
+
+export function validateRestartArtifactSemantics(doc) {
+  assert.equal(typeof doc, "object", "restart doc must be an object");
+  assert.ok(doc.beforeRestart?.authorityB, "beforeRestart.authorityB required");
+  assert.ok(doc.beforeRestart?.routeTargetB, "beforeRestart.routeTargetB required");
+  assert.ok(doc.afterRestart?.authorityB, "afterRestart.authorityB required");
+  assert.ok(doc.afterRestart?.routeTargetB, "afterRestart.routeTargetB required");
+  assert.equal(doc.beforeRestart.authorityB, doc.afterRestart.authorityB, "authorityB must match across restart");
+  assert.equal(doc.beforeRestart.routeTargetB, doc.afterRestart.routeTargetB, "routeTargetB must match across restart");
+  assert.equal(doc.afterRestart.eligibleB, true, "afterRestart.eligibleB must be true");
+  assert.equal(doc.result, "PASS", "restart result must be PASS");
+  return true;
+}
+
 test("Stage 6 Mounted Contract: sample valid manifest passes validation and rejects tampering", () => {
   const sample = {
     schemaVersion: 2,
@@ -305,6 +367,57 @@ test("Stage 6 Mounted Contract: sample valid manifest passes validation and reje
       ),
     });
   }, /physical cookie-browser-jar-isolation must attach structured evidence file/);
+
+  // Positive: validateTransportArtifactSemantics accepts valid transport doc
+  const sampleTransport = {
+    checks: {
+      htmlRoot: { result: "PASS" },
+      asset: { result: "PASS" },
+      routeReadyApi: { result: "PASS" },
+      webSocket101: { result: "PASS" },
+      pingPong: { result: "PASS" },
+      longLivedTransport: {
+        result: "PASS",
+        idleDurationMs: 31500,
+        postIdlePingPong: "PASS",
+        retainedOpen: true,
+      },
+      compatibilityReport: {
+        webSocketTransport: "pass",
+        webRoutesCapability: true,
+      },
+    },
+    runtimeIdentity: {
+      dshVersion: "0.1.1-rc.2",
+      dshCommitSha: "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+      cliBinarySha256: "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62",
+      containerImageDigest: "sha256:ad3a966f19b273c9f918e074111e92c3aaeaca66960701f447438d4e9f71dfc5",
+      processRole: "nas-containerized-dsh",
+    },
+  };
+  assert.equal(validateTransportArtifactSemantics(sampleTransport, { expectedRole: "nas" }), true);
+
+  // Negative: validateTransportArtifactSemantics rejects short idleDurationMs
+  assert.throws(() => {
+    validateTransportArtifactSemantics({
+      ...sampleTransport,
+      checks: {
+        ...sampleTransport.checks,
+        longLivedTransport: { ...sampleTransport.checks.longLivedTransport, idleDurationMs: 3000 },
+      },
+    });
+  }, /idleDurationMs must be >= 31000ms/);
+
+  // Negative: validateTransportArtifactSemantics rejects missing webSocketTransport
+  assert.throws(() => {
+    validateTransportArtifactSemantics({
+      ...sampleTransport,
+      checks: {
+        ...sampleTransport.checks,
+        compatibilityReport: { webRoutesCapability: true },
+      },
+    });
+  }, /compatibilityReport webSocketTransport must be pass/);
 });
 
 test("Stage 6 Mounted Contract: live manifest verification if manifest is present", () => {
@@ -338,7 +451,26 @@ test("Stage 6 Mounted Contract: live manifest verification if manifest is presen
         assert.equal(fileBuf.length, art.bytes, `File size mismatch for artifact ${artKey}`);
         const computedHash = crypto.createHash("sha256").update(fileBuf).digest("hex");
         assert.equal(computedHash, art.sha256, `SHA256 hash mismatch for artifact ${artKey}`);
+
+        if (manifest.scope === "physical-two-host-mounted-e2e") {
+          const doc = JSON.parse(fileBuf.toString("utf8"));
+          if (artKey === "nodeATransport") {
+            validateTransportArtifactSemantics(doc, { expectedRole: "nas" });
+          } else if (artKey === "nodeBTransport") {
+            validateTransportArtifactSemantics(doc, { expectedRole: "workstation" });
+          } else if (artKey === "restartIdentity") {
+            validateRestartArtifactSemantics(doc);
+          }
+        }
       }
+    }
+  }
+
+  if (manifest.scope === "physical-two-host-mounted-e2e") {
+    const cookieScenario = manifest.scenarios.find((s) => s.id === "cookie-browser-jar-isolation");
+    if (cookieScenario && cookieScenario.file) {
+      const cookieDoc = JSON.parse(readFileSync(join(evidenceDir, cookieScenario.file), "utf8"));
+      validateCookieJarArtifactSemantics(cookieDoc);
     }
   }
 });
