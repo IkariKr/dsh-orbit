@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage8-fresh-install-acceptance",
+  "candidateCommit": "5a6f94fa8bfc1adf850627d28f2cad150af55c20",
+  "executedAt": "2026-09-07T06:20:30.000Z",
+  "dbStatus": {
+    "initialSchemaVersion": 5,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "tableCount": 11
+  },
+  "lifecycle": {
+    "hubStarted": true,
+    "tokenMinted": true,
+    "nodeEnrolled": true,
+    "nodeId": "node_ade735cbdd5bcc6909499f53fe5e9d0f",
+    "reportUploaded": true,
+    "derivedCapabilities": [
+      "sessions.resume",
+      "settings.remote",
+      "web.routes"
+    ],
+    "routeTargetAssigned": "https://127.0.0.1:50081",
+    "nodeState": "active"
+  },
+  "result": "PASS"
+}

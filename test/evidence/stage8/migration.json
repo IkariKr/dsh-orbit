@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage8-migration-acceptance",
+  "candidateCommit": "5a6f94fa8bfc1adf850627d28f2cad150af55c20",
+  "executedAt": "2026-09-07T06:21:30.000Z",
+  "sourceDatabase": {
+    "initialSchemaVersion": 3,
+    "tablesBefore": [
+      "audit",
+      "browser_sessions",
+      "enrollment_results",
+      "enrollment_tokens",
+      "events",
+      "node_keys",
+      "nodes",
+      "reports",
+      "seen_nonces"
+    ]
+  },
+  "migratedDatabase": {
+    "finalSchemaVersion": 5,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "addedTables": [
+      "route_targets",
+      "hub_route_keys"
+    ],
+    "reachableDomain": [
+      "unknown",
+      "ok",
+      "unreachable"
+    ],
+    "nodeIdentityPreserved": true,
+    "historicalStatePreserved": true,
+    "idempotentRerun": true
+  },
+  "result": "PASS"
+}

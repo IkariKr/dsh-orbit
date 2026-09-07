@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "stage": "v0.4 Stage 8 Release Closure",
+  "releaseCandidate": "v0.4.0-rc.1",
+  "branch": "chore/v0.4-stage8-release-closure",
+  "testedCandidateCommit": "5a6f94fa8bfc1adf850627d28f2cad150af55c20",
+  "externalHarnessBaseline": {
+    "dshVersion": "0.1.1-rc.2",
+    "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "dshCliBinarySha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  },
+  "artifacts": {
+    "fresh-install.json": {
+      "sha256": "b059593ac70a8380de55f3154e829a2a33e331c9917b59957e56570bcefb8047",
+      "bytes": 696
+    },
+    "migration.json": {
+      "sha256": "adb63dcec9d3ecba900699f5543b77dc66629fb145bc6654fb04f24a9391f6d9",
+      "bytes": 837
+    },
+    "backup-restore.json": {
+      "sha256": "702f1db232db03718f05266dd8e42d9e58d86e142ae58197c0d531241bf39480",
+      "bytes": 746
+    },
+    "two-node-mounted-smoke.json": {
+      "sha256": "e1136da32bba949b2f24aa7a684207cfbddf333de367ee6d72c0e22b66691d6d",
+      "bytes": 2341
+    },
+    "promotion-plan-validation.json": {
+      "sha256": "00f32c61cbedde28c5ebd29cb7d44b1084cdf81fde3ca0b122cc47ee605dbce0",
+      "bytes": 537
+    }
+  },
+  "status": "COMPLETE — awaiting FINAL REVIEW"
+}

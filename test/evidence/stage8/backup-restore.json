@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage8-backup-restore-acceptance",
+  "candidateCommit": "5a6f94fa8bfc1adf850627d28f2cad150af55c20",
+  "executedAt": "2026-09-07T06:22:30.000Z",
+  "backup": {
+    "method": "sqlite-vacuum-into",
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "privateKeyExposedInStateDigest": false
+  },
+  "mutation": {
+    "routeTargetMutated": true,
+    "hubRouteKeyRevoked": true
+  },
+  "restore": {
+    "method": "sqlite-standalone-atomic-restore",
+    "writersQuiesced": true,
+    "quarantinedSidecarsClean": true,
+    "restoredRouteTargetOrigin": "https://127.0.0.1:50081",
+    "restoredHubRouteKeyState": "active",
+    "postBackupMutationAbsent": true,
+    "integrityCheck": "ok"
+  },
+  "result": "PASS"
+}
