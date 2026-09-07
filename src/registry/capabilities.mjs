@@ -19,7 +19,7 @@ export const CAPABILITY_EVIDENCE = Object.freeze({
 export const NON_CLAIMABLE_CAPABILITIES = Object.freeze(["terminal.pty", "agents.run"]);
 
 export function isDshVersionSupported(dshVersion) {
-  return typeof dshVersion === "string" && Boolean(compatibilityProfiles[dshVersion]);
+  return typeof dshVersion === "string" && Object.hasOwn(compatibilityProfiles, dshVersion);
 }
 
 export function deriveCapabilities(report) {

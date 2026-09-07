@@ -128,12 +128,18 @@ function collectRequiredPredicates(evidence) {
 }
 
 function scrub(value, key = "") {
-  if (/plaintext|tokenreturned|tokenpresent|secretpresent/i.test(key)) return typeof value === "boolean" ? value : "[redacted]";
+  if (typeof value === "boolean") return value;
+  if (/tokenreturned|tokenpresent|secretpresent/i.test(key)) return "[redacted]";
   if (Array.isArray(value)) return value.map((child) => scrub(child, key));
   if (value && typeof value === "object") {
     const result = {};
     for (const [childKey, child] of Object.entries(value)) {
-      if (/digest|csrf|private|password/i.test(childKey)) continue;
+      if (typeof child === "boolean") {
+        result[childKey] = child;
+        continue;
+      }
+      if (/^(?:private_?key|csrf|password|token_digest|token)$/i.test(childKey)) continue;
+      if (/(?:csrf|password)/i.test(childKey)) continue;
       result[childKey] = scrub(child, childKey);
     }
     return result;

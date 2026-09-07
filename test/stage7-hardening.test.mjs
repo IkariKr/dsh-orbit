@@ -10,7 +10,7 @@ import { Registry } from "../src/registry/registry.mjs";
 import { openRegistryDatabase, SCHEMA_VERSION } from "../src/registry/sqlite.mjs";
 import { backupRegistryDatabase, restoreRegistryDatabase, inspectRegistryDatabase } from "../src/registry/backup.mjs";
 import { generateNodeKeyPair, deriveKeyId } from "../src/registry/crypto.mjs";
-import { deriveCapabilities, deriveOrbitCompatible } from "../src/registry/capabilities.mjs";
+import { deriveCapabilities, deriveOrbitCompatible, isDshVersionSupported } from "../src/registry/capabilities.mjs";
 import { RouteNonceCache, signRouteRequest, verifyRouteRequest } from "../src/registry/route-auth.mjs";
 import { IngressWebSocketTracker, RouteIngress } from "../src/node/route-ingress.mjs";
 import { HubWebSocketTracker } from "../src/registry/route-proxy.mjs";
@@ -331,6 +331,17 @@ test("S7-F9: Stale / unsupported DSH version or missing webSocketTransport withd
     candidate: { dshVersion: "0.2.0-unapproved", profile: "unknown" },
   };
   assert.deepEqual(deriveCapabilities(unsupportedReport), []);
+
+  // 2b. Negative prototype-key tests: object prototype properties must never match as supported versions
+  const prototypeKeys = ["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf", "isPrototypeOf"];
+  for (const protoKey of prototypeKeys) {
+    assert.equal(isDshVersionSupported(protoKey), false, `prototype key ${protoKey} must not be supported`);
+    const protoReport = {
+      ...validReport,
+      candidate: { dshVersion: protoKey, profile: protoKey },
+    };
+    assert.deepEqual(deriveCapabilities(protoReport), [], `prototype key ${protoKey} must yield no capabilities`);
+  }
 
   // 3. Missing webSocketTransport -> web.routes withheld
   const noWsReport = {
