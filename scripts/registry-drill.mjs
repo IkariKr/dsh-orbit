@@ -265,8 +265,9 @@ function validateBrowserBindings(checkpoint, label) {
 
 async function waitForCheckpoint(path, label, { attempts = 1800, intervalMs = 1000 } = {}) {
   return waitFor(label, async () => {
-    if (browserBridgeProcess && browserBridgeProcess.exitCode !== null && browserBridgeProcess.exitCode !== 0) {
-      throw new Error(`runner-owned Firefox bridge exited ${browserBridgeProcess.exitCode}`);
+    if (browserBridgeProcess && browserBridgeProcess.exitCode !== null) {
+      const status = evidence.browserBridgeExit;
+      throw new Error(`runner-owned Firefox bridge exited ${status?.code ?? browserBridgeProcess.exitCode}${status?.error ? `: ${status.error}` : ""}`);
     }
     if (!existsSync(path)) return false;
     try {
