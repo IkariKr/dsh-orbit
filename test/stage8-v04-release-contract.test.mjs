@@ -110,12 +110,10 @@ function validateReleaseProvenance({
       `chronology: candidate commit (${candidateCommitDate.toISOString()}) must precede ${fileName} executedAt (${executedDate.toISOString()})`,
     );
 
-    if (mode === "final-release") {
-      assert.ok(
-        executedDate.getTime() < closureCommitDate.getTime(),
-        `chronology: ${fileName} executedAt (${executedDate.toISOString()}) must precede closure commit (${closureCommitDate.toISOString()})`,
-      );
-    }
+    assert.ok(
+      executedDate.getTime() < closureCommitDate.getTime(),
+      `chronology: ${fileName} executedAt (${executedDate.toISOString()}) must precede closure commit (${closureCommitDate.toISOString()})`,
+    );
   }
 
   const mountedArtifact = artifacts["two-node-mounted-smoke.json"]?.json;
