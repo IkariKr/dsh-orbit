@@ -421,7 +421,7 @@ const waitFor = async (label, fn, { attempts = 40, intervalMs = 3000 } = {}) => 
 const nodeEnv = (dataHome) => ({
   DSH_ORBIT_NODE_STATE: `${dataHome}/orbit-node.json`,
   DSH_ORBIT_HUB_URL: NODE_HUB_URL,
-  DSH_ORBIT_NODE_ORBIT_VERSION: "0.3.0",
+  DSH_ORBIT_NODE_ORBIT_VERSION: "0.4.0-rc.1",
   DSH_ORBIT_NODE_ORBIT_REVISION: REVISION,
   DSH_ORBIT_NODE_DSH_VERSION: "0.1.1-rc.2",
   DSH_ORBIT_NODE_DSH_PROFILE: "dsh-0.1.1-rc.2",
@@ -704,7 +704,7 @@ async function main() {
       composeOverrideFile: null,
       composeService: name,
       workdir: verificationWorkdir,
-      orbitVersion: "0.3.0",
+      orbitVersion: "0.4.0-rc.1",
       orbitRevision: REVISION,
       dshVersion: "0.1.1-rc.2",
       baselineImage: "mounted-drill",
@@ -719,7 +719,7 @@ async function main() {
     });
     const report = createCompatibilityReport({
       promotionEvaluated: false,
-      orbit: { version: "0.3.0", revision: REVISION },
+      orbit: { version: "0.4.0-rc.1", revision: REVISION },
       candidate: { dshVersion: "0.1.1-rc.2", profile: "dsh-0.1.1-rc.2" },
       checks,
       snapshot: { reference: null, failure: null },
