@@ -70,7 +70,7 @@ test("Stage 8 release candidate artifact set exists", async () => {
   const changelog = await text("CHANGELOG.md");
   assert.match(changelog, /^## Unreleased$/m);
   assert.match(changelog, /^### 0\.3\.0-rc\.1 candidate - 2026-09-02$/m);
-  assert.doesNotMatch(changelog, /^## 0\.3\.0-rc\.1 - 2026-08-31$/m);
+  assert.doesNotMatch(changelog, /^## 0\.4\.0-rc\.1 - 2026-08-31$/m);
 });
 
 test("Registry Compose requires an explicit release image tag", async () => {
@@ -86,7 +86,7 @@ test("Registry Compose requires an explicit release image tag", async () => {
   const config = await text("docs/configuration-reference.md");
   assert.match(config, /`DSH_ORBIT_REGISTRY_TAG`/);
   assert.match(config, /Required.*Default.*Meaning and constraints/s);
-  assert.match(config, /explicitly bound.*v0\.3\.0-rc\.1.*fail closed/s);
+  assert.match(config, /explicitly bound.*v0\.4\.0-rc\.1.*fail closed/s);
   assert.match(config, /v0\.3\.0-s6.*not permitted/s);
 });
 
