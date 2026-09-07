@@ -24,6 +24,7 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /DSH_ORBIT_BROWSER_CHALLENGE/);
   assert.match(source, /BROWSER_NODE_BINDING_PATH/);
   assert.match(source, /browserBridgeProcess/);
+  assert.match(source, /BROWSER_BRIDGE_LOG_PATH/);
   assert.match(source, /nodeIds: \[aNodeId, bNodeId\]/);
   assert.match(source, /runVerificationSequence\(/);
   assert.match(source, /createCompatibilityReport\(/);

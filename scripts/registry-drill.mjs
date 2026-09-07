@@ -52,6 +52,7 @@ const BROWSER_CHECKPOINT_PATH = join(REPO, "data", "orbit-drill", "browser-check
 const BROWSER_BINDINGS_PATH = join(REPO, "data", "orbit-drill", "browser-checkpoint-bindings.json");
 const BROWSER_NODE_BINDING_PATH = join(REPO, "data", "orbit-drill", "browser-node-binding.json");
 const BROWSER_STOP_PATH = join(REPO, "data", "orbit-drill", "browser-stop");
+const BROWSER_BRIDGE_LOG_PATH = join(REPO, "data", "orbit-drill", "browser-bridge.log");
 const BROWSER_BRIDGE_PATH = join(REPO, "scripts", "registry-drill-firefox-bridge.py");
 const RUN_ID = randomUUID();
 const BROWSER_CHALLENGE = randomUUID();
@@ -335,6 +336,7 @@ function browserBridgeArgs() {
     "--lifecycle-path", BROWSER_CHECKPOINT_PATH,
     "--node-binding-path", BROWSER_NODE_BINDING_PATH,
     "--stop-path", BROWSER_STOP_PATH,
+    "--log-path", BROWSER_BRIDGE_LOG_PATH,
   ];
 }
 
@@ -577,6 +579,7 @@ async function main() {
   rmSync(BROWSER_CHECKPOINT_PATH, { force: true });
   rmSync(BROWSER_NODE_BINDING_PATH, { force: true });
   rmSync(BROWSER_STOP_PATH, { force: true });
+  rmSync(BROWSER_BRIDGE_LOG_PATH, { force: true });
   ensureDrillCertificate();
   const composeUp = args.includes("--compose-up");
   const waitForBrowser = args.includes("--wait-for-browser");

@@ -123,15 +123,28 @@ def wait_for_node_ids(driver, expected: list[str]) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
+    log_path = Path(args.log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def log(message: str) -> None:
+        line = f"{utc_now()} {message}"
+        print(line, file=sys.stderr, flush=True)
+        with log_path.open("a", encoding="utf-8") as stream:
+            stream.write(line + "\n")
+
     bindings = read_json(Path(args.bindings_path))
+    log("bindings-loaded")
     challenge = os.environ.get("DSH_ORBIT_BROWSER_CHALLENGE", "")
     if not challenge:
         raise RuntimeError("runner browser challenge is missing")
     challenge_digest = hashlib.sha256(challenge.encode("utf-8")).hexdigest()
 
     ca_path = Path(args.ca_path)
+    log(f"installing-ca:{ca_path.name}")
     thumbprint, owned_root = install_windows_root(ca_path)
+    log(f"ca-trusted:{thumbprint}:{'owned' if owned_root else 'preexisting'}")
     profile_dir = Path(tempfile.mkdtemp(prefix="dsh-orbit-firefox-"))
+    gecko_log = log_path.with_name("geckodriver.log")
     driver = None
     try:
         options = Options()
@@ -141,17 +154,22 @@ def run(args: argparse.Namespace) -> int:
         options.set_preference("network.trr.mode", 5)
         options.accept_insecure_certs = False
         options.enable_bidi = True
-        driver = webdriver.Firefox(options=options, service=Service(resolve_geckodriver()))
+        log("starting-firefox")
+        driver = webdriver.Firefox(options=options, service=Service(resolve_geckodriver(), log_output=str(gecko_log)))
+        log("firefox-started")
         driver.set_page_load_timeout(60)
         wait = WebDriverWait(driver, WAIT_SECONDS, poll_frequency=POLL_SECONDS)
 
         # URL credentials exercise the real browser Basic Auth path without
         # logging or storing the password in any checkpoint.
         gateway = bindings["gatewayUrl"]
+        log("navigating-gateway")
         driver.get(gateway.replace("https://", "https://operator:drill-password@", 1) + "/")
+        log("gateway-loaded")
         wait_for(wait, EC.title_contains("DSH Orbit Registry"))
         session_status = wait_for(wait, EC.visibility_of_element_located((By.ID, "session-status")))
         wait.until(lambda _driver: session_status.text.strip().startswith("operator:"))
+        log("session-authenticated")
 
         driver.find_element(By.ID, "nav-tokens").click()
         wait_for(wait, EC.visibility_of_element_located((By.ID, "tokens-view")))
@@ -159,6 +177,7 @@ def run(args: argparse.Namespace) -> int:
         plaintext = wait_for(wait, EC.visibility_of_element_located((By.CSS_SELECTOR, "code[data-plaintext-once]")))
         if not plaintext.text.strip():
             raise RuntimeError("token plaintext-once element was empty")
+        log("token-observed")
 
         bootstrap = {
             **bindings,
@@ -173,6 +192,7 @@ def run(args: argparse.Namespace) -> int:
             "recordedAt": utc_now(),
         }
         write_json(Path(args.bootstrap_path), bootstrap)
+        log("bootstrap-checkpoint-written")
 
         node_binding_path = Path(args.node_binding_path)
         stop_path = Path(args.stop_path)
@@ -237,6 +257,7 @@ def main() -> int:
     parser.add_argument("--lifecycle-path", required=True)
     parser.add_argument("--node-binding-path", required=True)
     parser.add_argument("--stop-path", required=True)
+    parser.add_argument("--log-path", required=True)
     args = parser.parse_args()
     try:
         return run(args)
