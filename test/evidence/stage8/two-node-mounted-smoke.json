@@ -1,82 +1,25 @@
 {
   "schemaVersion": 1,
   "kind": "stage8-final-two-node-mounted-smoke",
-  "candidateCommit": "5a6f94fa8bfc1adf850627d28f2cad150af55c20",
-  "executedAt": "2026-09-07T06:24:00.000Z",
-  "externalHarnessBaseline": {
-    "dshVersion": "0.1.1-rc.2",
-    "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
-    "dshCliBinarySha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  "candidateCommit": "6245c66d399bb8d593ab445649135699c28d0bcc",
+  "executedAt": "2026-09-07T08:12:00.000Z",
+  "execution": "not-executed",
+  "blocker": {
+    "code": "docker-engine-unavailable",
+    "command": "docker info",
+    "detail": "Docker Desktop Linux engine did not expose npipe:////./pipe/dockerDesktopLinuxEngine",
+    "mountedDriver": "scripts/registry-drill.mjs --compose-up --wait-for-browser",
+    "attempted": true
   },
-  "topology": {
-    "nodeA": {
-      "nodeId": "node_cf75069a705898a43da2a7caedf455a8",
-      "authority": "n-cf75069a705898a43da2a7caedf455a8.stage6.localhost:51558",
-      "hostRole": "nas-class",
-      "routeTargetOrigin": "https://<NAS_HOST_PRIVATE_IP>:50081",
-      "tlsVerified": true
-    },
-    "nodeB": {
-      "nodeId": "node_88f5fe031a2bfea7ecb2f1e0c4de4114",
-      "authority": "n-88f5fe031a2bfea7ecb2f1e0c4de4114.stage6.localhost:51558",
-      "hostRole": "workstation-class",
-      "routeTargetOrigin": "http://127.0.0.1:50085",
-      "tlsVerified": true
-    }
+  "requiredMatrix": {
+    "selectorListsAB": "NOT_EXECUTED",
+    "httpRootA": "NOT_EXECUTED",
+    "httpRootB": "NOT_EXECUTED",
+    "websocketUpgradeA": "NOT_EXECUTED",
+    "websocketUpgradeB": "NOT_EXECUTED",
+    "nodeContextIsolation": "NOT_EXECUTED",
+    "hubRestartRecovery": "NOT_EXECUTED",
+    "nodeAFailClosedOutage": "NOT_EXECUTED"
   },
-  "gateway": {
-    "authority": "stage6.localhost:51558",
-    "certificateSha256": "c908ff6b7d651e2077bfa9d6d429e7b4858603698fde99a8235974aa4dfa9bb5",
-    "subject": "CN=stage6.localhost",
-    "issuer": "CN=Orbit Rehearsal CA",
-    "tlsVerified": true,
-    "hostnameValidation": true,
-    "tlsBypass": false
-  },
-  "matrix": {
-    "selectorListsAB": true,
-    "bothNodesEligible": true,
-    "httpRootA": {
-      "status": 200,
-      "isolated": true
-    },
-    "httpRootB": {
-      "status": 200,
-      "isolated": true
-    },
-    "staticAssetsA": {
-      "status": 200,
-      "isolated": true
-    },
-    "staticAssetsB": {
-      "status": 200,
-      "isolated": true
-    },
-    "websocketUpgradeA": {
-      "status": 101,
-      "protocol": "events.mux",
-      "pingPongSuccess": true
-    },
-    "websocketUpgradeB": {
-      "status": 101,
-      "protocol": "events.mux",
-      "pingPongSuccess": true
-    },
-    "nodeContextIsolation": {
-      "crossCrosstalkDetected": false,
-      "hostOnlyCookiesStrict": true
-    },
-    "hubRestartRecovery": {
-      "nodeIdentityPreserved": true,
-      "nodesRecovered": true
-    },
-    "nodeAFailClosedOutage": {
-      "aUnavailableStatus": 502,
-      "aMarkedUnreachable": true,
-      "bUnaffectedAndHealthy": true,
-      "noSilentFailover": true,
-      "aRestoredOnRecovery": true
-    }
-  },
-  "result": "PASS"
+  "result": "BLOCKED"
 }

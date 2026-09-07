@@ -1,8 +1,9 @@
 {
   "schemaVersion": 1,
   "kind": "stage8-backup-restore-acceptance",
-  "candidateCommit": "5a6f94fa8bfc1adf850627d28f2cad150af55c20",
-  "executedAt": "2026-09-07T06:22:30.000Z",
+  "candidateCommit": "6245c66d399bb8d593ab445649135699c28d0bcc",
+  "executedAt": "2026-09-07T08:10:00.000Z",
+  "execution": "local-file-backed-wal-registry",
   "backup": {
     "method": "sqlite-vacuum-into",
     "integrityCheck": "ok",
