@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "kind": "stage8-promotion-plan-validation",
-  "candidateCommit": "6245c66d399bb8d593ab445649135699c28d0bcc",
-  "executedAt": "2026-09-07T08:12:00.000Z",
+  "candidateCommit": "73f6d7d6a8518200a9b522a2a5706d36af992190",
+  "executedAt": "2026-09-07T08:45:33.200Z",
   "productionTarget": {
     "authorityApex": "dsh.ikarikore.top",
     "wildcardRouteDomain": "*.dsh.ikarikore.top",

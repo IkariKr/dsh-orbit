@@ -4,7 +4,7 @@
   "releaseCandidate": "v0.4.0-rc.1",
   "branch": "chore/v0.4-stage8-release-closure",
   "parentStage7Evidence": "b8bdbbda91180b91005f9344aa28fa029cf37df2",
-  "testedCandidateCommit": "6245c66d399bb8d593ab445649135699c28d0bcc",
+  "testedCandidateCommit": "73f6d7d6a8518200a9b522a2a5706d36af992190",
   "externalHarnessBaseline": {
     "dshVersion": "0.1.1-rc.2",
     "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
@@ -20,23 +20,23 @@
   "physicalMountedGate": "BLOCKED_DOCKER_ENGINE_UNAVAILABLE",
   "artifacts": {
     "fresh-install.json": {
-      "sha256": "6effb03bce31a8526035442f03a87c4c1cbb596ba89028f495af4af670f433c8",
+      "sha256": "042b1ee573b45b2116609371b5947dfc9ddae065a8067c6b4e3c011b7eb27353",
       "bytes": 741
     },
     "migration.json": {
-      "sha256": "66cf7f1cb0ad8db936241242c1c96c8beee9aaa763ba174f0a9b424270ec6b9b",
-      "bytes": 884
+      "sha256": "8b0b4b0f2681c2a19c0b0a395c7c1869f5ecfd1bc81b536ad582d009f5b872b9",
+      "bytes": 672
     },
     "backup-restore.json": {
-      "sha256": "584fa88a50d5c4a2ea960737cc3ac95cbab43e26ea46a3bd63df6cb25b618dc2",
+      "sha256": "4a107d64995b28236e21951bc5c5a6273c270f5c1b0f0f40af1f8e836f709c00",
       "bytes": 795
     },
     "two-node-mounted-smoke.json": {
-      "sha256": "94b6357067f7419ac8db88cb6ef5d95fae05191621deeb72129d6d287a46a071",
-      "bytes": 879
+      "sha256": "7af883747d4e42f5fb15977ecca330344640f6f48cf69b3a57fc2285175b47eb",
+      "bytes": 763
     },
     "promotion-plan-validation.json": {
-      "sha256": "a52e33edaf4bfddb9062014dee12d1a0dffe6e5cfe25524a1affbd27837dc604",
+      "sha256": "bf7eba41a61ebbeca79d0752f1dda8dd9902aedbaaa7627ada487152d5cb9fce",
       "bytes": 540
     }
   },
