@@ -59,6 +59,15 @@ function gitIsAncestor(ancestor, descendant) {
   }
 }
 
+function gitChangedPaths(from, to) {
+  try {
+    const stdout = execFileSync("git", ["diff", "--name-only", `${from}..${to}`], { cwd: rootPath, encoding: "utf8" });
+    return stdout.trim().split(/\r?\n/).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 function assertFullCommit(commit, label) {
   assert.match(commit ?? "", /^[0-9a-f]{40}$/, `${label} must be a full 40-character SHA`);
   assert.equal(gitCommitExists(commit), true, `${label} must resolve to a real commit`);
@@ -119,14 +128,14 @@ function validateReleaseProvenance({
   const mountedArtifact = artifacts["two-node-mounted-smoke.json"]?.json;
   const isPass =
     mountedArtifact?.result === "PASS" &&
+    mountedArtifact?.execution === "executed" &&
     manifest.physicalMountedGate === "PASS" &&
-    attestationText.includes(releaseClosureCommit) &&
     !/\bpending\b/i.test(attestationText);
 
   if (mode === "final-release") {
     assert.equal(mountedArtifact?.result, "PASS", "final release requires mounted smoke result PASS");
+    assert.equal(mountedArtifact?.execution, "executed", "final release requires mounted smoke execution executed");
     assert.equal(manifest.physicalMountedGate, "PASS", "final release requires manifest physicalMountedGate PASS");
-    assert.ok(attestationText.includes(releaseClosureCommit), "final release requires releaseClosureCommit in attestation");
     assert.doesNotMatch(attestationText, /\bpending\b/i, "final release forbids pending wording in attestation");
   }
 
@@ -204,6 +213,19 @@ test("Stage 8 v0.4 release provenance contract: candidate vs closure, evidence m
   // Tag must not exist before final review
   assert.equal(gitTagExists("v0.4.0-rc.1"), false, "release tag v0.4.0-rc.1 must not exist before Final Review");
 
+  // Changed paths between candidate and closure (HEAD^..HEAD) must only be the attestation and evidence files
+  const changedPaths = gitChangedPaths(candidateCommit, releaseClosureCommit);
+  assert.ok(changedPaths.length > 0, "closure commit HEAD must have changes over candidate HEAD^");
+  for (const changedPath of changedPaths) {
+    const isAllowed =
+      changedPath === "docs/release-attestations/v0.4.0-rc.1.md" ||
+      changedPath.startsWith("test/evidence/stage8/");
+    assert.ok(
+      isAllowed,
+      `closure commit HEAD^..HEAD changed forbidden path: ${changedPath} (only docs/release-attestations/v0.4.0-rc.1.md and test/evidence/stage8/** allowed)`,
+    );
+  }
+
   const manifestText = await text("test/evidence/stage8/manifest.json");
   const manifest = JSON.parse(manifestText);
   const attestation = await text("docs/release-attestations/v0.4.0-rc.1.md");
@@ -241,15 +263,15 @@ test("Stage 8 v0.4 release provenance contract: candidate vs closure, evidence m
   const mountedSmoke = artifacts["two-node-mounted-smoke.json"].json;
   const isFinalReleasePass =
     mountedSmoke.result === "PASS" &&
+    mountedSmoke.execution === "executed" &&
     manifest.physicalMountedGate === "PASS" &&
-    attestation.includes(releaseClosureCommit) &&
     !/\bpending\b/i.test(attestation);
 
   if (isFinalReleasePass) {
     // Final release acceptance criteria (expected once updated for C8.2/E8.2)
     assert.equal(mountedSmoke.result, "PASS", "two-node mounted smoke must be PASS for release");
+    assert.equal(mountedSmoke.execution, "executed", "two-node mounted smoke execution must be executed for release");
     assert.equal(manifest.physicalMountedGate, "PASS", "manifest physicalMountedGate must be PASS for release");
-    assert.ok(attestation.includes(releaseClosureCommit), "attestation must contain releaseClosureCommit SHA");
     assert.doesNotMatch(attestation, /\bpending\b/i, "attestation must have no pending wording");
     for (const [fileName, art] of Object.entries(artifacts)) {
       const executedDate = new Date(art.json.executedAt);
@@ -284,6 +306,7 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
     schemaVersion: 1,
     candidateCommit,
     executedAt: "2026-09-07T08:10:00.000Z",
+    execution: "executed",
     result: "PASS",
   };
   const freshBuf = Buffer.from(JSON.stringify(validFreshInstallJson));
@@ -365,21 +388,32 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
     /final release forbids pending wording/,
   );
 
-  // 4. Fails closed if attestation lacks releaseClosureCommit
+  // 4. Constructibility test: attestation does NOT require self-referential releaseClosureCommit SHA.
+  // Proves that a valid bundle where attestation does not mention closure commit succeeds,
+  // whereas requiring attestation to contain releaseClosureCommit would fail constructibility.
+  const attestationWithoutClosure = `Candidate: ${candidateCommit}\nParent: ${STAGE7_E72_BASE}\nStatus: PASS`;
+  const constructibleResult = validateReleaseProvenance({
+    candidateCommit,
+    releaseClosureCommit,
+    candidateCommitDate,
+    closureCommitDate,
+    parentBaseline: STAGE7_E72_BASE,
+    manifest: validManifest,
+    artifacts: validArtifacts,
+    attestationText: attestationWithoutClosure,
+    mode: "final-release",
+  });
+  assert.equal(constructibleResult.isPass, true, "constructibility: attestation must not require self-referential closure SHA");
+
+  // Constructibility verification: verify that requiring closure commit in attestation WOULD fail
   assert.throws(
-    () =>
-      validateReleaseProvenance({
-        candidateCommit,
-        releaseClosureCommit,
-        candidateCommitDate,
-        closureCommitDate,
-        parentBaseline: STAGE7_E72_BASE,
-        manifest: validManifest,
-        artifacts: validArtifacts,
-        attestationText: `Candidate: ${candidateCommit}\nParent: ${STAGE7_E72_BASE}\nStatus: PASS`,
-        mode: "final-release",
-      }),
-    /final release requires releaseClosureCommit in attestation/,
+    () => {
+      assert.ok(
+        attestationWithoutClosure.includes(releaseClosureCommit),
+        "impossible requirement: attestation must contain releaseClosureCommit",
+      );
+    },
+    /impossible requirement: attestation must contain releaseClosureCommit/,
   );
 
   // 5. Fails closed if executedAt is after closure timestamp
