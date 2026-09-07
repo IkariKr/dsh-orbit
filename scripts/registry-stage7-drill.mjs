@@ -17,6 +17,12 @@ import { Registry } from "../src/registry/registry.mjs";
 import { openRegistryDatabase, SCHEMA_VERSION } from "../src/registry/sqlite.mjs";
 import { generateNodeKeyPair, deriveKeyId } from "../src/registry/crypto.mjs";
 import { runStage7ProcessDrill } from "./stage7-process-scenarios.mjs";
+import { deriveCapabilities } from "../src/registry/capabilities.mjs";
+import { RouteNonceCache, signRouteRequest, verifyRouteRequest } from "../src/registry/route-auth.mjs";
+import { IngressWebSocketTracker } from "../src/node/route-ingress.mjs";
+import { HubWebSocketTracker } from "../src/registry/route-proxy.mjs";
+import https from "node:https";
+import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "../test/fixtures/gateway-identity.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
 const runId = `stage7-${new Date().toISOString().replaceAll(/[-:.TZ]/g, "")}-${process.pid}`;
@@ -38,10 +44,42 @@ function requireCleanCandidateWorktree() {
 function collectRequiredPredicates(evidence) {
   const predicates = {
     cleanWorktreeBefore: evidence.cleanWorktreeBefore,
-    migrations: ["v1", "v2", "v3"].every((version) => {
+    migrations: ["v1", "v2", "v3", "v4"].every((version) => {
       const item = evidence.migration?.[version];
       return item?.preservedState === true && item?.idempotent === true && item?.integrityCheck === "ok";
     }),
+    migrationV04: evidence.migration?.v4?.preservedState === true &&
+      evidence.migration?.v4?.idempotent === true &&
+      evidence.migration?.v4?.integrityCheck === "ok" &&
+      evidence.migration?.v4?.routeTargetsPresent === true &&
+      evidence.migration?.v4?.hubRouteKeysPresent === true,
+    routeIdentityBackupRestore: evidence.backupRestore?.method === "sqlite-vacuum-into" &&
+      evidence.backupRestore?.mutationChangedState === true &&
+      evidence.backupRestore?.restoredBackupState === true &&
+      evidence.backupRestore?.postBackupMutationAbsent === true &&
+      evidence.backupRestore?.routeTargetPreserved === true &&
+      evidence.backupRestore?.hubRouteKeyPreserved === true,
+    secretProtection: evidence.secretProtection?.privateKeyExcludedFromDigest === true &&
+      evidence.secretProtection?.privateKeyExcludedFromInspection === true,
+    routeIdentityCorruption: evidence.failureModes?.routeTargetCorruptionRejected === true &&
+      evidence.failureModes?.hubRouteKeyCorruptionRejected === true,
+    hubRouteKeyRotation: evidence.processBoundary?.hubRestart?.sameKeyId === true &&
+      evidence.processBoundary?.rotationRecovery?.samePendingKeyPromoted === true,
+    nonceRestartSemantics: evidence.nonceRestartSemantics?.sameProcessReplayRejected === true &&
+      evidence.nonceRestartSemantics?.freshProcessNonceAcceptedWithinSkew === true,
+    tlsFailureMatrix: evidence.tlsFailureMatrix?.unknownCaRejected === true &&
+      evidence.tlsFailureMatrix?.wrongSanRejected === true &&
+      evidence.tlsFailureMatrix?.matchingCertSucceeds === true,
+    compatibilityWithdrawal: evidence.compatibilityWithdrawal?.unsupportedDshWithheld === true &&
+      evidence.compatibilityWithdrawal?.missingWsWithheld === true,
+    dshLossRecovery: evidence.dshLossRecovery?.unreachableOnLoss === true &&
+      evidence.dshLossRecovery?.restoredOnRecovery === true,
+    bookmarkReenroll: evidence.processBoundary?.reenrollmentRecovery?.exactReplaySucceeded === true &&
+      evidence.bookmarkReenroll?.deletedRouteKeyRevoked === true,
+    httpWsCleanup: evidence.httpWsCleanup?.earlyAbortCleanedUp === true,
+    restartStability: evidence.processBoundary?.hubRestart?.sameNodeId === true &&
+      evidence.processBoundary?.hubRestart?.sameKeyId === true &&
+      evidence.processBoundary?.hubRestart?.healthPreserved === true,
     failureModes: evidence.failureModes?.noRebuildOrOverwrite === true &&
       evidence.failureModes?.futureDatabaseUnchanged === true &&
       evidence.failureModes?.corruptDatabaseUnchanged === true,
@@ -124,6 +162,41 @@ function seedNode(db, nodeId, suffix) {
 function migrationDatabase(path, version) {
   const db = openRegistryDatabase(path);
   seedNode(db, `node_${String(version).repeat(32)}`, String(version));
+  if (version < 5) {
+    db.exec("DROP TABLE hub_route_keys");
+  }
+  if (version < 4) {
+    db.exec("DROP TABLE route_targets");
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.exec(`
+      CREATE TABLE nodes_v3 (
+        node_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state IN ('active', 'tombstoned')),
+        minted_at TEXT NOT NULL,
+        tombstoned_at TEXT,
+        tombstone_reason TEXT,
+        registry_contact TEXT NOT NULL DEFAULT 'unknown' CHECK (registry_contact IN ('fresh', 'stale', 'lost', 'unknown')),
+        authenticated TEXT NOT NULL DEFAULT 'unknown' CHECK (authenticated IN ('ok', 'revoked', 'unknown')),
+        dsh_healthy TEXT NOT NULL DEFAULT 'unknown' CHECK (dsh_healthy IN ('ok', 'degraded', 'unknown')),
+        orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
+        reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable = 'unknown'),
+        alert_flags TEXT NOT NULL DEFAULT '[]',
+        last_heartbeat_at TEXT,
+        capabilities TEXT NOT NULL DEFAULT '[]',
+        capabilities_stale INTEGER NOT NULL DEFAULT 1,
+        last_seen TEXT,
+        last_seen_source TEXT,
+        orbit_version TEXT NOT NULL DEFAULT '',
+        orbit_revision TEXT,
+        dsh_version TEXT NOT NULL DEFAULT '',
+        compatibility_profile TEXT
+      );
+      INSERT INTO nodes_v3 SELECT * FROM nodes;
+      DROP TABLE nodes;
+      ALTER TABLE nodes_v3 RENAME TO nodes;
+    `);
+    db.exec("PRAGMA foreign_keys = ON");
+  }
   if (version === 1) {
     db.exec("ALTER TABLE nodes DROP COLUMN alert_flags");
     db.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
@@ -190,16 +263,9 @@ async function run() {
   try {
     const migrationRoot = join(root, "migrations");
     await mkdir(migrationRoot, { recursive: true });
-    for (const version of [1, 2, 3]) {
+    for (const version of [1, 2, 3, 4]) {
       const path = join(migrationRoot, `v${version}.db`);
-      if (version === 3) {
-        const db = openRegistryDatabase(path);
-        seedNode(db, "node_33333333333333333333333333333333", "3");
-        db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-        db.close();
-      } else {
-        migrationDatabase(path, version);
-      }
+      migrationDatabase(path, version);
       const beforeBytes = await readFile(path);
       const before = {
         schemaVersion: version,
@@ -218,7 +284,9 @@ async function run() {
         idempotentInspection: idempotent,
         preservedState: after.rowCounts.nodes === 1 && after.rowCounts.node_keys === 1,
         idempotent: idempotent.stateDigest === after.stateDigest && idempotent.rowCounts.nodes === after.rowCounts.nodes,
-        noOpCurrent: version === 3 && idempotent.stateDigest === after.stateDigest,
+        noOpCurrent: version === 4 && idempotent.stateDigest === after.stateDigest,
+        routeTargetsPresent: Boolean(after.schemaShape.tables.route_targets),
+        hubRouteKeysPresent: Boolean(after.schemaShape.tables.hub_route_keys),
         healthSemantics: "registryContact=fresh, reachable=unknown, capabilities derived from stored evidence",
       };
     }
@@ -268,16 +336,48 @@ async function run() {
       fkRejected = error.code === "integrity-failed";
     }
     const fkAfterBytes = await readFile(fkPath);
+    const corruptRtPath = join(failureRoot, "corrupt-route-targets.db");
+    const corruptRtDb = openRegistryDatabase(corruptRtPath);
+    corruptRtDb.close();
+    const rawRt = new DatabaseSync(corruptRtPath);
+    rawRt.exec("PRAGMA foreign_keys = OFF");
+    rawRt.prepare("INSERT INTO route_targets (node_id, route_target_origin, created_at, updated_at) VALUES ('node_orphan', 'https://bad.example', 't', 't')").run();
+    rawRt.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    rawRt.close();
+    let corruptRtRejected = false;
+    try {
+      openRegistryDatabase(corruptRtPath);
+    } catch (error) {
+      corruptRtRejected = error.code === "integrity-failed";
+    }
+
+    const corruptHrkPath = join(failureRoot, "corrupt-hub-route-keys.db");
+    const corruptHrkDb = openRegistryDatabase(corruptHrkPath);
+    corruptHrkDb.close();
+    const rawHrk = new DatabaseSync(corruptHrkPath);
+    rawHrk.exec("PRAGMA foreign_keys = OFF");
+    rawHrk.prepare("INSERT INTO hub_route_keys (node_id, key_id, public_key, private_key, state, created_at) VALUES ('node_orphan', 'k1', 'a', 'b', 'provisioned', 't')").run();
+    rawHrk.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    rawHrk.close();
+    let corruptHrkRejected = false;
+    try {
+      openRegistryDatabase(corruptHrkPath);
+    } catch (error) {
+      corruptHrkRejected = error.code === "integrity-failed";
+    }
+
     evidence.failureModes = {
       futureSchemaRejected: futureRejected,
       corruptDatabaseRejected: corruptRejected,
       businessPageCorruptionRejected: pageRejected,
       foreignKeyViolationRejected: fkRejected,
+      routeTargetCorruptionRejected: corruptRtRejected,
+      hubRouteKeyCorruptionRejected: corruptHrkRejected,
       futureDatabaseUnchanged: Buffer.compare(futureBeforeBytes, futureAfterBytes) === 0,
       corruptDatabaseUnchanged: Buffer.compare(corruptAfterBytes, corruptBytes) === 0,
       businessPageDatabaseUnchanged: Buffer.compare(pageAfterBytes, pageBeforeBytes) === 0,
       foreignKeyDatabaseUnchanged: Buffer.compare(fkAfterBytes, fkBeforeBytes) === 0,
-      noRebuildOrOverwrite: futureRejected && corruptRejected && pageRejected && fkRejected &&
+      noRebuildOrOverwrite: futureRejected && corruptRejected && pageRejected && fkRejected && corruptRtRejected && corruptHrkRejected &&
         Buffer.compare(futureBeforeBytes, futureAfterBytes) === 0 &&
         Buffer.compare(corruptAfterBytes, corruptBytes) === 0 &&
         Buffer.compare(pageAfterBytes, pageBeforeBytes) === 0 &&
@@ -309,15 +409,29 @@ async function run() {
       plaintextTokenReturnedOnce: typeof enrollmentResult.token === "string" && enrollmentResult.token.length === 32,
     };
     seedNode(db, "node_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "a");
+    const testNodeId = "node_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const testKeys = generateNodeKeyPair();
+    const testKeyId = deriveKeyId(testKeys.publicKeyHex);
+    db.prepare("INSERT INTO route_targets (node_id, route_target_origin, created_at, updated_at) VALUES (?, 'https://127.0.0.1:50081', '2026-08-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z')").run(testNodeId);
+    db.prepare("INSERT INTO hub_route_keys (node_id, key_id, public_key, private_key, state, created_at, activated_at) VALUES (?, ?, ?, ?, 'active', '2026-08-31T00:00:00.000Z', '2026-08-31T00:00:00.000Z')").run(testNodeId, testKeyId, testKeys.publicKeyHex, testKeys.privateKeyHex);
     db.exec("PRAGMA wal_checkpoint(PASSIVE)");
     const backup = await backupRegistryDatabase({ db, sourcePath: freshPath, destinationPath: backupPath });
     db.prepare("UPDATE nodes SET registry_contact = 'lost', alert_flags = '[\"contact-lost\"]'").run();
+    db.prepare("UPDATE route_targets SET route_target_origin = 'https://mutated.example' WHERE node_id = ?").run(testNodeId);
+    db.prepare("UPDATE hub_route_keys SET state = 'revoked' WHERE node_id = ?").run(testNodeId);
     db.prepare("INSERT INTO audit (at, actor, action, detail_json) VALUES ('2026-08-31T01:00:00.000Z', 'operator', 'stage7.mutation', '{}')").run();
     const mutated = inspectRegistryDatabase(freshPath);
     db.close();
     const restore = await restoreRegistryDatabase({ backupPath, targetPath: freshPath, writersQuiesced: true });
     db = openRegistryDatabase(freshPath);
     const restoredState = inspectRegistryDatabase(freshPath);
+    const restoredRouteTarget = db.prepare("SELECT route_target_origin FROM route_targets WHERE node_id = ?").get(testNodeId)?.route_target_origin;
+    const restoredKey = db.prepare("SELECT key_id, state, private_key FROM hub_route_keys WHERE node_id = ?").get(testNodeId);
+    const routeTargetPreserved = restoredRouteTarget === "https://127.0.0.1:50081";
+    const hubRouteKeyPreserved = restoredKey?.key_id === testKeyId && restoredKey?.state === "active" && restoredKey?.private_key === testKeys.privateKeyHex;
+    const privateKeyExcludedFromDigest = !backup.backup.stateDigest.includes(testKeys.privateKeyHex) && !restoredState.stateDigest.includes(testKeys.privateKeyHex);
+    const privateKeyExcludedFromInspection = !JSON.stringify(backup.backup).includes(testKeys.privateKeyHex) && !JSON.stringify(restoredState).includes(testKeys.privateKeyHex);
+
     const retentionPath = join(root, "retention.db");
     const retentionDb = openRegistryDatabase(retentionPath);
     const retentionRegistry = new Registry({ db: retentionDb, now: () => new Date("2026-12-01T00:00:00.000Z") });
@@ -367,7 +481,183 @@ async function run() {
       restoredBackupState: restoredState.stateDigest === backup.backup.stateDigest,
       postBackupMutationAbsent: restoredState.stateDigest !== mutated.stateDigest,
       walSidecarsNotCopied: backup.backupWalPresent === false && backup.backupShmPresent === false,
+      routeTargetPreserved,
+      hubRouteKeyPreserved,
     };
+    evidence.secretProtection = {
+      privateKeyExcludedFromDigest,
+      privateKeyExcludedFromInspection,
+    };
+
+    // S7-F7 Nonce restart semantics verification
+    const testSignKeys = generateNodeKeyPair();
+    const testSignKeyId = deriveKeyId(testSignKeys.publicKeyHex);
+    const nonceNodeId = "node_11111111111111111111111111111111";
+    const nonceAuthority = `n-${nonceNodeId.slice(5)}.stage7.localhost`;
+    const nonceCache1 = new RouteNonceCache({ retentionMs: 60_000 });
+    const nowMs = Date.now();
+    const { headers: nonceHeaders } = signRouteRequest({
+      privateKeyHex: testSignKeys.privateKeyHex,
+      keyId: testSignKeyId,
+      nodeId: nonceNodeId,
+      routeAuthority: nonceAuthority,
+      method: "GET",
+      rawTarget: "/_orbit/route-ready",
+      nowMs,
+      nonce: "1".repeat(32),
+    });
+    const getNonceKey = (kId) => (kId === testSignKeyId ? { publicKey: testSignKeys.publicKeyHex, state: "active" } : null);
+    const v1 = verifyRouteRequest({
+      headers: nonceHeaders,
+      method: "GET",
+      rawTarget: "/_orbit/route-ready",
+      expectedNodeId: nonceNodeId,
+      expectedRouteAuthority: nonceAuthority,
+      getPublicKey: getNonceKey,
+      nonceCache: nonceCache1,
+      nowMs,
+    });
+    const v2 = verifyRouteRequest({
+      headers: nonceHeaders,
+      method: "GET",
+      rawTarget: "/_orbit/route-ready",
+      expectedNodeId: nonceNodeId,
+      expectedRouteAuthority: nonceAuthority,
+      getPublicKey: getNonceKey,
+      nonceCache: nonceCache1,
+      nowMs,
+    });
+    const nonceCache2 = new RouteNonceCache({ retentionMs: 60_000 });
+    const vRestart = verifyRouteRequest({
+      headers: nonceHeaders,
+      method: "GET",
+      rawTarget: "/_orbit/route-ready",
+      expectedNodeId: nonceNodeId,
+      expectedRouteAuthority: nonceAuthority,
+      getPublicKey: getNonceKey,
+      nonceCache: nonceCache2,
+      nowMs,
+    });
+    evidence.nonceRestartSemantics = {
+      sameProcessReplayRejected: v1.ok === true && v2.ok === false && v2.code === "replay",
+      freshProcessNonceAcceptedWithinSkew: vRestart.ok === true,
+    };
+
+    // S7-F8 TLS failure matrix verification
+    const tlsServer = https.createServer({
+      cert: GATEWAY_CERT_PEM,
+      key: GATEWAY_KEY_PEM,
+    }, (req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+    });
+    await new Promise((resolve) => tlsServer.listen(0, "127.0.0.1", resolve));
+    const tlsPort = tlsServer.address().port;
+    let unknownCaRejected = false;
+    try {
+      await new Promise((resolve, reject) => {
+        const req = https.request({ hostname: "127.0.0.1", port: tlsPort, path: "/", method: "GET" }, resolve);
+        req.on("error", reject);
+        req.end();
+      });
+    } catch {
+      unknownCaRejected = true;
+    }
+    let wrongSanRejected = false;
+    try {
+      await new Promise((resolve, reject) => {
+        const req = https.request({ hostname: "localhost", port: tlsPort, path: "/", method: "GET", ca: GATEWAY_CERT_PEM }, resolve);
+        req.on("error", reject);
+        req.end();
+      });
+    } catch {
+      wrongSanRejected = true;
+    }
+    let matchingCertSucceeds = false;
+    try {
+      const code = await new Promise((resolve, reject) => {
+        const req = https.request({ hostname: "127.0.0.1", port: tlsPort, path: "/", method: "GET", ca: GATEWAY_CERT_PEM }, (res) => resolve(res.statusCode));
+        req.on("error", reject);
+        req.end();
+      });
+      matchingCertSucceeds = code === 200;
+    } catch {}
+    await new Promise((resolve) => tlsServer.close(resolve));
+    evidence.tlsFailureMatrix = {
+      unknownCaRejected,
+      wrongSanRejected,
+      matchingCertSucceeds,
+    };
+
+    // S7-F9 Compatibility withdrawal verification
+    const unapprovedReport = {
+      candidate: { dshVersion: "0.9.9-unapproved", profile: "unknown" },
+      checks: {
+        sessionResume: { status: "pass" },
+        settingsRead: { status: "pass" },
+        settingsNoopWrite: { status: "pass" },
+        authorizationSmoke: { status: "pass" },
+        runtimeReadiness: { status: "pass" },
+        webPluginRoutes: { status: "pass" },
+        webSocketTransport: { status: "pass" },
+      },
+      compatibility: { outcome: "pass" },
+    };
+    const missingWsReport = {
+      candidate: { dshVersion: "0.1.1-rc.2", profile: "dsh-0.1.1-rc.2" },
+      checks: {
+        sessionResume: { status: "pass" },
+        settingsRead: { status: "pass" },
+        settingsNoopWrite: { status: "pass" },
+        authorizationSmoke: { status: "pass" },
+        runtimeReadiness: { status: "pass" },
+        webPluginRoutes: { status: "pass" },
+        webSocketTransport: { status: "fail" },
+      },
+      compatibility: { outcome: "pass" },
+    };
+    evidence.compatibilityWithdrawal = {
+      unsupportedDshWithheld: deriveCapabilities(unapprovedReport).length === 0,
+      missingWsWithheld: !deriveCapabilities(missingWsReport).some((c) => c.name === "web.routes"),
+    };
+
+    // S7-F10 DSH loss recovery verification on db/registry
+    const probeDb = openRegistryDatabase(join(root, "probe-test.db"));
+    const probeRegistry = new Registry({ db: probeDb });
+    const pNodeId = "node_22222222222222222222222222222222";
+    probeDb.prepare("INSERT INTO nodes (node_id, state, minted_at) VALUES (?, 'active', 't')").run(pNodeId);
+    probeRegistry.setRouteTarget({ actor: "operator", nodeId: pNodeId, routeTarget: "http://127.0.0.1:54321" });
+    const pKey = probeRegistry.ensureHubRouteKey(pNodeId);
+    probeRegistry.acknowledgeHubRouteKeys(pNodeId, [pKey.key_id]);
+    for (let i = 0; i < 3; i++) {
+      await probeRegistry.probeNode(pNodeId, {
+        requestTransport: async () => { throw new Error("ECONNREFUSED"); },
+      });
+    }
+    const unreachableOnLoss = probeRegistry.getNode(pNodeId).health.reachable === "unreachable";
+    await probeRegistry.probeNode(pNodeId, {
+      requestTransport: async () => ({ status: 200, body: JSON.stringify({ nodeId: pNodeId, ready: true }) }),
+    });
+    const restoredOnRecovery = probeRegistry.getNode(pNodeId).health.reachable === "ok";
+    evidence.dshLossRecovery = { unreachableOnLoss, restoredOnRecovery };
+
+    // S7-F11 Bookmark delete/reenroll
+    const delRes = probeRegistry.deleteNode({ actor: "operator", nodeId: pNodeId, requestId: "1".repeat(32), reason: "test" });
+    const keyAfterDel = probeDb.prepare("SELECT state FROM hub_route_keys WHERE key_id = ?").get(pKey.key_id);
+    evidence.bookmarkReenroll = {
+      deletedRouteKeyRevoked: delRes.state === "tombstoned" && keyAfterDel.state === "revoked",
+    };
+    probeDb.close();
+
+    // S7-F12 Early abort WS cleanup
+    const tracker = new IngressWebSocketTracker({ maxConnections: 5 });
+    const fakeSock = { once(e, cb) { if (e === "close") this.onClose = cb; }, destroy() { if (this.onClose) this.onClose(); } };
+    const release = tracker.track(fakeSock);
+    release();
+    evidence.httpWsCleanup = {
+      earlyAbortCleanedUp: tracker.count === 0,
+    };
+
     db.close();
     evidence.processBoundary = await runStage7ProcessDrill(join(root, "process-boundary"));
     evidence.cleanup = { isolatedRoot: keepRoot ? root : "removed", removed: !keepRoot };

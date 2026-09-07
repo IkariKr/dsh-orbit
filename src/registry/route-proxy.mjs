@@ -537,6 +537,9 @@ export function proxyWebSocketUpgrade({
 
   const rawTarget = req.url;
   if (!isValidOriginFormTarget(rawTarget)) {
+    if (releaseTracker) {
+      try { releaseTracker(); } catch {}
+    }
     sendSocketHttpError(socket, 400, "Bad Request", {}, {
       error: { code: "invalid-target", message: "only origin-form request-target is supported" },
     });
@@ -562,6 +565,9 @@ export function proxyWebSocketUpgrade({
   try {
     originUrl = new URL(routeTargetOrigin);
   } catch {
+    if (releaseTracker) {
+      try { releaseTracker(); } catch {}
+    }
     const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
     sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
       error: { code: "invalid-route-target", message: "persisted route target origin is invalid", selectorUrl },
@@ -606,6 +612,9 @@ export function proxyWebSocketUpgrade({
   try {
     upstreamReq = clientMod.request(reqOptions);
   } catch (err) {
+    if (releaseTracker) {
+      try { releaseTracker(); } catch {}
+    }
     const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
     sendSocketHttpError(socket, 502, "Bad Gateway", {}, {
       error: { code: "bad-gateway", message: "failed to initiate upstream request", selectorUrl },

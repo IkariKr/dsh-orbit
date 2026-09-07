@@ -422,7 +422,7 @@ export class RouteIngress {
     }
 
     // Track ingress socket
-    this.wsTracker.track(socket);
+    const releaseTracker = this.wsTracker.track(socket);
 
     let dshOrigin;
     try {
@@ -431,6 +431,9 @@ export class RouteIngress {
         : `http://${this.dshTarget}`;
       dshOrigin = new URL(base);
     } catch {
+      if (releaseTracker) {
+        try { releaseTracker(); } catch {}
+      }
       sendSocketHttpError(socket, 500, "Internal Server Error", {}, {
         error: { code: "config-error", message: "invalid dshTarget configuration" },
       });

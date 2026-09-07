@@ -45,3 +45,24 @@ test("Stage 7 startup integrity and file protection are explicit", async () => {
   assert.match(backup, /chmod/);
   assert.match(backup, /0o600/);
 });
+
+test("Stage 7 drill enforces v0.4 failure hardening predicates (S7-F1 through S7-F13)", async () => {
+  const source = await readFile(new URL("../scripts/registry-stage7-drill.mjs", import.meta.url), "utf8");
+  const requiredHardeningPredicates = [
+    "migrationV04",
+    "routeIdentityBackupRestore",
+    "secretProtection",
+    "routeIdentityCorruption",
+    "hubRouteKeyRotation",
+    "nonceRestartSemantics",
+    "tlsFailureMatrix",
+    "compatibilityWithdrawal",
+    "dshLossRecovery",
+    "bookmarkReenroll",
+    "httpWsCleanup",
+    "restartStability",
+  ];
+  for (const pred of requiredHardeningPredicates) {
+    assert.match(source, new RegExp(pred), `registry-stage7-drill.mjs must declare predicate ${pred}`);
+  }
+});

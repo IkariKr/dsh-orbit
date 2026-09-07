@@ -3,6 +3,7 @@
 // from the latest uploaded compatibility report — never node-declared.
 
 import { COMPATIBILITY_OUTCOMES } from "../compatibility-report.mjs";
+import { compatibilityProfiles } from "../compatibility.mjs";
 
 export const CAPABILITY_CONTRACT_VERSION = 1;
 
@@ -17,9 +18,15 @@ export const CAPABILITY_EVIDENCE = Object.freeze({
 // no automated PTY/streaming runtime evidence exists.
 export const NON_CLAIMABLE_CAPABILITIES = Object.freeze(["terminal.pty", "agents.run"]);
 
+export function isDshVersionSupported(dshVersion) {
+  return typeof dshVersion === "string" && Boolean(compatibilityProfiles[dshVersion]);
+}
+
 export function deriveCapabilities(report) {
   const capabilities = [];
   if (!report?.checks) return capabilities;
+  const dshVersion = report?.candidate?.dshVersion;
+  if (!isDshVersionSupported(dshVersion)) return capabilities;
   for (const [name, checks] of Object.entries(CAPABILITY_EVIDENCE)) {
     if (checks.every((check) => report.checks[check]?.status === "pass")) {
       capabilities.push({ name, version: CAPABILITY_CONTRACT_VERSION });
