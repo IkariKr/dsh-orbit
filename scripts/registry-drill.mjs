@@ -14,7 +14,16 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { get as httpGet } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { dirname, join } from "node:path";
@@ -30,6 +39,8 @@ const HUB_URL = "http://127.0.0.1:5445/";
 const NODE_HUB_URL = "http://registry-hub:5446/";
 const GATEWAY_URL = "https://127.0.0.1:8443";
 const AUTH = `Basic ${Buffer.from("operator:drill-password").toString("base64")}`;
+const DRILL_PROXY_SECRET = "drill-proxy-secret";
+const DRILL_PROXY_SECRET_PATH = join(REPO, "secrets", "dsh_proxy_auth");
 const NODE_BIN = "/usr/local/lib/dsh-orbit/bin/dsh-orbit-node.mjs";
 const REVISION = execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO }).toString().trim();
 const HEARTBEAT_CADENCE_SECONDS = 60;
@@ -328,6 +339,36 @@ async function requireBrowserCheckpoint({ wait = false, nodeIds = [] } = {}) {
   };
 }
 
+function prepareDrillProxySecret() {
+  mkdirSync(dirname(DRILL_PROXY_SECRET_PATH), { recursive: true });
+  if (existsSync(DRILL_PROXY_SECRET_PATH)) {
+    const stat = lstatSync(DRILL_PROXY_SECRET_PATH);
+    if (stat.isDirectory()) {
+      const entries = readdirSync(DRILL_PROXY_SECRET_PATH);
+      if (entries.length !== 0) throw new Error("secrets/dsh_proxy_auth directory is not an empty placeholder");
+      rmSync(DRILL_PROXY_SECRET_PATH, { recursive: true, force: true });
+    } else if (!stat.isFile()) {
+      throw new Error("secrets/dsh_proxy_auth must be a regular file or empty placeholder directory");
+    } else if (readFileSync(DRILL_PROXY_SECRET_PATH, "utf8").trim() !== DRILL_PROXY_SECRET) {
+      throw new Error("secrets/dsh_proxy_auth exists with unexpected content; refusing to overwrite");
+    } else {
+      chmodSync(DRILL_PROXY_SECRET_PATH, 0o600);
+      return;
+    }
+  }
+  writeFileSync(DRILL_PROXY_SECRET_PATH, `${DRILL_PROXY_SECRET}\n`, { encoding: "utf8", mode: 0o600 });
+  try { chmodSync(DRILL_PROXY_SECRET_PATH, 0o600); } catch {}
+}
+
+function removeDrillProxySecret() {
+  if (!existsSync(DRILL_PROXY_SECRET_PATH)) return;
+  const stat = lstatSync(DRILL_PROXY_SECRET_PATH);
+  if (stat.isFile() && readFileSync(DRILL_PROXY_SECRET_PATH, "utf8").trim() === DRILL_PROXY_SECRET) {
+    rmSync(DRILL_PROXY_SECRET_PATH, { force: true });
+    mkdirSync(DRILL_PROXY_SECRET_PATH, { recursive: true });
+  }
+}
+
 function browserBridgeArgs() {
   return [
     "--bindings-path", BROWSER_BINDINGS_PATH,
@@ -595,6 +636,7 @@ async function main() {
     await stopNode("dsh-a", "/data/dsh-a", { strict: false });
     await stopNode("dsh-b", "/data/dsh-b", { strict: false });
     if (stackStarted) sh(`docker compose -f ${COMPOSE} down`, { expect: null });
+    removeDrillProxySecret();
   };
 
   // The drill Hub performs an immediate maintenance pass at startup, so
@@ -618,6 +660,7 @@ async function main() {
   evidence.hubListenPolicy = "127.0.0.1:5445 (loopback; frozen policy intact)";
 
   // --- 1. compose up ---
+  prepareDrillProxySecret();
   if (composeUp || !existsSync(join(REPO, "data", "orbit-drill"))) {
     sh(`docker compose -f ${COMPOSE} up -d --build`);
     stackStarted = true;
