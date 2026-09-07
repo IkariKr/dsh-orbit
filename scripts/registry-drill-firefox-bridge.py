@@ -162,8 +162,12 @@ def run(args: argparse.Namespace) -> int:
         # URL credentials exercise the real browser Basic Auth path without
         # logging or storing the password in any checkpoint.
         gateway = bindings["gatewayUrl"]
-        log("navigating-gateway")
+        log("navigating-gateway-authenticated")
         driver.get(gateway.replace("https://", "https://operator:drill-password@", 1) + "/")
+        # Firefox rejects page fetches while the document URL retains userinfo.
+        # Navigate to the same origin without userinfo after the browser has
+        # cached the real Basic Auth challenge response.
+        driver.get(gateway + "/")
         log(f"gateway-loaded:title={driver.title!r}:url={driver.current_url!r}")
         body_text = driver.find_element(By.TAG_NAME, "body").text.strip().replace("\\n", " ")[:160]
         log(f"gateway-body-prefix:{body_text!r}")
