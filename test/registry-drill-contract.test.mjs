@@ -47,6 +47,7 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /driver\.get\(gateway \+ "\/"\)/);
   assert.match(source, /if stop_path\.exists\(\):/);
   assert.match(source, /wait_for_node_ids\(driver, node_ids, stop_path\)/);
+  assert.match(source, /return True/);
   assert.doesNotMatch(source, /plaintext.*write_text|token.*write_text/i);
   assert.doesNotMatch(source, /accept_insecure_certs\s*=\s*True/);
   assert.doesNotMatch(source, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);

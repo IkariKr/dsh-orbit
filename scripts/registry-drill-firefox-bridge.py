@@ -119,7 +119,7 @@ def wait_for_node_ids(driver, expected: list[str], stop_path: Path) -> bool:
             if element.text.strip()
         }
         if all(node_id in ids for node_id in expected):
-            return
+            return True
         time.sleep(POLL_SECONDS)
     raise RuntimeError("current-run node IDs did not appear in the Nodes list before timeout")
 
