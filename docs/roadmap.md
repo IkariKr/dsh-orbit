@@ -37,16 +37,19 @@ Explicitly excluded from 0.3: inbound connection acceptance for NAT-restricted d
 
 ## 0.4: endpoint selector
 
-v0.4 remains limited to **server-reachable** registered nodes. The proposed construction contract is [RFC-0010](rfc/0010-node-endpoint-and-routing.md), [RFC-0011](rfc/0011-browser-node-selection.md), and the [multistage SOP](sop/v0.4-endpoint-selector-multistage-sop.md). Construction begins only after architecture review accepts them.
+Implemented in `v0.4.0-rc.1`:
 
 - one familiar selector entry point for multiple registered DSH nodes;
-- explicit node selection by navigation to a deterministic per-node route authority under the Orbit wildcard route domain;
+- explicit node selection by navigation to a deterministic per-node route authority under the Orbit wildcard route domain (`n-<nodeId>.<routeDomain>`);
 - one operator-approved route target per node, with Hub-derived reachability;
 - transparent HTTP and WebSocket routing to the selected node without DSH path-prefix rewriting;
-- node status, compatibility, and capability display;
+- deterministic 5-condition node eligibility (`state=active`, `authenticated=ok`, `dshHealthy=ok`, `orbitCompatible=pass`, `reachable=ok`);
+- cryptographic hop-by-hop `ORBIT-ROUTE-V1` request signing with per-node Ed25519 Hub route identities and restart-safe rotation overlap;
+- strict host-only cookie isolation preventing cross-node session pollution;
 - fail-closed target preservation: a failed node route never automatically falls back to another node.
 
-DSH-specific authentication remains behind the node-local compatibility seam. The Hub selector/router must not freeze DSH cookie names, launch-token details, private RPC inventory, or frontend implementation.
+> **Reverse-connected nodes are not part of v0.4. They remain a v0.5 scope.**
+> v0.4 routes exclusively to server-reachable node endpoints.
 
 ## 0.5: reverse-connected nodes
 
