@@ -106,9 +106,11 @@ def browser_text(driver, locator: tuple[str, str]) -> str:
     return driver.find_element(*locator).text.strip()
 
 
-def wait_for_node_ids(driver, expected: list[str]) -> None:
+def wait_for_node_ids(driver, expected: list[str], stop_path: Path) -> bool:
     deadline = time.monotonic() + WAIT_SECONDS
     while time.monotonic() < deadline:
+        if stop_path.exists():
+            return False
         driver.find_element(By.ID, "nav-nodes").click()
         time.sleep(0.25)
         ids = {
@@ -200,7 +202,10 @@ def run(args: argparse.Namespace) -> int:
 
         node_binding_path = Path(args.node_binding_path)
         stop_path = Path(args.stop_path)
-        wait_for(wait, lambda _driver: node_binding_path.exists())
+        while not node_binding_path.exists():
+            if stop_path.exists():
+                return 0
+            time.sleep(POLL_SECONDS)
         node_binding = read_json(node_binding_path)
         if node_binding.get("runId") != bindings.get("runId") or node_binding.get("commit") != bindings.get("commit"):
             raise RuntimeError("node binding does not match browser run")
@@ -210,7 +215,8 @@ def run(args: argparse.Namespace) -> int:
 
         driver.find_element(By.ID, "nav-nodes").click()
         wait_for(wait, EC.visibility_of_element_located((By.ID, "nodes-view")))
-        wait_for_node_ids(driver, node_ids)
+        if not wait_for_node_ids(driver, node_ids, stop_path):
+            return 0
         node_elements = driver.find_elements(By.CSS_SELECTOR, ".node-id")
         visible_ids = {element.text.strip() for element in node_elements}
         if not set(node_ids).issubset(visible_ids):
