@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const DRIVER = new URL("../scripts/registry-drill.mjs", import.meta.url);
+const BRIDGE = new URL("../scripts/registry-drill-firefox-bridge.py", import.meta.url);
 
 test("mounted drill requires trusted browser evidence and real compatibility reports", async () => {
   const source = await readFile(DRIVER, "utf8");
@@ -19,6 +20,10 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /resolveOpenSsl\(\)/);
   assert.match(source, /DSH_ORBIT_OPENSSL_BIN/);
   assert.match(source, /checkpoint\.leafFingerprint/);
+  assert.match(source, /runner-owned-firefox-selenium/);
+  assert.match(source, /DSH_ORBIT_BROWSER_CHALLENGE/);
+  assert.match(source, /BROWSER_NODE_BINDING_PATH/);
+  assert.match(source, /browserBridgeProcess/);
   assert.match(source, /nodeIds: \[aNodeId, bNodeId\]/);
   assert.match(source, /runVerificationSequence\(/);
   assert.match(source, /createCompatibilityReport\(/);
@@ -26,6 +31,17 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /aging reset healed A without heartbeat/);
   assert.doesNotMatch(source, /Object\.fromEntries\(/);
   assert.doesNotMatch(source, /rejectUnauthorized:\s*false/);
+});
+
+test("runner-owned Firefox bridge requires trusted browser settings and secret-free checkpoints", async () => {
+  const source = await readFile(BRIDGE, "utf8");
+  assert.match(source, /accept_insecure_certs = False/);
+  assert.match(source, /security\.enterprise_roots\.enabled/);
+  assert.match(source, /runner-owned-firefox-selenium/);
+  assert.match(source, /data-plaintext-once/);
+  assert.doesNotMatch(source, /plaintext.*write_text|token.*write_text/i);
+  assert.doesNotMatch(source, /accept_insecure_certs\s*=\s*True/);
+  assert.doesNotMatch(source, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);
 });
 
 test("mounted drill keeps the RFC production thresholds explicit", async () => {

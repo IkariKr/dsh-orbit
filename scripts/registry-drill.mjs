@@ -12,8 +12,8 @@
 //   node scripts/registry-drill.mjs [--compose-up] [--wait-for-browser] [--keep]
 // Prints a JSON evidence record and writes data/drill-evidence.json.
 
-import { randomUUID } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -50,7 +50,12 @@ const BROWSER_BOOTSTRAP_CHECKPOINT_PATH = join(
 );
 const BROWSER_CHECKPOINT_PATH = join(REPO, "data", "orbit-drill", "browser-checkpoint.json");
 const BROWSER_BINDINGS_PATH = join(REPO, "data", "orbit-drill", "browser-checkpoint-bindings.json");
+const BROWSER_NODE_BINDING_PATH = join(REPO, "data", "orbit-drill", "browser-node-binding.json");
+const BROWSER_STOP_PATH = join(REPO, "data", "orbit-drill", "browser-stop");
+const BROWSER_BRIDGE_PATH = join(REPO, "scripts", "registry-drill-firefox-bridge.py");
 const RUN_ID = randomUUID();
+const BROWSER_CHALLENGE = randomUUID();
+let browserBridgeProcess = null;
 let resolvedOpenSsl = null;
 
 const evidence = {
@@ -224,6 +229,13 @@ function readCheckpoint(path, label) {
 }
 
 function validateBrowserBindings(checkpoint, label) {
+  if (checkpoint.browserProducer !== "runner-owned-firefox-selenium") {
+    throw new Error(`${label} must be produced by runner-owned Firefox bridge`);
+  }
+  const expectedChallengeDigest = createHash("sha256").update(BROWSER_CHALLENGE).digest("hex");
+  if (checkpoint.challengeDigest !== expectedChallengeDigest) {
+    throw new Error(`${label} challenge binding mismatch`);
+  }
   const bindings = [
     ["runId", checkpoint.runId, RUN_ID],
     ["commit", checkpoint.commit, REVISION],
@@ -241,6 +253,9 @@ function validateBrowserBindings(checkpoint, label) {
 
 async function waitForCheckpoint(path, label, { attempts = 1800, intervalMs = 1000 } = {}) {
   return waitFor(label, async () => {
+    if (browserBridgeProcess && browserBridgeProcess.exitCode !== null && browserBridgeProcess.exitCode !== 0) {
+      throw new Error(`runner-owned Firefox bridge exited ${browserBridgeProcess.exitCode}`);
+    }
     if (!existsSync(path)) return false;
     try {
       return JSON.parse(readFileSync(path, "utf8"));
@@ -310,6 +325,55 @@ async function requireBrowserCheckpoint({ wait = false, nodeIds = [] } = {}) {
     leafFingerprint: evidence.tls.leafFingerprint,
     nodeIds: [...checkpoint.nodeIds],
   };
+}
+
+function browserBridgeArgs() {
+  return [
+    "--bindings-path", BROWSER_BINDINGS_PATH,
+    "--ca-path", DRILL_CA_PATH,
+    "--bootstrap-path", BROWSER_BOOTSTRAP_CHECKPOINT_PATH,
+    "--lifecycle-path", BROWSER_CHECKPOINT_PATH,
+    "--node-binding-path", BROWSER_NODE_BINDING_PATH,
+    "--stop-path", BROWSER_STOP_PATH,
+  ];
+}
+
+function startBrowserBridge() {
+  if (!existsSync(BROWSER_BRIDGE_PATH)) {
+    throw new Error(`runner-owned Firefox bridge missing: ${BROWSER_BRIDGE_PATH}`);
+  }
+  const python = process.env.DSH_ORBIT_PYTHON ?? "python";
+  browserBridgeProcess = spawn(python, [BROWSER_BRIDGE_PATH, ...browserBridgeArgs()], {
+    cwd: REPO,
+    env: {
+      ...process.env,
+      DSH_ORBIT_BROWSER_CHALLENGE: BROWSER_CHALLENGE,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let stderr = "";
+  browserBridgeProcess.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+  browserBridgeProcess.on("exit", (code, signal) => {
+    evidence.browserBridgeExit = { code, signal, error: code === 0 ? null : stderr.trim().slice(0, 500) };
+  });
+  evidence.browserBridge = {
+    producer: "runner-owned-firefox-selenium",
+    challengeDigest: createHash("sha256").update(BROWSER_CHALLENGE).digest("hex"),
+    python,
+    startedAt: new Date().toISOString(),
+  };
+}
+
+async function stopBrowserBridge() {
+  if (!browserBridgeProcess) return;
+  writeFileSync(BROWSER_STOP_PATH, "stop\n", { encoding: "utf8", mode: 0o640 });
+  await waitFor("Firefox bridge exit", async () => browserBridgeProcess.exitCode !== null, { attempts: 60, intervalMs: 500 });
+  if (browserBridgeProcess.exitCode !== 0) {
+    throw new Error(`runner-owned Firefox bridge exited ${browserBridgeProcess.exitCode}`);
+  }
+  browserBridgeProcess = null;
+  rmSync(BROWSER_STOP_PATH, { force: true });
 }
 
 function file(command, args, { expect = 0 } = {}) {
@@ -511,12 +575,19 @@ async function main() {
   requireCleanCandidateWorktree();
   rmSync(BROWSER_BOOTSTRAP_CHECKPOINT_PATH, { force: true });
   rmSync(BROWSER_CHECKPOINT_PATH, { force: true });
+  rmSync(BROWSER_NODE_BINDING_PATH, { force: true });
+  rmSync(BROWSER_STOP_PATH, { force: true });
   ensureDrillCertificate();
   const composeUp = args.includes("--compose-up");
   const waitForBrowser = args.includes("--wait-for-browser");
   const keep = args.includes("--keep");
   let stackStarted = false;
   runCleanup = async () => {
+    try {
+      await stopBrowserBridge();
+    } catch (error) {
+      console.error(`drill cleanup: browser bridge: ${error.message}`);
+    }
     if (keep) return;
     await stopNode("dsh-a", "/data/dsh-a", { strict: false });
     await stopNode("dsh-b", "/data/dsh-b", { strict: false });
@@ -590,6 +661,8 @@ async function main() {
   evidence.steps.push("caddy: real caddy validate -> Valid configuration; TLS certificate mounted");
   await waitFor("hub http", async () => (await hubGetHealth()) === 200);
   await waitFor("gateway tls", async () => (await gatewayFetch("/")).status === 200);
+
+  if (waitForBrowser) startBrowserBridge();
 
   // The mounted lifecycle is not final evidence until the real browser
   // walkthrough has proved trusted HTTPS, authentication, session bootstrap,
@@ -740,6 +813,13 @@ async function main() {
   }
   const aNodeId = await deployNode("dsh-a", "/data/dsh-a", "https://127.0.0.1:18443", 18443);
   const bNodeId = await deployNode("dsh-b", "/data/dsh-b", "https://127.0.0.1:18444", 18444);
+  if (waitForBrowser) {
+    writeFileSync(
+      BROWSER_NODE_BINDING_PATH,
+      JSON.stringify({ runId: RUN_ID, commit: REVISION, nodeIds: [aNodeId, bNodeId], recordedAt: new Date().toISOString() }, null, 2) + "\n",
+      { encoding: "utf8", mode: 0o640 },
+    );
+  }
   evidence.aNodeId = aNodeId;
   evidence.bNodeId = bNodeId;
   evidence.steps.push(`nodes: A=${aNodeId} B=${bNodeId} enrolled, running, reports uploaded`);
