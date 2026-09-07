@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage7-delete-bookmark-reenroll",
+  "candidateCommit": "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582",
+  "executedAt": "2026-09-07T02:33:20.000Z",
+  "nodeId": "node_cf75069a705898a43da2a7caedf455a8",
+  "preDelete": {
+    "state": "active",
+    "routeKeyCount": 1,
+    "routeKeyId": "7b852970016401c6db7448e8632c579a",
+    "routeKeyState": "active"
+  },
+  "deletion": {
+    "executedAt": "2026-09-07T02:33:40.000Z",
+    "actor": "operator",
+    "reason": "stage7-lifecycle-test",
+    "resultingState": "tombstoned",
+    "routeKeyCascadeRevoked": true,
+    "keyStateAfterDelete": "revoked"
+  },
+  "staleBookmarkProbe": {
+    "executedAt": "2026-09-07T02:34:10.000Z",
+    "targetUrl": "https://n-cf75069a705898a43da2a7caedf455a8.stage6.localhost:51558/",
+    "responseStatus": 404,
+    "errorCode": "node-tombstoned",
+    "failClosed": true
+  },
+  "reenrollment": {
+    "executedAt": "2026-09-07T02:35:50.000Z",
+    "enrollmentTokenMinted": true,
+    "enrollmentPurpose": "reenroll",
+    "boundNodeId": "node_cf75069a705898a43da2a7caedf455a8",
+    "enrollmentResponseStatus": 200,
+    "restoredNodeId": "node_cf75069a705898a43da2a7caedf455a8",
+    "nodeIdentityPreserved": true,
+    "freshKeyId": "5adbd18a44705a0a7d0ce8c163d56efb",
+    "freshKeyState": "active",
+    "oldKeyIdReused": false,
+    "deletedEraHistoricalKeyRevoked": true
+  },
+  "result": "PASS"
+}

@@ -1,0 +1,2948 @@
+{
+  "stage": "7",
+  "runId": "stage7-20260907020800145-37232",
+  "testedCommit": "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582",
+  "branch": "chore/v0.4-stage7-failure-hardening",
+  "cleanWorktreeBefore": true,
+  "nodeVersion": "v25.9.0",
+  "schemaVersion": 5,
+  "thresholds": {
+    "heartbeatCadenceSeconds": 60,
+    "staleMissedBeats": 3,
+    "lostAfterHours": 24,
+    "reportRetentionDays": 90,
+    "eventRetentionDays": 90,
+    "auditRetentionDays": 365
+  },
+  "migration": {
+    "v1": {
+      "before": {
+        "schemaVersion": 1,
+        "fileSha256": "60760a0b00b900fc37cc9f16442d74153dd77193bd17ce3c5cb96ae925876542"
+      },
+      "after": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "wal",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 0,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 1,
+          "browser_sessions": 0,
+          "route_targets": 0,
+          "hub_route_keys": 0
+        },
+        "stateDigest": "0116a42f6713ee562ee4508b6592de2c863e9f0b246bdcde9545ccf62f838114"
+      },
+      "integrityCheck": "ok",
+      "idempotentInspection": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "wal",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 0,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 1,
+          "browser_sessions": 0,
+          "route_targets": 0,
+          "hub_route_keys": 0
+        },
+        "stateDigest": "0116a42f6713ee562ee4508b6592de2c863e9f0b246bdcde9545ccf62f838114"
+      },
+      "preservedState": true,
+      "idempotent": true,
+      "noOpCurrent": false,
+      "routeTargetsPresent": true,
+      "hubRouteKeysPresent": true,
+      "healthSemantics": "registryContact=fresh, reachable=unknown, capabilities derived from stored evidence"
+    },
+    "v2": {
+      "before": {
+        "schemaVersion": 2,
+        "fileSha256": "083ffc2f9bcba8e785621ac75c70913760dfc9d6cdbeea1411b70d846b851c8d"
+      },
+      "after": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "wal",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 0,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 1,
+          "browser_sessions": 0,
+          "route_targets": 0,
+          "hub_route_keys": 0
+        },
+        "stateDigest": "1a089127a04ace1e8e8cc9f05550933d6376a330cbe2b4a28b9acb41107646b9"
+      },
+      "integrityCheck": "ok",
+      "idempotentInspection": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "wal",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 0,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 1,
+          "browser_sessions": 0,
+          "route_targets": 0,
+          "hub_route_keys": 0
+        },
+        "stateDigest": "1a089127a04ace1e8e8cc9f05550933d6376a330cbe2b4a28b9acb41107646b9"
+      },
+      "preservedState": true,
+      "idempotent": true,
+      "noOpCurrent": false,
+      "routeTargetsPresent": true,
+      "hubRouteKeysPresent": true,
+      "healthSemantics": "registryContact=fresh, reachable=unknown, capabilities derived from stored evidence"
+    },
+    "v3": {
+      "before": {
+        "schemaVersion": 3,
+        "fileSha256": "9a7c816369433f89a4affaca62e363717f022522c3872a426845d24b3f4596dc"
+      },
+      "after": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "wal",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 0,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 1,
+          "browser_sessions": 0,
+          "route_targets": 0,
+          "hub_route_keys": 0
+        },
+        "stateDigest": "0f18fd792f88409bc835f2bf1ad522684643361438048189b26d0a3783c23ab2"
+      },
+      "integrityCheck": "ok",
+      "idempotentInspection": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "wal",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 0,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 1,
+          "browser_sessions": 0,
+          "route_targets": 0,
+          "hub_route_keys": 0
+        },
+        "stateDigest": "0f18fd792f88409bc835f2bf1ad522684643361438048189b26d0a3783c23ab2"
+      },
+      "preservedState": true,
+      "idempotent": true,
+      "noOpCurrent": false,
+      "routeTargetsPresent": true,
+      "hubRouteKeysPresent": true,
+      "healthSemantics": "registryContact=fresh, reachable=unknown, capabilities derived from stored evidence"
+    },
+    "v4": {
+      "before": {
+        "schemaVersion": 4,
+        "fileSha256": "dc2a674ceaeb58f21ae686022b1bdaa2f3069c45831d24848060368d3720a3a6"
+      },
+      "after": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "wal",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 0,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 1,
+          "browser_sessions": 0,
+          "route_targets": 0,
+          "hub_route_keys": 0
+        },
+        "stateDigest": "52f32e8bdf1f32d88c1cfc44c698ab73252d25db1fe3f5205565ba24d9fccbd8"
+      },
+      "integrityCheck": "ok",
+      "idempotentInspection": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "wal",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 0,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 1,
+          "browser_sessions": 0,
+          "route_targets": 0,
+          "hub_route_keys": 0
+        },
+        "stateDigest": "52f32e8bdf1f32d88c1cfc44c698ab73252d25db1fe3f5205565ba24d9fccbd8"
+      },
+      "preservedState": true,
+      "idempotent": true,
+      "noOpCurrent": true,
+      "routeTargetsPresent": true,
+      "hubRouteKeysPresent": true,
+      "healthSemantics": "registryContact=fresh, reachable=unknown, capabilities derived from stored evidence"
+    }
+  },
+  "backupRestore": {
+    "method": "sqlite-vacuum-into",
+    "source": {
+      "schemaVersion": 5,
+      "schemaShape": {
+        "tables": {
+          "audit": [
+            "action",
+            "actor",
+            "at",
+            "detail_json",
+            "id"
+          ],
+          "browser_sessions": [
+            "created_at",
+            "csrf_token",
+            "expires_at",
+            "expiry_audited_at",
+            "idle_until",
+            "operator_principal",
+            "revoked_at",
+            "session_id"
+          ],
+          "enrollment_results": [
+            "created_at",
+            "idempotency_key",
+            "kind",
+            "node_id",
+            "request_id",
+            "result_json",
+            "token_digest"
+          ],
+          "enrollment_tokens": [
+            "bound_node_id",
+            "consumed_at",
+            "consumed_by",
+            "created_at",
+            "expires_at",
+            "purpose",
+            "token_digest",
+            "token_id"
+          ],
+          "events": [
+            "at",
+            "dimension",
+            "from_value",
+            "id",
+            "node_id",
+            "source",
+            "to_value"
+          ],
+          "hub_route_keys": [
+            "activated_at",
+            "created_at",
+            "key_id",
+            "node_id",
+            "private_key",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "node_keys": [
+            "created_at",
+            "key_id",
+            "node_id",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "nodes": [
+            "alert_flags",
+            "authenticated",
+            "capabilities",
+            "capabilities_stale",
+            "compatibility_profile",
+            "dsh_healthy",
+            "dsh_version",
+            "last_heartbeat_at",
+            "last_seen",
+            "last_seen_source",
+            "minted_at",
+            "node_id",
+            "orbit_compatible",
+            "orbit_revision",
+            "orbit_version",
+            "reachable",
+            "registry_contact",
+            "state",
+            "tombstone_reason",
+            "tombstoned_at"
+          ],
+          "reports": [
+            "checks_json",
+            "compatibility",
+            "compatibility_profile",
+            "dsh_version",
+            "id",
+            "identity_json",
+            "node_id",
+            "orbit_revision",
+            "orbit_version",
+            "report_json",
+            "uploaded_at"
+          ],
+          "route_targets": [
+            "created_at",
+            "node_id",
+            "route_target_origin",
+            "updated_at"
+          ],
+          "seen_nonces": [
+            "created_at",
+            "node_id",
+            "nonce"
+          ]
+        },
+        "indexes": [
+          "idx_audit_at",
+          "idx_events_node_at",
+          "idx_reports_node_uploaded",
+          "idx_seen_nonces_created_at"
+        ]
+      },
+      "journalMode": "wal",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "rowCounts": {
+        "nodes": 1,
+        "node_keys": 1,
+        "enrollment_tokens": 1,
+        "enrollment_results": 0,
+        "seen_nonces": 0,
+        "reports": 1,
+        "events": 1,
+        "audit": 2,
+        "browser_sessions": 0,
+        "route_targets": 1,
+        "hub_route_keys": 1
+      },
+      "stateDigest": "dba1def624ef440b5957095e3d36bb4ae24238a96da7cb7c86c70a6f41f199d5"
+    },
+    "backup": {
+      "schemaVersion": 5,
+      "schemaShape": {
+        "tables": {
+          "audit": [
+            "action",
+            "actor",
+            "at",
+            "detail_json",
+            "id"
+          ],
+          "browser_sessions": [
+            "created_at",
+            "csrf_token",
+            "expires_at",
+            "expiry_audited_at",
+            "idle_until",
+            "operator_principal",
+            "revoked_at",
+            "session_id"
+          ],
+          "enrollment_results": [
+            "created_at",
+            "idempotency_key",
+            "kind",
+            "node_id",
+            "request_id",
+            "result_json",
+            "token_digest"
+          ],
+          "enrollment_tokens": [
+            "bound_node_id",
+            "consumed_at",
+            "consumed_by",
+            "created_at",
+            "expires_at",
+            "purpose",
+            "token_digest",
+            "token_id"
+          ],
+          "events": [
+            "at",
+            "dimension",
+            "from_value",
+            "id",
+            "node_id",
+            "source",
+            "to_value"
+          ],
+          "hub_route_keys": [
+            "activated_at",
+            "created_at",
+            "key_id",
+            "node_id",
+            "private_key",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "node_keys": [
+            "created_at",
+            "key_id",
+            "node_id",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "nodes": [
+            "alert_flags",
+            "authenticated",
+            "capabilities",
+            "capabilities_stale",
+            "compatibility_profile",
+            "dsh_healthy",
+            "dsh_version",
+            "last_heartbeat_at",
+            "last_seen",
+            "last_seen_source",
+            "minted_at",
+            "node_id",
+            "orbit_compatible",
+            "orbit_revision",
+            "orbit_version",
+            "reachable",
+            "registry_contact",
+            "state",
+            "tombstone_reason",
+            "tombstoned_at"
+          ],
+          "reports": [
+            "checks_json",
+            "compatibility",
+            "compatibility_profile",
+            "dsh_version",
+            "id",
+            "identity_json",
+            "node_id",
+            "orbit_revision",
+            "orbit_version",
+            "report_json",
+            "uploaded_at"
+          ],
+          "route_targets": [
+            "created_at",
+            "node_id",
+            "route_target_origin",
+            "updated_at"
+          ],
+          "seen_nonces": [
+            "created_at",
+            "node_id",
+            "nonce"
+          ]
+        },
+        "indexes": [
+          "idx_audit_at",
+          "idx_events_node_at",
+          "idx_reports_node_uploaded",
+          "idx_seen_nonces_created_at"
+        ]
+      },
+      "journalMode": "delete",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "rowCounts": {
+        "nodes": 1,
+        "node_keys": 1,
+        "enrollment_tokens": 1,
+        "enrollment_results": 0,
+        "seen_nonces": 0,
+        "reports": 1,
+        "events": 1,
+        "audit": 2,
+        "browser_sessions": 0,
+        "route_targets": 1,
+        "hub_route_keys": 1
+      },
+      "stateDigest": "dba1def624ef440b5957095e3d36bb4ae24238a96da7cb7c86c70a6f41f199d5"
+    },
+    "mutation": {
+      "schemaVersion": 5,
+      "schemaShape": {
+        "tables": {
+          "audit": [
+            "action",
+            "actor",
+            "at",
+            "detail_json",
+            "id"
+          ],
+          "browser_sessions": [
+            "created_at",
+            "csrf_token",
+            "expires_at",
+            "expiry_audited_at",
+            "idle_until",
+            "operator_principal",
+            "revoked_at",
+            "session_id"
+          ],
+          "enrollment_results": [
+            "created_at",
+            "idempotency_key",
+            "kind",
+            "node_id",
+            "request_id",
+            "result_json",
+            "token_digest"
+          ],
+          "enrollment_tokens": [
+            "bound_node_id",
+            "consumed_at",
+            "consumed_by",
+            "created_at",
+            "expires_at",
+            "purpose",
+            "token_digest",
+            "token_id"
+          ],
+          "events": [
+            "at",
+            "dimension",
+            "from_value",
+            "id",
+            "node_id",
+            "source",
+            "to_value"
+          ],
+          "hub_route_keys": [
+            "activated_at",
+            "created_at",
+            "key_id",
+            "node_id",
+            "private_key",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "node_keys": [
+            "created_at",
+            "key_id",
+            "node_id",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "nodes": [
+            "alert_flags",
+            "authenticated",
+            "capabilities",
+            "capabilities_stale",
+            "compatibility_profile",
+            "dsh_healthy",
+            "dsh_version",
+            "last_heartbeat_at",
+            "last_seen",
+            "last_seen_source",
+            "minted_at",
+            "node_id",
+            "orbit_compatible",
+            "orbit_revision",
+            "orbit_version",
+            "reachable",
+            "registry_contact",
+            "state",
+            "tombstone_reason",
+            "tombstoned_at"
+          ],
+          "reports": [
+            "checks_json",
+            "compatibility",
+            "compatibility_profile",
+            "dsh_version",
+            "id",
+            "identity_json",
+            "node_id",
+            "orbit_revision",
+            "orbit_version",
+            "report_json",
+            "uploaded_at"
+          ],
+          "route_targets": [
+            "created_at",
+            "node_id",
+            "route_target_origin",
+            "updated_at"
+          ],
+          "seen_nonces": [
+            "created_at",
+            "node_id",
+            "nonce"
+          ]
+        },
+        "indexes": [
+          "idx_audit_at",
+          "idx_events_node_at",
+          "idx_reports_node_uploaded",
+          "idx_seen_nonces_created_at"
+        ]
+      },
+      "journalMode": "wal",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "rowCounts": {
+        "nodes": 1,
+        "node_keys": 1,
+        "enrollment_tokens": 1,
+        "enrollment_results": 0,
+        "seen_nonces": 0,
+        "reports": 1,
+        "events": 1,
+        "audit": 3,
+        "browser_sessions": 0,
+        "route_targets": 1,
+        "hub_route_keys": 1
+      },
+      "stateDigest": "e71810b812058a03b4d5e89039a029dff2545a365976f9c4068cbc02bacf80c2"
+    },
+    "mutationChangedState": true,
+    "restore": {
+      "method": "sqlite-standalone-atomic-restore",
+      "backupPath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\backup\\registry.db",
+      "targetPath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\fresh\\registry.db",
+      "quarantinePath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\fresh\\registry.db.pre-restore-37232-1788746880497",
+      "backup": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "delete",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 1,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 2,
+          "browser_sessions": 0,
+          "route_targets": 1,
+          "hub_route_keys": 1
+        },
+        "stateDigest": "dba1def624ef440b5957095e3d36bb4ae24238a96da7cb7c86c70a6f41f199d5"
+      },
+      "restored": {
+        "schemaVersion": 5,
+        "schemaShape": {
+          "tables": {
+            "audit": [
+              "action",
+              "actor",
+              "at",
+              "detail_json",
+              "id"
+            ],
+            "browser_sessions": [
+              "created_at",
+              "csrf_token",
+              "expires_at",
+              "expiry_audited_at",
+              "idle_until",
+              "operator_principal",
+              "revoked_at",
+              "session_id"
+            ],
+            "enrollment_results": [
+              "created_at",
+              "idempotency_key",
+              "kind",
+              "node_id",
+              "request_id",
+              "result_json",
+              "token_digest"
+            ],
+            "enrollment_tokens": [
+              "bound_node_id",
+              "consumed_at",
+              "consumed_by",
+              "created_at",
+              "expires_at",
+              "purpose",
+              "token_digest",
+              "token_id"
+            ],
+            "events": [
+              "at",
+              "dimension",
+              "from_value",
+              "id",
+              "node_id",
+              "source",
+              "to_value"
+            ],
+            "hub_route_keys": [
+              "activated_at",
+              "created_at",
+              "key_id",
+              "node_id",
+              "private_key",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "node_keys": [
+              "created_at",
+              "key_id",
+              "node_id",
+              "public_key",
+              "revocation_reason",
+              "revoke_after",
+              "revoked_at",
+              "state"
+            ],
+            "nodes": [
+              "alert_flags",
+              "authenticated",
+              "capabilities",
+              "capabilities_stale",
+              "compatibility_profile",
+              "dsh_healthy",
+              "dsh_version",
+              "last_heartbeat_at",
+              "last_seen",
+              "last_seen_source",
+              "minted_at",
+              "node_id",
+              "orbit_compatible",
+              "orbit_revision",
+              "orbit_version",
+              "reachable",
+              "registry_contact",
+              "state",
+              "tombstone_reason",
+              "tombstoned_at"
+            ],
+            "reports": [
+              "checks_json",
+              "compatibility",
+              "compatibility_profile",
+              "dsh_version",
+              "id",
+              "identity_json",
+              "node_id",
+              "orbit_revision",
+              "orbit_version",
+              "report_json",
+              "uploaded_at"
+            ],
+            "route_targets": [
+              "created_at",
+              "node_id",
+              "route_target_origin",
+              "updated_at"
+            ],
+            "seen_nonces": [
+              "created_at",
+              "node_id",
+              "nonce"
+            ]
+          },
+          "indexes": [
+            "idx_audit_at",
+            "idx_events_node_at",
+            "idx_reports_node_uploaded",
+            "idx_seen_nonces_created_at"
+          ]
+        },
+        "journalMode": "delete",
+        "integrityCheck": "ok",
+        "foreignKeyViolations": 0,
+        "rowCounts": {
+          "nodes": 1,
+          "node_keys": 1,
+          "enrollment_tokens": 1,
+          "enrollment_results": 0,
+          "seen_nonces": 0,
+          "reports": 1,
+          "events": 1,
+          "audit": 2,
+          "browser_sessions": 0,
+          "route_targets": 1,
+          "hub_route_keys": 1
+        },
+        "stateDigest": "dba1def624ef440b5957095e3d36bb4ae24238a96da7cb7c86c70a6f41f199d5"
+      },
+      "quarantinedSidecars": 0
+    },
+    "restoredState": {
+      "schemaVersion": 5,
+      "schemaShape": {
+        "tables": {
+          "audit": [
+            "action",
+            "actor",
+            "at",
+            "detail_json",
+            "id"
+          ],
+          "browser_sessions": [
+            "created_at",
+            "csrf_token",
+            "expires_at",
+            "expiry_audited_at",
+            "idle_until",
+            "operator_principal",
+            "revoked_at",
+            "session_id"
+          ],
+          "enrollment_results": [
+            "created_at",
+            "idempotency_key",
+            "kind",
+            "node_id",
+            "request_id",
+            "result_json",
+            "token_digest"
+          ],
+          "enrollment_tokens": [
+            "bound_node_id",
+            "consumed_at",
+            "consumed_by",
+            "created_at",
+            "expires_at",
+            "purpose",
+            "token_digest",
+            "token_id"
+          ],
+          "events": [
+            "at",
+            "dimension",
+            "from_value",
+            "id",
+            "node_id",
+            "source",
+            "to_value"
+          ],
+          "hub_route_keys": [
+            "activated_at",
+            "created_at",
+            "key_id",
+            "node_id",
+            "private_key",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "node_keys": [
+            "created_at",
+            "key_id",
+            "node_id",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "nodes": [
+            "alert_flags",
+            "authenticated",
+            "capabilities",
+            "capabilities_stale",
+            "compatibility_profile",
+            "dsh_healthy",
+            "dsh_version",
+            "last_heartbeat_at",
+            "last_seen",
+            "last_seen_source",
+            "minted_at",
+            "node_id",
+            "orbit_compatible",
+            "orbit_revision",
+            "orbit_version",
+            "reachable",
+            "registry_contact",
+            "state",
+            "tombstone_reason",
+            "tombstoned_at"
+          ],
+          "reports": [
+            "checks_json",
+            "compatibility",
+            "compatibility_profile",
+            "dsh_version",
+            "id",
+            "identity_json",
+            "node_id",
+            "orbit_revision",
+            "orbit_version",
+            "report_json",
+            "uploaded_at"
+          ],
+          "route_targets": [
+            "created_at",
+            "node_id",
+            "route_target_origin",
+            "updated_at"
+          ],
+          "seen_nonces": [
+            "created_at",
+            "node_id",
+            "nonce"
+          ]
+        },
+        "indexes": [
+          "idx_audit_at",
+          "idx_events_node_at",
+          "idx_reports_node_uploaded",
+          "idx_seen_nonces_created_at"
+        ]
+      },
+      "journalMode": "wal",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "rowCounts": {
+        "nodes": 1,
+        "node_keys": 1,
+        "enrollment_tokens": 1,
+        "enrollment_results": 0,
+        "seen_nonces": 0,
+        "reports": 1,
+        "events": 1,
+        "audit": 2,
+        "browser_sessions": 0,
+        "route_targets": 1,
+        "hub_route_keys": 1
+      },
+      "stateDigest": "dba1def624ef440b5957095e3d36bb4ae24238a96da7cb7c86c70a6f41f199d5"
+    },
+    "restoredBackupState": true,
+    "postBackupMutationAbsent": true,
+    "walSidecarsNotCopied": true,
+    "routeTargetPreserved": true,
+    "hubRouteKeyPreserved": true
+  },
+  "freshInstall": {
+    "emptyBeforeStartup": true,
+    "emptyState": {
+      "schemaVersion": 5,
+      "schemaShape": {
+        "tables": {
+          "audit": [
+            "action",
+            "actor",
+            "at",
+            "detail_json",
+            "id"
+          ],
+          "browser_sessions": [
+            "created_at",
+            "csrf_token",
+            "expires_at",
+            "expiry_audited_at",
+            "idle_until",
+            "operator_principal",
+            "revoked_at",
+            "session_id"
+          ],
+          "enrollment_results": [
+            "created_at",
+            "idempotency_key",
+            "kind",
+            "node_id",
+            "request_id",
+            "result_json",
+            "token_digest"
+          ],
+          "enrollment_tokens": [
+            "bound_node_id",
+            "consumed_at",
+            "consumed_by",
+            "created_at",
+            "expires_at",
+            "purpose",
+            "token_digest",
+            "token_id"
+          ],
+          "events": [
+            "at",
+            "dimension",
+            "from_value",
+            "id",
+            "node_id",
+            "source",
+            "to_value"
+          ],
+          "hub_route_keys": [
+            "activated_at",
+            "created_at",
+            "key_id",
+            "node_id",
+            "private_key",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "node_keys": [
+            "created_at",
+            "key_id",
+            "node_id",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "nodes": [
+            "alert_flags",
+            "authenticated",
+            "capabilities",
+            "capabilities_stale",
+            "compatibility_profile",
+            "dsh_healthy",
+            "dsh_version",
+            "last_heartbeat_at",
+            "last_seen",
+            "last_seen_source",
+            "minted_at",
+            "node_id",
+            "orbit_compatible",
+            "orbit_revision",
+            "orbit_version",
+            "reachable",
+            "registry_contact",
+            "state",
+            "tombstone_reason",
+            "tombstoned_at"
+          ],
+          "reports": [
+            "checks_json",
+            "compatibility",
+            "compatibility_profile",
+            "dsh_version",
+            "id",
+            "identity_json",
+            "node_id",
+            "orbit_revision",
+            "orbit_version",
+            "report_json",
+            "uploaded_at"
+          ],
+          "route_targets": [
+            "created_at",
+            "node_id",
+            "route_target_origin",
+            "updated_at"
+          ],
+          "seen_nonces": [
+            "created_at",
+            "node_id",
+            "nonce"
+          ]
+        },
+        "indexes": [
+          "idx_audit_at",
+          "idx_events_node_at",
+          "idx_reports_node_uploaded",
+          "idx_seen_nonces_created_at"
+        ]
+      },
+      "journalMode": "wal",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "rowCounts": {
+        "nodes": 0,
+        "node_keys": 0,
+        "enrollment_tokens": 0,
+        "enrollment_results": 0,
+        "seen_nonces": 0,
+        "reports": 0,
+        "events": 0,
+        "audit": 0,
+        "browser_sessions": 0,
+        "route_targets": 0,
+        "hub_route_keys": 0
+      },
+      "stateDigest": "6ebf8fed7874f246c3921cbf7b52f2d07a761705b7e1c4115da969bc61b428e8"
+    },
+    "maintenance": {
+      "invoked": true,
+      "integrityCheck": "ok",
+      "stateDigest": "6ebf8fed7874f246c3921cbf7b52f2d07a761705b7e1c4115da969bc61b428e8",
+      "auditRowsBefore": 0,
+      "auditRowsAfter": 0
+    },
+    "schemaAfterToken": {
+      "schemaVersion": 5,
+      "schemaShape": {
+        "tables": {
+          "audit": [
+            "action",
+            "actor",
+            "at",
+            "detail_json",
+            "id"
+          ],
+          "browser_sessions": [
+            "created_at",
+            "csrf_token",
+            "expires_at",
+            "expiry_audited_at",
+            "idle_until",
+            "operator_principal",
+            "revoked_at",
+            "session_id"
+          ],
+          "enrollment_results": [
+            "created_at",
+            "idempotency_key",
+            "kind",
+            "node_id",
+            "request_id",
+            "result_json",
+            "token_digest"
+          ],
+          "enrollment_tokens": [
+            "bound_node_id",
+            "consumed_at",
+            "consumed_by",
+            "created_at",
+            "expires_at",
+            "purpose",
+            "token_digest",
+            "token_id"
+          ],
+          "events": [
+            "at",
+            "dimension",
+            "from_value",
+            "id",
+            "node_id",
+            "source",
+            "to_value"
+          ],
+          "hub_route_keys": [
+            "activated_at",
+            "created_at",
+            "key_id",
+            "node_id",
+            "private_key",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "node_keys": [
+            "created_at",
+            "key_id",
+            "node_id",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "nodes": [
+            "alert_flags",
+            "authenticated",
+            "capabilities",
+            "capabilities_stale",
+            "compatibility_profile",
+            "dsh_healthy",
+            "dsh_version",
+            "last_heartbeat_at",
+            "last_seen",
+            "last_seen_source",
+            "minted_at",
+            "node_id",
+            "orbit_compatible",
+            "orbit_revision",
+            "orbit_version",
+            "reachable",
+            "registry_contact",
+            "state",
+            "tombstone_reason",
+            "tombstoned_at"
+          ],
+          "reports": [
+            "checks_json",
+            "compatibility",
+            "compatibility_profile",
+            "dsh_version",
+            "id",
+            "identity_json",
+            "node_id",
+            "orbit_revision",
+            "orbit_version",
+            "report_json",
+            "uploaded_at"
+          ],
+          "route_targets": [
+            "created_at",
+            "node_id",
+            "route_target_origin",
+            "updated_at"
+          ],
+          "seen_nonces": [
+            "created_at",
+            "node_id",
+            "nonce"
+          ]
+        },
+        "indexes": [
+          "idx_audit_at",
+          "idx_events_node_at",
+          "idx_reports_node_uploaded",
+          "idx_seen_nonces_created_at"
+        ]
+      },
+      "journalMode": "wal",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "rowCounts": {
+        "nodes": 0,
+        "node_keys": 0,
+        "enrollment_tokens": 1,
+        "enrollment_results": 0,
+        "seen_nonces": 0,
+        "reports": 0,
+        "events": 0,
+        "audit": 1,
+        "browser_sessions": 0,
+        "route_targets": 0,
+        "hub_route_keys": 0
+      },
+      "stateDigest": "0187f6793dad4181845dcd3d63996de69e83025623eb55b915de45a57593a107"
+    },
+    "plaintextTokenReturnedOnce": true
+  },
+  "cleanup": {
+    "isolatedRoot": "removed",
+    "removed": true
+  },
+  "processBoundary": {
+    "hubRestart": {
+      "hubAClosed": true,
+      "hubBReady": true,
+      "sameNodeId": true,
+      "sameKeyId": true,
+      "reportPreserved": true,
+      "healthPreserved": true,
+      "auditPreserved": true,
+      "browserSessionPreserved": true,
+      "persistedCountsPreserved": true,
+      "dbPath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\process-boundary\\process\\registry.db",
+      "statePath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\process-boundary\\process\\node.json",
+      "hubAProcessId": 60728,
+      "hubBProcessId": 5728
+    },
+    "rotationRecovery": {
+      "upstreamCommitted": true,
+      "pendingPersistedBeforeKill": true,
+      "childKilled": true,
+      "samePendingKeyPromoted": true,
+      "noThirdKey": true,
+      "noOrphanNode": true,
+      "heartbeatFresh": true,
+      "processId": 55120,
+      "dbPath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\process-boundary\\process\\registry.db",
+      "statePath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\process-boundary\\process\\node.json"
+    },
+    "reenrollmentRecovery": {
+      "upstreamCommitted": true,
+      "pendingPersistedBeforeKill": true,
+      "childKilled": true,
+      "exactReplaySucceeded": true,
+      "sameNodeId": true,
+      "pendingCleared": true,
+      "pendingKeyReused": true,
+      "noOrphanNode": true,
+      "processId": 23104,
+      "dbPath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\process-boundary\\process\\registry.db",
+      "statePath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\process-boundary\\process\\node.json"
+    },
+    "longDowntime": {
+      "lostAfterRestart": true,
+      "contactLostAlert": true,
+      "reportDidNotHealContact": true,
+      "authenticatedHeartbeatRestoredFresh": true,
+      "identityPreserved": true,
+      "thresholdsUnchanged": true,
+      "clockIsolated": true,
+      "dbPath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\process-boundary\\process\\registry.db",
+      "statePath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\process-boundary\\process\\node.json",
+      "clockPath": "C:\\Users\\41382\\AppData\\Local\\Temp\\orbit-stage7-tgOsXh\\process-boundary\\process\\aging-clock.json"
+    },
+    "cleanup": true
+  },
+  "failureModes": {
+    "futureSchemaRejected": true,
+    "corruptDatabaseRejected": true,
+    "businessPageCorruptionRejected": true,
+    "foreignKeyViolationRejected": true,
+    "routeTargetCorruptionRejected": true,
+    "hubRouteKeyCorruptionRejected": true,
+    "futureDatabaseUnchanged": true,
+    "corruptDatabaseUnchanged": true,
+    "businessPageDatabaseUnchanged": true,
+    "foreignKeyDatabaseUnchanged": true,
+    "noRebuildOrOverwrite": true
+  },
+  "retention": {
+    "before": {
+      "schemaVersion": 5,
+      "schemaShape": {
+        "tables": {
+          "audit": [
+            "action",
+            "actor",
+            "at",
+            "detail_json",
+            "id"
+          ],
+          "browser_sessions": [
+            "created_at",
+            "csrf_token",
+            "expires_at",
+            "expiry_audited_at",
+            "idle_until",
+            "operator_principal",
+            "revoked_at",
+            "session_id"
+          ],
+          "enrollment_results": [
+            "created_at",
+            "idempotency_key",
+            "kind",
+            "node_id",
+            "request_id",
+            "result_json",
+            "token_digest"
+          ],
+          "enrollment_tokens": [
+            "bound_node_id",
+            "consumed_at",
+            "consumed_by",
+            "created_at",
+            "expires_at",
+            "purpose",
+            "token_digest",
+            "token_id"
+          ],
+          "events": [
+            "at",
+            "dimension",
+            "from_value",
+            "id",
+            "node_id",
+            "source",
+            "to_value"
+          ],
+          "hub_route_keys": [
+            "activated_at",
+            "created_at",
+            "key_id",
+            "node_id",
+            "private_key",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "node_keys": [
+            "created_at",
+            "key_id",
+            "node_id",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "nodes": [
+            "alert_flags",
+            "authenticated",
+            "capabilities",
+            "capabilities_stale",
+            "compatibility_profile",
+            "dsh_healthy",
+            "dsh_version",
+            "last_heartbeat_at",
+            "last_seen",
+            "last_seen_source",
+            "minted_at",
+            "node_id",
+            "orbit_compatible",
+            "orbit_revision",
+            "orbit_version",
+            "reachable",
+            "registry_contact",
+            "state",
+            "tombstone_reason",
+            "tombstoned_at"
+          ],
+          "reports": [
+            "checks_json",
+            "compatibility",
+            "compatibility_profile",
+            "dsh_version",
+            "id",
+            "identity_json",
+            "node_id",
+            "orbit_revision",
+            "orbit_version",
+            "report_json",
+            "uploaded_at"
+          ],
+          "route_targets": [
+            "created_at",
+            "node_id",
+            "route_target_origin",
+            "updated_at"
+          ],
+          "seen_nonces": [
+            "created_at",
+            "node_id",
+            "nonce"
+          ]
+        },
+        "indexes": [
+          "idx_audit_at",
+          "idx_events_node_at",
+          "idx_reports_node_uploaded",
+          "idx_seen_nonces_created_at"
+        ]
+      },
+      "journalMode": "wal",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "rowCounts": {
+        "nodes": 1,
+        "node_keys": 1,
+        "enrollment_tokens": 0,
+        "enrollment_results": 0,
+        "seen_nonces": 0,
+        "reports": 1,
+        "events": 3,
+        "audit": 1,
+        "browser_sessions": 0,
+        "route_targets": 0,
+        "hub_route_keys": 0
+      },
+      "stateDigest": "14b77272b9ff6ca64d2039b58828e158d11c59675dbb33d29a97611229f4e986"
+    },
+    "afterFirstMaintenance": {
+      "schemaVersion": 5,
+      "schemaShape": {
+        "tables": {
+          "audit": [
+            "action",
+            "actor",
+            "at",
+            "detail_json",
+            "id"
+          ],
+          "browser_sessions": [
+            "created_at",
+            "csrf_token",
+            "expires_at",
+            "expiry_audited_at",
+            "idle_until",
+            "operator_principal",
+            "revoked_at",
+            "session_id"
+          ],
+          "enrollment_results": [
+            "created_at",
+            "idempotency_key",
+            "kind",
+            "node_id",
+            "request_id",
+            "result_json",
+            "token_digest"
+          ],
+          "enrollment_tokens": [
+            "bound_node_id",
+            "consumed_at",
+            "consumed_by",
+            "created_at",
+            "expires_at",
+            "purpose",
+            "token_digest",
+            "token_id"
+          ],
+          "events": [
+            "at",
+            "dimension",
+            "from_value",
+            "id",
+            "node_id",
+            "source",
+            "to_value"
+          ],
+          "hub_route_keys": [
+            "activated_at",
+            "created_at",
+            "key_id",
+            "node_id",
+            "private_key",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "node_keys": [
+            "created_at",
+            "key_id",
+            "node_id",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "nodes": [
+            "alert_flags",
+            "authenticated",
+            "capabilities",
+            "capabilities_stale",
+            "compatibility_profile",
+            "dsh_healthy",
+            "dsh_version",
+            "last_heartbeat_at",
+            "last_seen",
+            "last_seen_source",
+            "minted_at",
+            "node_id",
+            "orbit_compatible",
+            "orbit_revision",
+            "orbit_version",
+            "reachable",
+            "registry_contact",
+            "state",
+            "tombstone_reason",
+            "tombstoned_at"
+          ],
+          "reports": [
+            "checks_json",
+            "compatibility",
+            "compatibility_profile",
+            "dsh_version",
+            "id",
+            "identity_json",
+            "node_id",
+            "orbit_revision",
+            "orbit_version",
+            "report_json",
+            "uploaded_at"
+          ],
+          "route_targets": [
+            "created_at",
+            "node_id",
+            "route_target_origin",
+            "updated_at"
+          ],
+          "seen_nonces": [
+            "created_at",
+            "node_id",
+            "nonce"
+          ]
+        },
+        "indexes": [
+          "idx_audit_at",
+          "idx_events_node_at",
+          "idx_reports_node_uploaded",
+          "idx_seen_nonces_created_at"
+        ]
+      },
+      "journalMode": "wal",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "rowCounts": {
+        "nodes": 1,
+        "node_keys": 1,
+        "enrollment_tokens": 0,
+        "enrollment_results": 0,
+        "seen_nonces": 0,
+        "reports": 0,
+        "events": 3,
+        "audit": 0,
+        "browser_sessions": 0,
+        "route_targets": 0,
+        "hub_route_keys": 0
+      },
+      "stateDigest": "d7b9d7cf0f5c22c0464f938b173cdba4e840987c109813fa2bc3e156814e1589"
+    },
+    "afterSecondMaintenance": {
+      "schemaVersion": 5,
+      "schemaShape": {
+        "tables": {
+          "audit": [
+            "action",
+            "actor",
+            "at",
+            "detail_json",
+            "id"
+          ],
+          "browser_sessions": [
+            "created_at",
+            "csrf_token",
+            "expires_at",
+            "expiry_audited_at",
+            "idle_until",
+            "operator_principal",
+            "revoked_at",
+            "session_id"
+          ],
+          "enrollment_results": [
+            "created_at",
+            "idempotency_key",
+            "kind",
+            "node_id",
+            "request_id",
+            "result_json",
+            "token_digest"
+          ],
+          "enrollment_tokens": [
+            "bound_node_id",
+            "consumed_at",
+            "consumed_by",
+            "created_at",
+            "expires_at",
+            "purpose",
+            "token_digest",
+            "token_id"
+          ],
+          "events": [
+            "at",
+            "dimension",
+            "from_value",
+            "id",
+            "node_id",
+            "source",
+            "to_value"
+          ],
+          "hub_route_keys": [
+            "activated_at",
+            "created_at",
+            "key_id",
+            "node_id",
+            "private_key",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "node_keys": [
+            "created_at",
+            "key_id",
+            "node_id",
+            "public_key",
+            "revocation_reason",
+            "revoke_after",
+            "revoked_at",
+            "state"
+          ],
+          "nodes": [
+            "alert_flags",
+            "authenticated",
+            "capabilities",
+            "capabilities_stale",
+            "compatibility_profile",
+            "dsh_healthy",
+            "dsh_version",
+            "last_heartbeat_at",
+            "last_seen",
+            "last_seen_source",
+            "minted_at",
+            "node_id",
+            "orbit_compatible",
+            "orbit_revision",
+            "orbit_version",
+            "reachable",
+            "registry_contact",
+            "state",
+            "tombstone_reason",
+            "tombstoned_at"
+          ],
+          "reports": [
+            "checks_json",
+            "compatibility",
+            "compatibility_profile",
+            "dsh_version",
+            "id",
+            "identity_json",
+            "node_id",
+            "orbit_revision",
+            "orbit_version",
+            "report_json",
+            "uploaded_at"
+          ],
+          "route_targets": [
+            "created_at",
+            "node_id",
+            "route_target_origin",
+            "updated_at"
+          ],
+          "seen_nonces": [
+            "created_at",
+            "node_id",
+            "nonce"
+          ]
+        },
+        "indexes": [
+          "idx_audit_at",
+          "idx_events_node_at",
+          "idx_reports_node_uploaded",
+          "idx_seen_nonces_created_at"
+        ]
+      },
+      "journalMode": "wal",
+      "integrityCheck": "ok",
+      "foreignKeyViolations": 0,
+      "rowCounts": {
+        "nodes": 1,
+        "node_keys": 1,
+        "enrollment_tokens": 0,
+        "enrollment_results": 0,
+        "seen_nonces": 0,
+        "reports": 0,
+        "events": 3,
+        "audit": 0,
+        "browser_sessions": 0,
+        "route_targets": 0,
+        "hub_route_keys": 0
+      },
+      "stateDigest": "d7b9d7cf0f5c22c0464f938b173cdba4e840987c109813fa2bc3e156814e1589"
+    },
+    "reportPurgedAfter90Days": true,
+    "tenDayEventRolledUp": true,
+    "oldEventPurgedAfter90Days": true,
+    "rawEventAndRollupBoundariesObserved": true,
+    "auditPurgedAfter365Days": true,
+    "repeatedMaintenanceStable": true
+  },
+  "secretProtection": {
+    "privateKeyExcludedFromDigest": true,
+    "privateKeyExcludedFromInspection": true
+  },
+  "nonceRestartSemantics": {
+    "sameProcessReplayRejected": true,
+    "freshProcessNonceAcceptedWithinSkew": true
+  },
+  "tlsFailureMatrix": {
+    "unknownCaRejected": true,
+    "wrongSanRejected": true,
+    "matchingCertSucceeds": true
+  },
+  "compatibilityWithdrawal": {
+    "unsupportedDshWithheld": true,
+    "missingWsWithheld": true
+  },
+  "dshLossRecovery": {
+    "unreachableOnLoss": true,
+    "restoredOnRecovery": true
+  },
+  "bookmarkReenroll": {
+    "deletedRouteKeyRevoked": true
+  },
+  "httpWsCleanup": {
+    "earlyAbortCleanedUp": true
+  },
+  "gate": {
+    "requiredPredicates": {
+      "cleanWorktreeBefore": true,
+      "migrations": true,
+      "migrationV04": true,
+      "routeIdentityBackupRestore": true,
+      "secretProtection": true,
+      "routeIdentityCorruption": true,
+      "hubRouteKeyRotation": true,
+      "nonceRestartSemantics": true,
+      "tlsFailureMatrix": true,
+      "compatibilityWithdrawal": true,
+      "dshLossRecovery": true,
+      "bookmarkReenroll": true,
+      "httpWsCleanup": true,
+      "restartStability": true,
+      "failureModes": true,
+      "freshInstall": true,
+      "backupRestore": true,
+      "retention": true,
+      "processBoundary": true,
+      "cleanup": true
+    },
+    "failedPredicates": []
+  },
+  "success": true
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage7-hub-node-gateway-restart-stability",
+  "candidateCommit": "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582",
+  "executedAt": "2026-09-07T02:38:20.000Z",
+  "activeTrafficHarness": {
+    "concurrency": 8,
+    "totalRequestsSent": 250,
+    "webSocketStreamsMaintained": 2
+  },
+  "hubRestart": {
+    "restartedAt": "2026-09-07T02:39:00.000Z",
+    "downtimeDurationMs": 420,
+    "reconnectCount": 8,
+    "persistedIdentityRestored": true,
+    "nonceCacheResetWithinSkewWindow": true,
+    "zeroCorruptRecords": true
+  },
+  "nodeRestart": {
+    "restartedAt": "2026-09-07T02:40:20.000Z",
+    "nodeRole": "workstation-nodeB",
+    "downtimeDurationMs": 310,
+    "reconnectToHub": true,
+    "reboundRouteTargetOrigin": "http://127.0.0.1:50085",
+    "zeroDuplicateEnrollments": true
+  },
+  "gatewayRestart": {
+    "restartedAt": "2026-09-07T02:41:40.000Z",
+    "downtimeDurationMs": 150,
+    "browserSessionsPreservedAcrossGateway": true,
+    "downstreamReconnected": true
+  },
+  "wsTrackersPostRestart": {
+    "hubWsTrackerActiveCount": 2,
+    "nodeWsTrackerActiveCount": 2,
+    "leakageDetected": false
+  },
+  "result": "PASS"
+}

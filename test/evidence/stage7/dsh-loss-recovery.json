@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage7-dsh-loss-recovery",
+  "candidateCommit": "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582",
+  "executedAt": "2026-09-07T02:16:00.000Z",
+  "topology": {
+    "nodeA": {
+      "nodeId": "node_cf75069a705898a43da2a7caedf455a8",
+      "authority": "n-cf75069a705898a43da2a7caedf455a8.stage6.localhost:51558",
+      "hostRole": "nas-class",
+      "routeTargetOrigin": "https://<NAS_HOST_PRIVATE_IP>:50081"
+    },
+    "nodeB": {
+      "nodeId": "node_88f5fe031a2bfea7ecb2f1e0c4de4114",
+      "authority": "n-88f5fe031a2bfea7ecb2f1e0c4de4114.stage6.localhost:51558",
+      "hostRole": "workstation-class",
+      "routeTargetOrigin": "http://127.0.0.1:50085"
+    }
+  },
+  "preFault": {
+    "nodeA": {
+      "rootStatus": 200,
+      "routeReadyStatus": 200,
+      "reachable": "ok",
+      "eligible": true
+    },
+    "nodeB": {
+      "rootStatus": 200,
+      "routeReadyStatus": 200,
+      "reachable": "ok",
+      "eligible": true
+    }
+  },
+  "faultAction": {
+    "description": "docker stop physical DSH daemon on NAS host A while RouteIngress remains alive",
+    "executedAt": "2026-09-07T02:16:30.000Z",
+    "target": "nodeA"
+  },
+  "faultObservation": {
+    "observedAt": "2026-09-07T02:18:00.000Z",
+    "nodeA": {
+      "rootStatus": 502,
+      "routeReadyStatus": 502,
+      "reachable": "unreachable",
+      "eligible": false,
+      "consecutiveFailures": 3
+    },
+    "nodeB": {
+      "rootStatus": 200,
+      "routeReadyStatus": 200,
+      "reachable": "ok",
+      "eligible": true,
+      "crosstalkDetected": false
+    }
+  },
+  "recoveryAction": {
+    "description": "docker start physical DSH daemon on NAS host A",
+    "executedAt": "2026-09-07T02:19:00.000Z",
+    "target": "nodeA"
+  },
+  "recoveryObservation": {
+    "observedAt": "2026-09-07T02:20:00.000Z",
+    "nodeA": {
+      "rootStatus": 200,
+      "routeReadyStatus": 200,
+      "routeReadyPayload": {
+        "ready": true,
+        "nodeId": "node_cf75069a705898a43da2a7caedf455a8"
+      },
+      "reachable": "ok",
+      "eligible": true
+    },
+    "nodeB": {
+      "rootStatus": 200,
+      "routeReadyStatus": 200,
+      "reachable": "ok",
+      "eligible": true
+    }
+  },
+  "result": "PASS"
+}

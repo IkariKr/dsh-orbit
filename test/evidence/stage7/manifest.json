@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "stage": "v0.4 Stage 7 Failure, Restart & Compatibility Hardening",
+  "branch": "chore/v0.4-stage7-failure-hardening",
+  "scope": "stage7-hardening-and-two-host-rehearsal",
+  "reviewGate": "HOLD",
+  "testedCandidateCommit": "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582",
+  "externalHarnessBaseline": {
+    "dshVersion": "0.1.1-rc.2",
+    "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "dshCliBinarySha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  },
+  "artifacts": {
+    "automated-drill.json": {
+      "sha256": "e7933002db9686122346babdfc1ea71b7b17c4e2cf23c42d6cbd9181cea66378",
+      "bytes": 79323
+    },
+    "dsh-loss-recovery.json": {
+      "sha256": "f302d0522ca0daef8b9ab11f79ddd174d7e410ce4e1b6af1d11591f27d0fbf62",
+      "bytes": 2196
+    },
+    "route-key-rotation.json": {
+      "sha256": "74864b2eddc6ceb039a43fa4278bbc652381248b5bf620025f7e341b71aacaa2",
+      "bytes": 1021
+    },
+    "tls-failure.json": {
+      "sha256": "513ba189dd2e983550c5e607592d607aa3b1213e5c62f60641df40986778f65c",
+      "bytes": 1773
+    },
+    "delete-reenroll.json": {
+      "sha256": "4cdb7cf9d6588f37d73be288f6acdb148489b8cc2d34954eb25915042fb928c5",
+      "bytes": 1390
+    },
+    "restart-stability.json": {
+      "sha256": "ce98a8432f991ec027719d52278fb99e1605e64618c0ae6fe938876a22c2174d",
+      "bytes": 1155
+    },
+    "live-two-host.json": {
+      "sha256": "d423cbdf7f60a493d0cb64d6ca524931dde5621c66b5aebb61b6c3fbfd3c349d",
+      "bytes": 3026
+    }
+  },
+  "status": "COMPLETE — awaiting independent Stage 7 review"
+}

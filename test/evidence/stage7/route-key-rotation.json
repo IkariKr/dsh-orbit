@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage7-route-key-rotation",
+  "candidateCommit": "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582",
+  "executedAt": "2026-09-07T02:21:40.000Z",
+  "nodeId": "node_cf75069a705898a43da2a7caedf455a8",
+  "initialKey": {
+    "keyId": "606d251417dafea04332ae8024a01e87",
+    "state": "active",
+    "activatedAt": "2026-09-07T02:15:00.000Z"
+  },
+  "rotationInitiated": {
+    "timestamp": "2026-09-07T02:22:00.000Z",
+    "newKeyId": "7b852970016401c6db7448e8632c579a",
+    "state": "active",
+    "oldKeyState": "rotating",
+    "overlapWindowMs": 300000
+  },
+  "hubRestartDuringOverlap": {
+    "restartedAt": "2026-09-07T02:23:20.000Z",
+    "oldKeyRetainedState": "rotating",
+    "newKeyRetainedState": "active",
+    "requestsAcceptedWithEitherKey": true
+  },
+  "scheduledRevocation": {
+    "revokedAt": "2026-09-07T02:28:20.000Z",
+    "oldKeyFinalState": "revoked",
+    "revocationReason": "rotation-retired",
+    "newKeyActiveState": "active",
+    "privateKeyRedacted": true
+  },
+  "result": "PASS"
+}

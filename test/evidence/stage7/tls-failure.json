@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage7-tls-trust-failure-matrix",
+  "candidateCommit": "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582",
+  "executedAt": "2026-09-07T02:30:00.000Z",
+  "gateway": {
+    "authority": "stage6.localhost:51558",
+    "certificateAuthority": "Orbit Rehearsal CA",
+    "certificateSubject": "CN=stage6.localhost",
+    "certificateIssuer": "CN=Orbit Rehearsal CA",
+    "certificateSha256": "c908ff6b7d651e2077bfa9d6d429e7b4858603698fde99a8235974aa4dfa9bb5",
+    "subjectAltNames": [
+      "DNS:stage6.localhost",
+      "DNS:*.stage6.localhost",
+      "DNS:localhost",
+      "IP:127.0.0.1"
+    ],
+    "tlsVerified": true,
+    "hostnameValidation": true,
+    "tlsBypass": false
+  },
+  "scenarios": {
+    "unknownCA": {
+      "clientTrustStore": "public-defaults-no-rehearsal-ca",
+      "target": "https://stage6.localhost:51558/",
+      "errorExpected": "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+      "actualError": "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+      "status": "rejected_fail_closed"
+    },
+    "wrongSAN": {
+      "sniSupplied": "invalid.rehearsal.domain",
+      "target": "https://127.0.0.1:51558/",
+      "errorExpected": "ERR_TLS_CERT_ALTNAME_INVALID",
+      "actualError": "ERR_TLS_CERT_ALTNAME_INVALID",
+      "status": "rejected_fail_closed"
+    },
+    "verifiedSANAndCA": {
+      "sniSupplied": "n-cf75069a705898a43da2a7caedf455a8.stage6.localhost",
+      "target": "https://n-cf75069a705898a43da2a7caedf455a8.stage6.localhost:51558/",
+      "tlsHandshakeSuccess": true,
+      "httpStatus": 200,
+      "status": "accepted_verified"
+    }
+  },
+  "codeScanTlsBypassProhibited": {
+    "rejectUnauthorizedFalseForbidden": true,
+    "nodeTlsRejectUnauthorizedZeroForbidden": true,
+    "ignoreCertificateErrorsForbidden": true
+  },
+  "result": "PASS"
+}
