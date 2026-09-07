@@ -29,6 +29,15 @@ function currentCommit() {
   return execFileSync("git", ["rev-parse", "HEAD"], { cwd: rootPath, encoding: "utf8" }).trim();
 }
 
+function gitIsAncestor(ancestor, descendant) {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], { cwd: rootPath, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function assertFullCommit(commit, label) {
   assert.match(commit, /^[0-9a-f]{40}$/, `${label} must be a full 40-character SHA`);
   assert.equal(gitCommitExists(commit), true, `${label} must resolve to a real commit`);
@@ -51,8 +60,9 @@ const requiredDocs = [
 ];
 
 test("Stage 8 v0.4 release closure artifacts and version declarations", async () => {
-  assert.equal(currentCommit(), "5a6f94fa8bfc1adf850627d28f2cad150af55c20");
-  assertFullCommit(currentCommit(), "C8 candidate");
+  const candidate = currentCommit();
+  assertFullCommit(candidate, "C8.1 candidate");
+  assert.equal(gitIsAncestor("5a6f94fa8bfc1adf850627d28f2cad150af55c20", candidate), true, "C8.1 must descend from C8");
   assert.equal(gitTagExists("v0.4.0-rc.1"), false, "release tag must not exist before Final Review");
   const lock = JSON.parse(await text("package-lock.json"));
   assert.equal(lock.lockfileVersion, 3);
