@@ -153,7 +153,6 @@ def run(args: argparse.Namespace) -> int:
         options.set_preference("security.enterprise_roots.enabled", True)
         options.set_preference("network.trr.mode", 5)
         options.accept_insecure_certs = False
-        options.enable_bidi = True
         log("starting-firefox")
         driver = webdriver.Firefox(options=options, service=Service(resolve_geckodriver(), log_output=str(gecko_log)))
         log("firefox-started")
@@ -165,8 +164,9 @@ def run(args: argparse.Namespace) -> int:
         gateway = bindings["gatewayUrl"]
         log("navigating-gateway")
         driver.get(gateway.replace("https://", "https://operator:drill-password@", 1) + "/")
-        log("gateway-loaded")
-        wait_for(wait, EC.title_contains("DSH Orbit Registry"))
+        log(f"gateway-loaded:title={driver.title!r}:url={driver.current_url!r}")
+        body_text = driver.find_element(By.TAG_NAME, "body").text.strip().replace("\\n", " ")[:160]
+        log(f"gateway-body-prefix:{body_text!r}")
         session_status = wait_for(wait, EC.visibility_of_element_located((By.ID, "session-status")))
         wait.until(lambda _driver: session_status.text.strip().startswith("operator:"))
         log("session-authenticated")
@@ -262,7 +262,7 @@ def main() -> int:
     try:
         return run(args)
     except Exception as error:  # no token or credential values are included
-        print(f"browser bridge failed: {type(error).__name__}: {error}", file=sys.stderr)
+        print(f"browser bridge failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
         return 1
 
 
