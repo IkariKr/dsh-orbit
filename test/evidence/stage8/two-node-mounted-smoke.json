@@ -1,13 +1,18 @@
 {
   "schemaVersion": 1,
   "kind": "stage8-final-two-node-mounted-smoke",
-  "candidateCommit": "73f6d7d6a8518200a9b522a2a5706d36af992190",
-  "executedAt": "2026-09-07T08:45:33.200Z",
+  "candidateCommit": "90312b66ce6f084ae10890313d71cd4bc19244f2",
+  "executedAt": "2026-09-07T10:48:26.510Z",
   "execution": "not-executed",
-  "blocker": {
-    "code": "docker-engine-unavailable",
-    "command": "scripts/registry-drill.mjs --compose-up --wait-for-browser",
-    "detail": "Command failed: docker info"
+  "attempt": {
+    "command": "node scripts/registry-drill.mjs --compose-up --wait-for-browser --keep",
+    "dockerEngine": "available",
+    "browserBootstrap": "observed in Firefox DevTools, but no current runner-owned lifecycle checkpoint",
+    "browserLifecycleCheckpoint": "missing",
+    "currentRunNodeIds": [],
+    "historicalNodesRejected": true,
+    "runnerProcess": "exited before enrollment/lifecycle barrier",
+    "stackCleanup": "docker compose down completed"
   },
   "requiredMatrix": {
     "selectorListsAB": "NOT_EXECUTED",
@@ -19,5 +24,9 @@
     "hubRestartRecovery": "NOT_EXECUTED",
     "nodeAFailClosedOutage": "NOT_EXECUTED"
   },
-  "result": "BLOCKED"
+  "result": "BLOCKED",
+  "blocker": {
+    "code": "browser-lifecycle-checkpoint-missing",
+    "detail": "Firefox showed only historical Registry nodes from earlier runs; no current-run node IDs were created or independently observed before the runner exited. No lifecycle checkpoint or mounted PASS was generated."
+  }
 }

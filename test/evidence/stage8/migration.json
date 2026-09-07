@@ -1,27 +1,23 @@
 {
   "schemaVersion": 1,
   "kind": "stage8-migration-acceptance",
-  "candidateCommit": "73f6d7d6a8518200a9b522a2a5706d36af992190",
-  "executedAt": "2026-09-07T08:45:32.505Z",
-  "execution": "local-file-backed-v3-fixture",
-  "sourceDatabase": {
-    "initialSchemaVersion": 3
-  },
-  "migratedDatabase": {
-    "finalSchemaVersion": 5,
+  "candidateCommit": "90312b66ce6f084ae10890313d71cd4bc19244f2",
+  "executedAt": "2026-09-07T10:48:26.510Z",
+  "execution": "local-file-backed-v3-fixture-tests",
+  "verification": {
+    "command": "node --test test/registry-sqlite.test.mjs test/stage7-hardening.test.mjs",
+    "migrationPath": "v3 -> v4 -> v5",
+    "tests": 14,
+    "pass": 14,
+    "fail": 0,
+    "schemaVersion": 5,
     "integrityCheck": "ok",
     "foreignKeyViolations": 0,
-    "addedTables": [
+    "routeTables": [
       "route_targets",
       "hub_route_keys"
     ],
-    "reachableDomain": [
-      "unknown",
-      "ok",
-      "unreachable"
-    ],
     "nodeIdentityPreserved": true,
-    "historicalStatePreserved": true,
     "idempotentRerun": true
   },
   "result": "PASS"

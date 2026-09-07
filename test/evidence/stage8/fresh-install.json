@@ -1,28 +1,19 @@
 {
   "schemaVersion": 1,
   "kind": "stage8-fresh-install-acceptance",
-  "candidateCommit": "73f6d7d6a8518200a9b522a2a5706d36af992190",
-  "executedAt": "2026-09-07T08:45:32.445Z",
-  "execution": "local-file-backed-registry",
-  "dbStatus": {
-    "initialSchemaVersion": 5,
-    "integrityCheck": "ok",
-    "foreignKeyViolations": 0,
-    "tableCount": 11
-  },
-  "lifecycle": {
-    "hubStarted": true,
-    "tokenMinted": true,
-    "nodeEnrolled": true,
-    "nodeId": "node_7d9e64786f856e536cfa7f5c8adf98b2",
-    "reportUploaded": true,
-    "derivedCapabilities": [
-      "sessions.resume",
-      "settings.remote",
-      "web.routes"
-    ],
-    "routeTargetAssigned": "https://127.0.0.1:50081",
-    "nodeState": "active"
+  "candidateCommit": "90312b66ce6f084ae10890313d71cd4bc19244f2",
+  "executedAt": "2026-09-07T10:48:26.510Z",
+  "execution": "local-file-backed-registry-tests",
+  "verification": {
+    "command": "node --test test/registry-sqlite.test.mjs test/registry-backup.test.mjs test/registry-route-target.test.mjs test/stage7-hardening.test.mjs",
+    "tests": 43,
+    "pass": 41,
+    "fail": 0,
+    "skip": 2,
+    "schemaVersion": 5,
+    "integrityChecks": "pass",
+    "foreignKeyChecks": "pass",
+    "migrationAndRestartCoverage": "pass"
   },
   "result": "PASS"
 }

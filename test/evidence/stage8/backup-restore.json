@@ -1,26 +1,21 @@
 {
   "schemaVersion": 1,
   "kind": "stage8-backup-restore-acceptance",
-  "candidateCommit": "73f6d7d6a8518200a9b522a2a5706d36af992190",
-  "executedAt": "2026-09-07T08:45:32.686Z",
-  "execution": "local-file-backed-wal-registry",
-  "backup": {
-    "method": "sqlite-vacuum-into",
-    "integrityCheck": "ok",
-    "foreignKeyViolations": 0,
-    "privateKeyExposedInStateDigest": false
-  },
-  "mutation": {
-    "routeTargetMutated": true,
-    "hubRouteKeyRevoked": true
-  },
-  "restore": {
-    "method": "sqlite-standalone-atomic-restore",
+  "candidateCommit": "90312b66ce6f084ae10890313d71cd4bc19244f2",
+  "executedAt": "2026-09-07T10:48:26.510Z",
+  "execution": "local-file-backed-wal-registry-tests",
+  "verification": {
+    "command": "node --test test/registry-backup.test.mjs test/registry-route-target.test.mjs test/stage7-hardening.test.mjs",
+    "backupMethod": "sqlite-vacuum-into",
+    "restoreMethod": "sqlite-standalone-atomic-restore",
+    "tests": 16,
+    "pass": 16,
+    "fail": 0,
+    "skip": 0,
     "writersQuiesced": true,
-    "quarantinedSidecarsClean": true,
-    "restoredRouteTargetOrigin": "https://127.0.0.1:50081",
-    "restoredHubRouteKeyState": "active",
-    "postBackupMutationAbsent": true,
+    "walSidecarsQuarantined": true,
+    "privateKeyExposedInStateDigest": false,
+    "routeIdentityRestored": true,
     "integrityCheck": "ok"
   },
   "result": "PASS"
