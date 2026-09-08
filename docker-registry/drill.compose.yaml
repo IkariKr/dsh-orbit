@@ -18,7 +18,7 @@ services:
       DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:-drill-gateway-secret}
       DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: operator
       DSH_ORBIT_HUB_TRUSTED_SCHEME: https
-      DSH_ORBIT_HUB_ROUTE_DOMAIN: dsh-orbit.test
+      DSH_ORBIT_HUB_ROUTE_DOMAIN: dsh-orbit.test:8443
       DSH_ORBIT_HUB_CA_CERT: /data/orbit/tls/ca.crt
       DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS: "1"
       DSH_ORBIT_HUB_DRILL_AGING: "1"
@@ -122,7 +122,7 @@ services:
       DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
       DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: "9444"
       DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0"
-      DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test
+      DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test:8443
       DSH_ORBIT_NODE_DSH_TARGET: http://127.0.0.1:3081
       DSH_ORBIT_NODE_ROUTE_TLS_KEY: /etc/caddy/tls/tls.key
       DSH_ORBIT_NODE_ROUTE_TLS_CERT: /etc/caddy/tls/tls.crt
@@ -196,7 +196,7 @@ services:
       DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
       DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: "9445"
       DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0"
-      DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test
+      DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test:8443
       DSH_ORBIT_NODE_DSH_TARGET: http://127.0.0.1:3081
       DSH_ORBIT_NODE_ROUTE_TLS_KEY: /etc/caddy/tls/tls.key
       DSH_ORBIT_NODE_ROUTE_TLS_CERT: /etc/caddy/tls/tls.crt

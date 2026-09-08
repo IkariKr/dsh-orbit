@@ -298,15 +298,34 @@ def run(args: argparse.Namespace) -> int:
 
         # The selector Open and cookie checks must be performed by this real
         # Firefox profile, not inferred from the selector JSON or response headers.
+        # Warm the Basic Auth challenge independently for the selector and both
+        # dynamic authorities before clicking their actual Open anchors.
+        for warm_url in [selector_url, open_urls["a"], open_urls["b"]]:
+            driver.get(warm_url.replace("https://", "https://operator:drill-password@", 1))
+            driver.get(warm_url)
         driver.get(selector_url)
         wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
-        driver.get(open_urls["a"])
+        cards = driver.find_elements(By.CSS_SELECTOR, ".selector-card")
+        if len(cards) < 2:
+            raise RuntimeError("selector did not render two endpoint cards")
+        open_links = driver.find_elements(By.CSS_SELECTOR, "a.open-button")
+        hrefs = {link.get_attribute("href") for link in open_links}
+        if open_urls["a"] not in hrefs or open_urls["b"] not in hrefs:
+            raise RuntimeError("selector Open hrefs did not match current-run bindings")
+        driver.execute_script("arguments[0].click()", next(link for link in open_links if link.get_attribute("href") == open_urls["a"]))
         wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
+        if not driver.current_url.startswith(open_urls["a"]):
+            raise RuntimeError("browser Open A did not navigate to the bound authority")
         if node_ids[1] in driver.find_element(By.TAG_NAME, "body").text:
             raise RuntimeError("browser Open A displayed Node B content")
         selector_open_a = True
-        driver.get(open_urls["b"])
+        driver.get(selector_url)
+        wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
+        open_links = driver.find_elements(By.CSS_SELECTOR, "a.open-button")
+        driver.execute_script("arguments[0].click()", next(link for link in open_links if link.get_attribute("href") == open_urls["b"]))
         wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
+        if not driver.current_url.startswith(open_urls["b"]):
+            raise RuntimeError("browser Open B did not navigate to the bound authority")
         if node_ids[0] in driver.find_element(By.TAG_NAME, "body").text:
             raise RuntimeError("browser Open B displayed Node A content")
         selector_open_b = True
