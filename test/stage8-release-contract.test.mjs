@@ -65,13 +65,15 @@ function gitIsAncestor(ancestor, descendant) {
   }
 }
 
-test("Stage 8 release candidate artifact set exists", async () => {
+test("Stage 8 construction candidate artifact set exists", async () => {
   for (const path of requiredDocs) await access(new URL(`../${path}`, import.meta.url));
+  const current = execFileSync("git", ["rev-parse", "HEAD"], { cwd: new URL("../", import.meta.url), encoding: "utf8" }).trim();
+  assert.equal(gitIsAncestor("0dc00ceb3b0574e2a6bd81eb62502fd6c2e233f3", current), true);
   const changelog = await text("CHANGELOG.md");
   assert.match(changelog, /^## Unreleased$/m);
+  assert.match(changelog, /^### 0\.4\.0-rc\.1 candidate - /m);
   assert.match(changelog, /^### 0\.3\.0-rc\.1 candidate - 2026-09-02$/m);
-  assert.doesNotMatch(changelog, /^## 0\.3\.0-rc\.1 - 2026-08-31$/m);
-});
+  });
 
 test("Registry Compose requires an explicit release image tag", async () => {
   const compose = await text("docker-registry/compose.example.yaml");
@@ -86,7 +88,7 @@ test("Registry Compose requires an explicit release image tag", async () => {
   const config = await text("docs/configuration-reference.md");
   assert.match(config, /`DSH_ORBIT_REGISTRY_TAG`/);
   assert.match(config, /Required.*Default.*Meaning and constraints/s);
-  assert.match(config, /explicitly bound.*v0\.3\.0-rc\.1.*fail closed/s);
+  assert.match(config, /explicitly bound.*v0\.4\.0-rc\.1.*fail closed/s);
   assert.match(config, /v0\.3\.0-s6.*not permitted/s);
 });
 

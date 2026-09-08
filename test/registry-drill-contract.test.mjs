@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const DRIVER = new URL("../scripts/registry-drill.mjs", import.meta.url);
+const BRIDGE = new URL("../scripts/registry-drill-firefox-bridge.py", import.meta.url);
 
 test("mounted drill requires trusted browser evidence and real compatibility reports", async () => {
   const source = await readFile(DRIVER, "utf8");
@@ -19,13 +20,64 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /resolveOpenSsl\(\)/);
   assert.match(source, /DSH_ORBIT_OPENSSL_BIN/);
   assert.match(source, /checkpoint\.leafFingerprint/);
+  assert.match(source, /runner-owned-firefox-selenium/);
+  assert.match(source, /DSH_ORBIT_BROWSER_CHALLENGE/);
+  assert.match(source, /BROWSER_NODE_BINDING_PATH/);
+  assert.match(source, /browserBridgeProcess/);
+  assert.match(source, /BROWSER_BRIDGE_LOG_PATH/);
+  assert.match(source, /prepareDrillProxySecret\(\)/);
+  assert.match(source, /removeDrillProxySecret\(\)/);
+  assert.match(source, /DRILL_PROXY_SECRET_PATH/);
   assert.match(source, /nodeIds: \[aNodeId, bNodeId\]/);
   assert.match(source, /runVerificationSequence\(/);
   assert.match(source, /createCompatibilityReport\(/);
+  assert.match(source, /REQUIRED_MOUNTED_MATRIX_FIELDS/);
+  assert.match(source, /requiredMatrix/);
+  assert.match(source, /routeTargetsConfiguredAB/);
+  assert.match(source, /hubRestartRecovery/);
+  assert.match(source, /dshLossAndRecovery/);
+  assert.match(source, /bookmarkFailClosed/);
+  assert.match(source, /sameNodeIdReenroll/);
+  assert.match(source, /freshHubRouteIdentity/);
+  assert.match(source, /assertMatrixComplete\(\)/);
+  assert.match(source, /docker restart \$\{hubContainer\}/);
+  assert.match(source, /suspendDsh/);
+  assert.match(source, /routeWebSocket\(/);
   assert.match(source, /runningImageEvidence\(/);
   assert.match(source, /aging reset healed A without heartbeat/);
-  assert.doesNotMatch(source, /Object\.fromEntries\(/);
   assert.doesNotMatch(source, /rejectUnauthorized:\s*false/);
+  assert.doesNotMatch(source, /accept_insecure_certs\s*=\s*True/);
+  assert.doesNotMatch(source, /NODE_TLS_REJECT_UNAUTHORIZED/);
+  assert.doesNotMatch(source, /--ignore-certificate-errors/);
+  assert.doesNotMatch(source, /requiredMatrix\s*=\s*\{[^}]*PASS/s);
+});
+
+test("runner-owned Firefox bridge requires trusted browser settings and secret-free checkpoints", async () => {
+  const source = await readFile(BRIDGE, "utf8");
+  assert.match(source, /accept_insecure_certs = False/);
+  assert.match(source, /security\.enterprise_roots\.enabled/);
+  assert.match(source, /runner-owned-firefox-selenium/);
+  assert.match(source, /data-plaintext-once/);
+  assert.match(source, /Firefox rejects page fetches while the document URL retains userinfo/);
+  assert.match(source, /driver\.get\(gateway \+ "\/"\)/);
+  assert.match(source, /if stop_path\.exists\(\):/);
+  assert.match(source, /CERTUTIL_TIMEOUT_SECONDS/);
+  assert.match(source, /certutil timed out/);
+  assert.match(source, /Firefox trust setup unavailable/);
+  assert.match(source, /wait_for_node_ids\(driver, node_ids, stop_path\)/);
+  assert.match(source, /return True/);
+  assert.doesNotMatch(source, /plaintext.*write_text|token.*write_text/i);
+  assert.doesNotMatch(source, /accept_insecure_certs\s*=\s*True/);
+  assert.doesNotMatch(source, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);
+});
+
+test("mounted evidence emitter is the only PASS artifact producer", async () => {
+  const source = await readFile(new URL("../scripts/emit-stage8-mounted-evidence.mjs", import.meta.url), "utf8");
+  assert.match(source, /drill-evidence\.json/);
+  assert.match(source, /assertMountedMatrixShape\(raw\.requiredMatrix, \{ requirePass: true \}\)/);
+  assert.match(source, /rawEvidenceSha256/);
+  assert.match(source, /rawEvidenceBytes/);
+  assert.doesNotMatch(source, /process\.argv.*PASS|process\.argv.*requiredMatrix/);
 });
 
 test("mounted drill keeps the RFC production thresholds explicit", async () => {

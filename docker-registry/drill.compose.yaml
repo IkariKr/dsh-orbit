@@ -18,6 +18,9 @@ services:
       DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:-drill-gateway-secret}
       DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: operator
       DSH_ORBIT_HUB_TRUSTED_SCHEME: https
+      DSH_ORBIT_HUB_ROUTE_DOMAIN: dsh-orbit.test
+      DSH_ORBIT_HUB_CA_CERT: /data/orbit/tls/ca.crt
+      DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS: "1"
       DSH_ORBIT_HUB_DRILL_AGING: "1"
       DSH_ORBIT_HUB_DRILL_AGING_CLOCK: /data/orbit/drill-aging-clock
     user: "1000:1000"
@@ -86,6 +89,7 @@ services:
     environment:
       DSH_PUBLIC_HOST: dsh-a.test
       DSH_PROXY_AUTH: drill-proxy-secret
+      DSH_DRILL_NODE: A
     volumes:
       - ./dsh-drill.Caddyfile:/etc/caddy/Caddyfile:ro
       - ../data/orbit-drill/tls:/etc/caddy/tls:ro
@@ -116,11 +120,18 @@ services:
       HOME: /data/dsh-a
       DSH_PUBLIC_HOST: dsh-a.test
       DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
+      DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: "9444"
+      DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0"
+      DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test
+      DSH_ORBIT_NODE_DSH_TARGET: http://127.0.0.1:3081
+      DSH_ORBIT_NODE_ROUTE_TLS_KEY: /etc/caddy/tls/tls.key
+      DSH_ORBIT_NODE_ROUTE_TLS_CERT: /etc/caddy/tls/tls.crt
       DSH_PROFILE_ROOT: /data/dsh-a/profiles/web
       DSH_PROFILE_CONNECTION_ROOT: /data/dsh-a/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib
     volumes:
       - dsh-a-data:/data/dsh-a
       - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+      - ../data/orbit-drill/tls:/etc/caddy/tls:ro
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=128m
@@ -152,6 +163,7 @@ services:
     environment:
       DSH_PUBLIC_HOST: dsh-b.test
       DSH_PROXY_AUTH: drill-proxy-secret
+      DSH_DRILL_NODE: B
     volumes:
       - ./dsh-drill.Caddyfile:/etc/caddy/Caddyfile:ro
       - ../data/orbit-drill/tls:/etc/caddy/tls:ro
@@ -182,11 +194,18 @@ services:
       HOME: /data/dsh-b
       DSH_PUBLIC_HOST: dsh-b.test
       DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
+      DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: "9445"
+      DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0"
+      DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test
+      DSH_ORBIT_NODE_DSH_TARGET: http://127.0.0.1:3081
+      DSH_ORBIT_NODE_ROUTE_TLS_KEY: /etc/caddy/tls/tls.key
+      DSH_ORBIT_NODE_ROUTE_TLS_CERT: /etc/caddy/tls/tls.crt
       DSH_PROFILE_ROOT: /data/dsh-b/profiles/web
       DSH_PROFILE_CONNECTION_ROOT: /data/dsh-b/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib
     volumes:
       - dsh-b-data:/data/dsh-b
       - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+      - ../data/orbit-drill/tls:/etc/caddy/tls:ro
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=128m
