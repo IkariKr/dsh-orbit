@@ -78,6 +78,23 @@ function sha256(buf) {
   return createHash("sha256").update(buf).digest("hex");
 }
 
+async function detectProvenanceMode() {
+  const attestationPath = new URL("../docs/release-attestations/v0.4.0-rc.1.md", import.meta.url);
+  const manifestPath = new URL("../test/evidence/stage8/manifest.json", import.meta.url);
+  const stage8Dir = new URL("../test/evidence/stage8", import.meta.url);
+  let hasAttestation = false;
+  let hasManifest = false;
+  let hasStage8Dir = false;
+  try { await access(attestationPath); hasAttestation = true; } catch {}
+  try { await access(manifestPath); hasManifest = true; } catch {}
+  try { await access(stage8Dir); hasStage8Dir = true; } catch {}
+  if (!hasAttestation && !hasManifest && !hasStage8Dir) return "construction";
+  if (!hasAttestation || !hasManifest) {
+    assert.fail(`Partial release bundle detected: hasAttestation=${hasAttestation}, hasManifest=${hasManifest}, hasStage8Dir=${hasStage8Dir}`);
+  }
+  return "closure";
+}
+
 function validateMountedBinding({ mountedArtifact, rawArtifact, rawBuffer, manifest }) {
   assert.equal(rawArtifact.kind, "stage8-mounted-runner-raw", "raw mounted evidence kind mismatch");
   assert.equal(rawArtifact.producer, "registry-drill-runner", "raw mounted evidence producer mismatch");
@@ -94,9 +111,9 @@ function validateMountedBinding({ mountedArtifact, rawArtifact, rawBuffer, manif
 }
 
 /**
- * Mechanically validates release provenance for a given bundle.
- * If mode === "final-release", requires all gates (mounted PASS, closure SHA in attestation,
- * strict chronology, no pending wording) or throws an assertion error (fail closed).
+ * Mechanically validates a frozen candidate/closure bundle.
+ * Final-release mode requires mounted PASS, strict chronology, hashes, and no pending wording.
+ * The closure SHA is never required inside the attestation itself.
  */
 function validateReleaseProvenance({
   candidateCommit,
@@ -128,7 +145,8 @@ function validateReleaseProvenance({
     const actualSha = sha256(artifact.buffer);
     assert.equal(actualSha, meta.sha256, `${fileName} sha256 mismatch`);
     assert.equal(artifact.buffer.byteLength, meta.bytes, `${fileName} bytes mismatch`);
-    assert.equal(artifact.json.candidateCommit, candidateCommit, `${fileName} candidateCommit mismatch`);
+    const artifactCommit = fileName === "mounted-runner-raw.json" ? artifact.json.commit : artifact.json.candidateCommit;
+    assert.equal(artifactCommit, candidateCommit, `${fileName} candidate commit mismatch`);
 
     const executedDate = new Date(artifact.json.executedAt ?? artifact.json.finishedAt ?? artifact.json.startedAt);
     assert.ok(!Number.isNaN(executedDate.getTime()), `${fileName} executedAt must be a valid date`);
@@ -235,18 +253,46 @@ test("Stage 8 construction candidate version declarations", async () => {
 
 test("Stage 8 v0.4 release provenance contract: candidate vs closure, evidence manifest, and fail-closed gate", async () => {
   const current = currentCommit();
-  assertFullCommit(current, "current construction candidate");
-  assert.equal(gitIsAncestor(STAGE8_E73_BASE, current), true, "current construction candidate must descend from E7.3");
+  assertFullCommit(current, "current commit (HEAD)");
   assert.equal(gitTagExists("v0.4.0-rc.1"), false, "release tag must not exist before Final Review");
+  const mode = await detectProvenanceMode();
+  if (mode === "construction") {
+    assert.equal(gitIsAncestor(STAGE8_E73_BASE, current), true, "current construction candidate must descend from E7.3");
+    const constructionPaths = gitChangedPaths(STAGE8_E73_BASE, current);
+    assert.ok(constructionPaths.length > 0, "construction candidate must contain transplanted construction");
+    assert.equal(constructionPaths.some((p) => p.startsWith("test/evidence/stage8/")), false, "construction candidate must not contain Stage 8 evidence");
+    assert.equal(constructionPaths.includes("docs/release-attestations/v0.4.0-rc.1.md"), false, "construction candidate must not contain release closure attestation");
+    return;
+  }
 
-  // Construction candidates must not contain any Stage 8 evidence or closure
-  // attestation. Those files are generated only after a frozen candidate.
-  const constructionPaths = gitChangedPaths(STAGE8_E73_BASE, current);
-  assert.ok(constructionPaths.length > 0, "construction candidate must contain transplanted construction");
-  assert.equal(constructionPaths.some((p) => p.startsWith("test/evidence/stage8/")), false, "construction candidate must not contain Stage 8 evidence");
-  assert.equal(constructionPaths.includes("docs/release-attestations/v0.4.0-rc.1.md"), false, "construction candidate must not contain release closure attestation");
-  return;
-
+  const releaseClosureCommit = current;
+  const candidateCommit = gitCommitParent(releaseClosureCommit);
+  assertFullCommit(candidateCommit, "executable candidate commit (HEAD^)");
+  assert.equal(gitIsAncestor(STAGE8_E73_BASE, candidateCommit), true, "closure candidate must descend from E7.3");
+  const changedPaths = gitChangedPaths(candidateCommit, releaseClosureCommit);
+  assert.ok(changedPaths.length > 0, "closure commit must contain evidence changes");
+  for (const changedPath of changedPaths) {
+    assert.ok(changedPath === "docs/release-attestations/v0.4.0-rc.1.md" || changedPath.startsWith("test/evidence/stage8/"), `closure changed forbidden path: ${changedPath}`);
+  }
+  const manifest = JSON.parse(await text("test/evidence/stage8/manifest.json"));
+  const attestationText = await text("docs/release-attestations/v0.4.0-rc.1.md");
+  assert.ok(manifest.artifacts && Object.keys(manifest.artifacts).length > 0, "closure manifest must declare artifacts");
+  const artifacts = {};
+  for (const [fileName] of Object.entries(manifest.artifacts)) {
+    const buffer = await readFile(new URL(`../test/evidence/stage8/${fileName}`, import.meta.url));
+    artifacts[fileName] = { buffer, json: JSON.parse(buffer.toString("utf8")) };
+  }
+  validateReleaseProvenance({
+    candidateCommit,
+    releaseClosureCommit,
+    candidateCommitDate: gitCommitDate(candidateCommit),
+    closureCommitDate: gitCommitDate(releaseClosureCommit),
+    parentBaseline: STAGE8_E73_BASE,
+    manifest,
+    artifacts,
+    attestationText,
+    mode: "final-release",
+  });
 });
 
 test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed gate semantics", () => {
@@ -485,7 +531,7 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
         attestationText: validAttestation,
         mode: "final-release-synthetic",
       }),
-    /candidateCommit mismatch/,
+    /candidate commit mismatch/,
   );
 });
 

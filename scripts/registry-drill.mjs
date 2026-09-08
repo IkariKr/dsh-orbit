@@ -36,7 +36,8 @@ import { REQUIRED_MOUNTED_MATRIX_FIELDS, emptyMountedMatrix, assertMountedMatrix
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const COMPOSE = "docker-registry/drill.compose.yaml";
 const HUB_URL = "http://127.0.0.1:5445/";
-const ROUTE_DOMAIN = "dsh-orbit.test";
+const ROUTE_DOMAIN_HOST = "dsh-orbit.test";
+const ROUTE_DOMAIN = `${ROUTE_DOMAIN_HOST}:8443`;
 const ROUTE_GATEWAY_TOKEN = "drill-proxy-secret";
 // Nodes reach the Hub through the PRIVATE machine ingress on the
 // compose bridge (the Hub process itself stays loopback-only).
@@ -186,12 +187,12 @@ function ensureDrillCertificate() {
   const leafReady =
     existsSync(DRILL_CERT_KEY_PATH) &&
     existsSync(DRILL_EXT_PATH) &&
-    readFileSync(DRILL_EXT_PATH, "utf8").includes(ROUTE_DOMAIN) &&
+    readFileSync(DRILL_EXT_PATH, "utf8").includes(ROUTE_DOMAIN_HOST) &&
     certificateUsable(DRILL_CERT_PATH, DRILL_CA_PATH);
   if (!leafReady) {
     writeFileSync(
       DRILL_EXT_PATH,
-      `subjectAltName=IP:127.0.0.1,DNS:${ROUTE_DOMAIN},DNS:*.${ROUTE_DOMAIN},DNS:dsh-a,DNS:dsh-b,DNS:dsh-a.test,DNS:dsh-b.test\n`,
+      `subjectAltName=IP:127.0.0.1,DNS:${ROUTE_DOMAIN_HOST},DNS:*.${ROUTE_DOMAIN_HOST},DNS:dsh-a,DNS:dsh-b,DNS:dsh-a.test,DNS:dsh-b.test\n`,
     );
     file(openssl, [
       "req",
@@ -235,7 +236,7 @@ function ensureDrillCertificate() {
     caPath: DRILL_CA_PATH,
     caFingerprint: file(openssl, ["x509", "-in", DRILL_CA_PATH, "-noout", "-fingerprint", "-sha256"]),
     leafFingerprint: file(openssl, ["x509", "-in", DRILL_CERT_PATH, "-noout", "-fingerprint", "-sha256"]),
-    sans: ["127.0.0.1", ROUTE_DOMAIN, `*.${ROUTE_DOMAIN}`, "dsh-a", "dsh-b", "dsh-a.test", "dsh-b.test"],
+    sans: ["127.0.0.1", ROUTE_DOMAIN_HOST, `*.${ROUTE_DOMAIN_HOST}`, "dsh-a", "dsh-b", "dsh-a.test", "dsh-b.test"],
   };
   mkdirSync(dirname(BROWSER_BINDINGS_PATH), { recursive: true });
   writeFileSync(
@@ -245,9 +246,10 @@ function ensureDrillCertificate() {
         runId: RUN_ID,
         commit: REVISION,
         gatewayUrl: GATEWAY_URL,
-        caFingerprint: evidence.tls.caFingerprint,
-        leafFingerprint: evidence.tls.leafFingerprint,
-        tlsValidation: "enabled",
+    caFingerprint: evidence.tls.caFingerprint,
+    leafFingerprint: evidence.tls.leafFingerprint,
+    selectorUrl: `https://${ROUTE_DOMAIN}/`,
+    tlsValidation: "enabled",
       },
       null,
       2,
@@ -332,7 +334,7 @@ async function requireBrowserCheckpoint({ wait = false, nodeIds = [] } = {}) {
   const checkpoint = wait
     ? await waitForCheckpoint(BROWSER_CHECKPOINT_PATH, "browser lifecycle checkpoint")
     : readCheckpoint(BROWSER_CHECKPOINT_PATH, "browser lifecycle checkpoint");
-  const required = ["trustedHttps", "authenticated", "nodesObserved", "nodeDetailObserved", "sessionBootstrapped", "tokenMinted", "plaintextOneTimeVerified"];
+  const required = ["trustedHttps", "authenticated", "nodesObserved", "nodeDetailObserved", "sessionBootstrapped", "tokenMinted", "plaintextOneTimeVerified", "selectorOpenAVerified", "selectorOpenBVerified", "cookieIsolationVerified"];
   const missing = required.filter((key) => checkpoint[key] !== true);
   if (missing.length > 0) {
     throw new Error(`browser checkpoint incomplete: ${missing.join(", ")}`);
@@ -512,7 +514,7 @@ function connectRouteTls(authority) {
     const socket = tls.connect({
       host: "127.0.0.1",
       port: 8443,
-      servername: authority,
+      servername: authority.split(":")[0],
       ca: readFileSync(DRILL_CA_PATH),
       rejectUnauthorized: true,
     }, () => resolve(socket));
@@ -1066,7 +1068,15 @@ async function main() {
   if (waitForBrowser) {
     writeFileSync(
       BROWSER_NODE_BINDING_PATH,
-      JSON.stringify({ runId: RUN_ID, commit: REVISION, nodeIds: [aNodeId, bNodeId], recordedAt: new Date().toISOString() }, null, 2) + "\n",
+      JSON.stringify({
+        runId: RUN_ID,
+        commit: REVISION,
+        nodeIds: [aNodeId, bNodeId],
+        openUrls: { a: `https://${authorityA}/`, b: `https://${authorityB}/` },
+        selectorUrl: `https://${ROUTE_DOMAIN}/`,
+        port: 8443,
+        recordedAt: new Date().toISOString(),
+      }, null, 2) + "\n",
       { encoding: "utf8", mode: 0o640 },
     );
   }
@@ -1127,6 +1137,10 @@ async function main() {
       selectorA.route.openUrl !== `https://${authorityA}/` || selectorB.route.openUrl !== `https://${authorityB}/`) {
     throw new Error(`mounted selector matrix mismatch: ${JSON.stringify(selectorBody)}`);
   }
+  const browserCheckpoint = readCheckpoint(BROWSER_CHECKPOINT_PATH, "browser lifecycle checkpoint");
+  if (browserCheckpoint.selectorOpenAVerified !== true || browserCheckpoint.selectorOpenBVerified !== true) {
+    throw new Error("browser lifecycle checkpoint did not verify Selector Open A/B navigation");
+  }
   markMatrix("selectorListsAB", "selectorOpenA", "selectorOpenB");
 
   const routeRootA = await routeFetch("/", authorityA, { headers: { accept: "text/html" } });
@@ -1148,6 +1162,9 @@ async function main() {
   markMatrix("staticAssetA", "staticAssetB");
   const cookies = [staticA.headers["set-cookie"], staticB.headers["set-cookie"]].flat().filter(Boolean).join(";");
   if (/domain=/i.test(cookies)) throw new Error("mounted route response leaked Domain cookie attribute");
+  if (browserCheckpoint.cookieIsolationVerified !== true) {
+    throw new Error("browser lifecycle checkpoint did not verify cookie-jar isolation");
+  }
   markMatrix("cookieIsolation");
 
   const wsA = await routeWebSocket(authorityA, { expectedNode: "A" });

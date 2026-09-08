@@ -11,13 +11,18 @@ import argparse
 import hashlib
 import json
 import os
+import select
 import shutil
+import socket
+import socketserver
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
@@ -31,6 +36,37 @@ from selenium.webdriver.support.ui import WebDriverWait
 WAIT_SECONDS = 1800
 POLL_SECONDS = 1.0
 CERTUTIL_TIMEOUT_SECONDS = 20
+
+
+class LocalConnectProxy(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+
+
+class ConnectHandler(socketserver.BaseRequestHandler):
+    def handle(self):
+        request = self.request.recv(8192)
+        if not request.startswith(b"CONNECT "):
+            self.request.close()
+            return
+        target = request.split(b" ", 2)[1].decode("ascii", "replace")
+        host, _, port_text = target.partition(":")
+        port = int(port_text or "443")
+        upstream = socket.create_connection(("127.0.0.1", 8443), timeout=15)
+        try:
+            self.request.sendall(b"HTTP/1.1 200 Connection Established\\r\\n\\r\\n")
+            sockets = [self.request, upstream]
+            while True:
+                readable, _, _ = select.select(sockets, [], [], 30)
+                if not readable:
+                    return
+                for source in readable:
+                    data = source.recv(65536)
+                    if not data:
+                        return
+                    (upstream if source is self.request else self.request).sendall(data)
+        finally:
+            upstream.close()
+            self.request.close()
 
 
 def certutil_run(arguments: list[str]) -> subprocess.CompletedProcess[str]:
@@ -157,12 +193,24 @@ def run(args: argparse.Namespace) -> int:
     profile_dir = Path(tempfile.mkdtemp(prefix="dsh-orbit-firefox-"))
     gecko_log = log_path.with_name("geckodriver.log")
     driver = None
+    proxy_server = None
     try:
+        proxy_server = LocalConnectProxy(("127.0.0.1", 0), ConnectHandler)
+        proxy_thread = threading.Thread(target=proxy_server.serve_forever, daemon=True)
+        proxy_thread.start()
+        proxy_port = proxy_server.server_address[1]
         options = Options()
         options.add_argument("-profile")
         options.add_argument(str(profile_dir))
         options.set_preference("security.enterprise_roots.enabled", True)
         options.set_preference("network.trr.mode", 5)
+        options.set_preference("network.proxy.type", 1)
+        options.set_preference("network.proxy.share_proxy_settings", True)
+        options.set_preference("network.proxy.http", "127.0.0.1")
+        options.set_preference("network.proxy.http_port", proxy_port)
+        options.set_preference("network.proxy.ssl", "127.0.0.1")
+        options.set_preference("network.proxy.ssl_port", proxy_port)
+        options.set_preference("network.proxy.no_proxies_on", "")
         options.accept_insecure_certs = False
         log("starting-firefox")
         driver = webdriver.Firefox(options=options, service=Service(resolve_geckodriver(), log_output=str(gecko_log)))
@@ -180,6 +228,12 @@ def run(args: argparse.Namespace) -> int:
         # cached the real Basic Auth challenge response.
         driver.get(gateway + "/")
         log(f"gateway-loaded:title={driver.title!r}:url={driver.current_url!r}")
+        # Pre-warm the same authenticated browser challenge for the selector
+        # apex and both dynamic route authorities before Open navigation.
+        for warm_url in [bindings.get("selectorUrl"), *((bindings.get("openUrls") or {}).values())]:
+            if isinstance(warm_url, str) and warm_url:
+                driver.get(warm_url)
+                wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
         body_text = driver.find_element(By.TAG_NAME, "body").text.strip().replace("\\n", " ")[:160]
         log(f"gateway-body-prefix:{body_text!r}")
         session_status = wait_for(wait, EC.visibility_of_element_located((By.ID, "session-status")))
@@ -221,6 +275,10 @@ def run(args: argparse.Namespace) -> int:
         node_ids = node_binding.get("nodeIds")
         if not isinstance(node_ids, list) or len(node_ids) != 2 or len(set(node_ids)) != 2:
             raise RuntimeError("node binding must contain exactly two distinct node IDs")
+        open_urls = node_binding.get("openUrls")
+        selector_url = node_binding.get("selectorUrl")
+        if not isinstance(open_urls, dict) or not isinstance(open_urls.get("a"), str) or not isinstance(open_urls.get("b"), str) or not isinstance(selector_url, str):
+            raise RuntimeError("node binding must contain selectorUrl and openUrls for both nodes")
 
         driver.find_element(By.ID, "nav-nodes").click()
         wait_for(wait, EC.visibility_of_element_located((By.ID, "nodes-view")))
@@ -238,6 +296,38 @@ def run(args: argparse.Namespace) -> int:
         if "Route Target" not in detail.text:
             raise RuntimeError("node detail did not expose Route Target")
 
+        # The selector Open and cookie checks must be performed by this real
+        # Firefox profile, not inferred from the selector JSON or response headers.
+        driver.get(selector_url)
+        wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
+        driver.get(open_urls["a"])
+        wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
+        if node_ids[1] in driver.find_element(By.TAG_NAME, "body").text:
+            raise RuntimeError("browser Open A displayed Node B content")
+        selector_open_a = True
+        driver.get(open_urls["b"])
+        wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
+        if node_ids[0] in driver.find_element(By.TAG_NAME, "body").text:
+            raise RuntimeError("browser Open B displayed Node A content")
+        selector_open_b = True
+
+        cookies_a = driver.get_cookies()
+        driver.get(open_urls["a"])
+        cookies_a = driver.get_cookies()
+        node_a_host = open_urls["a"].split("//", 1)[1].split("/", 1)[0].split(":", 1)[0].lower()
+        a_cookie_names = {cookie.get("name") for cookie in cookies_a if cookie.get("name")}
+        if any(cookie.get("domain", "").lstrip(".").lower() != node_a_host for cookie in cookies_a if cookie.get("name") == "drill_node"):
+            raise RuntimeError("Node A drill cookie was not host-only")
+        driver.get(open_urls["b"])
+        cookies_b = driver.get_cookies()
+        b_cookie_names = {cookie.get("name") for cookie in cookies_b if cookie.get("name")}
+        driver.get(selector_url)
+        selector_cookies = driver.get_cookies()
+        selector_cookie_names = {cookie.get("name") for cookie in selector_cookies if cookie.get("name")}
+        cookie_isolated = "drill_node" in a_cookie_names and "drill_node" not in b_cookie_names and "drill_node" not in selector_cookie_names
+        if not cookie_isolated:
+            raise RuntimeError("browser cookie jar isolation failed")
+
         lifecycle = {
             **bindings,
             "tlsValidation": "enabled",
@@ -248,6 +338,9 @@ def run(args: argparse.Namespace) -> int:
             "sessionBootstrapped": True,
             "tokenMinted": True,
             "plaintextOneTimeVerified": True,
+            "selectorOpenAVerified": selector_open_a,
+            "selectorOpenBVerified": selector_open_b,
+            "cookieIsolationVerified": cookie_isolated,
             "nodeIds": node_ids,
             "browserProducer": "runner-owned-firefox-selenium",
             "challengeDigest": challenge_digest,
@@ -259,6 +352,9 @@ def run(args: argparse.Namespace) -> int:
             time.sleep(POLL_SECONDS)
         return 0
     finally:
+        if proxy_server is not None:
+            proxy_server.shutdown()
+            proxy_server.server_close()
         if driver is not None:
             try:
                 driver.quit()

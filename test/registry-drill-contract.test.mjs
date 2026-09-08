@@ -33,6 +33,9 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /createCompatibilityReport\(/);
   assert.match(source, /REQUIRED_MOUNTED_MATRIX_FIELDS/);
   assert.match(source, /requiredMatrix/);
+  assert.match(source, /browserCheckpoint\.selectorOpenAVerified/);
+  assert.match(source, /browserCheckpoint\.cookieIsolationVerified/);
+  assert.match(source, /browser lifecycle checkpoint did not verify Selector Open A\/B navigation/);
   assert.match(source, /routeTargetsConfiguredAB/);
   assert.match(source, /hubRestartRecovery/);
   assert.match(source, /dshLossAndRecovery/);
@@ -65,6 +68,12 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /certutil timed out/);
   assert.match(source, /Firefox trust setup unavailable/);
   assert.match(source, /wait_for_node_ids\(driver, node_ids, stop_path\)/);
+  assert.match(source, /selectorOpenAVerified/);
+  assert.match(source, /selectorOpenBVerified/);
+  assert.match(source, /cookieIsolationVerified/);
+  assert.match(source, /driver\.get_cookies\(\)/);
+  assert.match(source, /open_urls/);
+  assert.match(source, /selectorUrl/);
   assert.match(source, /return True/);
   assert.doesNotMatch(source, /plaintext.*write_text|token.*write_text/i);
   assert.doesNotMatch(source, /accept_insecure_certs\s*=\s*True/);
