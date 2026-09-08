@@ -474,4 +474,3 @@ test("S7-F8: TLS trust failure matrix - unknown CA and wrong SAN are rejected fa
     await new Promise((resolve) => server.close(resolve));
   }
 });
-
