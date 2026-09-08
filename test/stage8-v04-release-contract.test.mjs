@@ -160,7 +160,7 @@ function validateReleaseProvenance({
     manifest.physicalMountedGate === "PASS" &&
     !/\bpending\b/i.test(attestationText);
 
-  if (mode === "final-release") {
+  if (mode.startsWith("final-release")) {
     assert.equal(mountedArtifact?.result, "PASS", "final release requires mounted smoke result PASS");
     assert.equal(mountedArtifact?.execution, "executed", "final release requires mounted smoke execution executed");
     assert.equal(manifest.physicalMountedGate, "PASS", "final release requires manifest physicalMountedGate PASS");
