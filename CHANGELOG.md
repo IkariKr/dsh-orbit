@@ -6,6 +6,30 @@ The project follows Semantic Versioning once the public API and deployment contr
 
 ## Unreleased
 
+### 0.4.0-rc.1 candidate - 2026-09-07
+
+### Added
+
+- **Endpoint Selector**: Dynamic, multi-node endpoint selector routing authenticated browser operators across enrolled DeepSeek Harness endpoints through dedicated subdomains (`n-<nodeId>.<routeDomain>`) while preserving the selector apex.
+- **Per-Node Route Target & Authenticated RouteIngress**: Granular operator-managed route target origins with cryptographic hop-by-hop authentication (`ORBIT-ROUTE-V1`), ensuring requests are authenticated, non-tamperable, and fail closed.
+- **Hub Route Identity & Key Rotation**: Deterministic per-node Ed25519 route keys (`hub_route_keys`) with graceful rotation overlap across process restarts and scheduled revocation.
+- **HTTP & WebSocket Routing**: Full bidirectional HTTP and duplex WebSocket streaming through RouteIngress with strict early-abort connection tracking, capacity limiting, and lifecycle cleanup.
+- **Multi-Node Isolation & Browser Context Separation**: Deterministic host-only cookie isolation preventing crosstalk or session leakage across distinct DSH node instances.
+- **Private CA TLS Verification**: Full TLS verification matrix fail-closed on unknown CA or mismatched SAN; strict prohibition of TLS verification bypasses.
+- **Deterministic 5-Condition Eligibility**: Real-time evaluation of `state=active`, `authenticated=ok`, `dshHealthy=ok`, `orbitCompatible=pass`, and `reachable=ok` before presenting nodes as selectable.
+- **Failure, Restart & Compatibility Hardening**: Seamless v0.3 to v0.4 SQLite database migrations (v3 -> v4 -> v5), atomic `VACUUM INTO` backup/restore preserving route targets and identities, process-local replay-window nonce semantics, and fail-closed compatibility withdrawal.
+
+### Known Limitations
+
+- **Reverse-connected nodes**: Not in v0.4. Reverse-connected nodes and NAT traversal are explicitly deferred to the v0.5 milestone.
+- **Replay cache boundary**: RouteIngress nonce replay cache is process-local in-memory; security boundaries across process restarts rely on signature verification and the 30-second timestamp skew window.
+- **No silent failover**: An outage on Node A fails closed and does not silently redirect operator traffic to Node B.
+- **Routing prerequisites**: Requires wildcard DNS, wildcard TLS, an outer authenticated gateway, and preservation of incoming Host headers.
+
+### Release status
+
+- `v0.4.0-rc.1` is awaiting final review. It is not tagged, published, or promoted to production.
+
 ### 0.3.0-rc.1 candidate - 2026-09-02
 
 ### Added

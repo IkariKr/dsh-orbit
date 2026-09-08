@@ -89,20 +89,42 @@ not advertise capabilities, and reports do not restore heartbeat contact. See
 `docs/registry-mvp.md`, `docs/registry-deployment.md`, and the frozen RFCs for
 the contract details.
 
-## Proposed v0.4 routing architecture
+## Implemented v0.4 Endpoint Selector & Routing Architecture
 
-v0.4 is intentionally a thin routing layer over the accepted Registry rather than a DSH-aware control plane. The proposal is documented in `docs/rfc/0010-node-endpoint-and-routing.md`, `docs/rfc/0011-browser-node-selection.md`, and `docs/sop/v0.4-endpoint-selector-multistage-sop.md`.
+The v0.4 release candidate implements the Endpoint Selector and routing layer
+over the accepted Registry:
 
-The selector lives at one familiar authority such as `dsh.example.com`. Selecting a node navigates to a deterministic authority such as `n-<node-id-hex>.dsh.example.com`; wildcard DNS/TLS terminates at the same Orbit deployment. Host-based selection keeps DSH at `/`, keeps browser authorities isolated per node, and avoids a mutable global active-node session.
+```text
+Browser --HTTPS (wildcard *.routeDomain)--> authenticated gateway --> Hub Router (loopback)
+                                                                       ^
+                                                                       | ORBIT-ROUTE-V1 (signed)
+                                                                       v
+                                                                 Node RouteIngress
+                                                                       | loopback
+                                                                      DSH
+```
 
-The Hub stores one operator-approved server-reachable route target per node. It authenticates to a small node-side Orbit route ingress with that node's RFC-0008 Hub identity, then forwards HTTP/WebSocket traffic opaquely to the node-local DSH compatibility adapter. The Hub router does not understand DSH cookie names/values, launch tokens, private RPC names, plugin routes, or frontend components; it may enforce generic HTTP isolation such as stripping parent-domain `Set-Cookie` scope and Orbit/gateway credentials. A DSH version is routable only while fresh compatibility evidence provides the v0.4 `web.routes` contract, including WebSocket transport evidence.
+The selector entrypoint lives at the route domain apex (e.g. `dsh.example.com`).
+Selecting an eligible node navigates to its deterministic authority
+`n-<nodeId>.<routeDomain>`. Wildcard DNS and TLS terminate at the outer gateway.
+Host-based selection keeps DSH at `/`, enforces host-only cookie isolation, and
+eliminates global mutable active-node session state.
 
-A failed node route never fails over to another node. Reverse-connected nodes, NAT traversal, multi-node sessions, and fleet execution remain later milestones.
+The Hub stores one operator-approved server-reachable route target per node. It
+authenticates to the node-side RouteIngress using per-node Ed25519 route keys
+(`hub_route_keys`, RFC-0010 / RFC-0008), forwarding HTTP and WebSocket traffic
+opaquely. The Hub router does not inspect private DSH application state. A node
+is routable only when all five deterministic conditions are met (`state=active`,
+`authenticated=ok`, `dshHealthy=ok`, `orbitCompatible=pass`, `reachable=ok`).
 
-## Explicitly out of scope for the implemented v0.3 release
+**No silent failover**: an unavailable node fails closed immediately.
 
-Endpoint routing, reverse connections, multi-node sessions, fleet execution,
-and third-party plugin compatibility remain outside the implemented v0.3 MVP.
-The v0.4 documents above are design proposals only until architecture review
-passes. Existing third-party compatibility debt remains freeze-only. See
-`docs/roadmap.md` and `docs/third-party-debt.md`.
+> **Reverse-connected nodes are not part of v0.4. They remain a v0.5 scope.**
+> NAT traversal, reverse tunnels, and fleet-wide execution remain future milestones.
+
+## Explicitly out of scope for the implemented v0.4 release
+
+Reverse connections, NAT traversal, multi-node concurrent sessions, fleet
+execution, and third-party plugin compatibility remain outside v0.4. Existing
+third-party compatibility debt remains freeze-only. See `docs/roadmap.md` and
+`docs/third-party-debt.md`.

@@ -47,7 +47,7 @@ function requireEnv(name) {
 function buildClient({ storePath, forbidEnrollmentBinding = false }) {
   const hubBaseUrl = requireEnv("DSH_ORBIT_HUB_URL");
   const availability = {
-    orbitVersion: process.env.DSH_ORBIT_NODE_ORBIT_VERSION ?? "0.3.0",
+    orbitVersion: process.env.DSH_ORBIT_NODE_ORBIT_VERSION ?? "0.4.0-rc.1",
     orbitRevision: process.env.DSH_ORBIT_NODE_ORBIT_REVISION ?? null,
     dshVersion: process.env.DSH_ORBIT_NODE_DSH_VERSION ?? "",
     compatibilityProfile: process.env.DSH_ORBIT_NODE_DSH_PROFILE ?? null,
