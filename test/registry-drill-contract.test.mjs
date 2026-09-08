@@ -72,6 +72,10 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /selectorOpenBVerified/);
   assert.match(source, /cookieIsolationVerified/);
   assert.match(source, /driver\.get_cookies\(\)/);
+  assert.match(source, /verify_cookie_jar_isolation/);
+  assert.match(source, /expected_value/);
+  assert.match(source, /drill_node/);
+  assert.match(source, /host-only/);
   assert.match(source, /open_urls/);
   assert.match(source, /selectorUrl/);
   assert.match(source, /return True/);

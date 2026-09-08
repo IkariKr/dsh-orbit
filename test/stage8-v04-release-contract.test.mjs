@@ -11,6 +11,14 @@ const rootPath = new URL("../", import.meta.url);
 
 const STAGE8_E73_BASE = "0dc00ceb3b0574e2a6bd81eb62502fd6c2e233f3";
 const TEST_CONTRACT_BASE = "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582";
+const REQUIRED_CLOSURE_ARTIFACTS = [
+  "fresh-install.json",
+  "migration.json",
+  "backup-restore.json",
+  "mounted-runner-raw.json",
+  "two-node-mounted-smoke.json",
+  "promotion-plan-validation.json",
+];
 
 function gitCommitExists(commit) {
   try {
@@ -76,6 +84,14 @@ function assertFullCommit(commit, label) {
 
 function sha256(buf) {
   return createHash("sha256").update(buf).digest("hex");
+}
+
+function assertRequiredClosureArtifactSet(manifest) {
+  assert.deepEqual(
+    Object.keys(manifest.artifacts ?? {}).sort(),
+    [...REQUIRED_CLOSURE_ARTIFACTS].sort(),
+    "closure manifest artifact set must be complete and exact",
+  );
 }
 
 async function detectProvenanceMode() {
@@ -277,10 +293,14 @@ test("Stage 8 v0.4 release provenance contract: candidate vs closure, evidence m
   const manifest = JSON.parse(await text("test/evidence/stage8/manifest.json"));
   const attestationText = await text("docs/release-attestations/v0.4.0-rc.1.md");
   assert.ok(manifest.artifacts && Object.keys(manifest.artifacts).length > 0, "closure manifest must declare artifacts");
+  assertRequiredClosureArtifactSet(manifest);
   const artifacts = {};
   for (const [fileName] of Object.entries(manifest.artifacts)) {
     const buffer = await readFile(new URL(`../test/evidence/stage8/${fileName}`, import.meta.url));
     artifacts[fileName] = { buffer, json: JSON.parse(buffer.toString("utf8")) };
+  }
+  for (const requiredArtifact of REQUIRED_CLOSURE_ARTIFACTS) {
+    assert.ok(artifacts[requiredArtifact], `required closure artifact missing: ${requiredArtifact}`);
   }
   validateReleaseProvenance({
     candidateCommit,
@@ -293,6 +313,13 @@ test("Stage 8 v0.4 release provenance contract: candidate vs closure, evidence m
     attestationText,
     mode: "final-release",
   });
+});
+
+test("Stage 8 closure requires every required artifact", () => {
+  for (const missing of ["migration.json", "backup-restore.json", "promotion-plan-validation.json"]) {
+    const partial = { artifacts: Object.fromEntries(REQUIRED_CLOSURE_ARTIFACTS.filter((name) => name !== missing).map((name) => [name, {}])) };
+    assert.throws(() => assertRequiredClosureArtifactSet(partial), /complete and exact/, `missing ${missing} must fail closed`);
+  }
 });
 
 test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed gate semantics", () => {
@@ -339,15 +366,19 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
   const mountedBuf = Buffer.from(JSON.stringify(validMountedSmokeJson));
   const rawArtifact = { buffer: rawBuf, json: validRawJson };
 
+  const validArtifactBuffers = {
+    "fresh-install.json": freshBuf,
+    "migration.json": freshBuf,
+    "backup-restore.json": freshBuf,
+    "mounted-runner-raw.json": rawBuf,
+    "two-node-mounted-smoke.json": mountedBuf,
+    "promotion-plan-validation.json": freshBuf,
+  };
   const validManifest = {
     testedCandidateCommit: candidateCommit,
     parentStage7Evidence: STAGE8_E73_BASE,
     physicalMountedGate: "PASS",
-    artifacts: {
-      "fresh-install.json": { sha256: sha256(freshBuf), bytes: freshBuf.byteLength },
-    "mounted-runner-raw.json": { sha256: sha256(rawBuf), bytes: rawBuf.byteLength },
-    "two-node-mounted-smoke.json": { sha256: sha256(mountedBuf), bytes: mountedBuf.byteLength },
-  },
+    artifacts: Object.fromEntries(Object.entries(validArtifactBuffers).map(([name, buffer]) => [name, { sha256: sha256(buffer), bytes: buffer.byteLength }])),
   mountedRun: {
     runId: validRawJson.runId,
     rawEvidenceSha256: sha256(rawBuf),
@@ -356,11 +387,11 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
 
   const validAttestation = `Candidate: ${candidateCommit}\nClosure: ${releaseClosureCommit}\nParent: ${STAGE8_E73_BASE}\nStatus: PASS`;
 
-  const validArtifacts = {
-    "fresh-install.json": { buffer: freshBuf, json: validFreshInstallJson },
-    "mounted-runner-raw.json": rawArtifact,
-    "two-node-mounted-smoke.json": { buffer: mountedBuf, json: validMountedSmokeJson },
-  };
+  const validArtifacts = Object.fromEntries(REQUIRED_CLOSURE_ARTIFACTS.map((name) => {
+    if (name === "mounted-runner-raw.json") return [name, rawArtifact];
+    if (name === "two-node-mounted-smoke.json") return [name, { buffer: mountedBuf, json: validMountedSmokeJson }];
+    return [name, { buffer: freshBuf, json: validFreshInstallJson }];
+  }));
 
   // 1. Valid final release bundle passes
   const validResult = validateReleaseProvenance({

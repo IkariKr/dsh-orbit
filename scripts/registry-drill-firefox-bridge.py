@@ -147,6 +147,22 @@ def wait_for(wait: WebDriverWait, condition):
     return wait.until(condition)
 
 
+def verify_cookie_jar_isolation(cookies_a: list[dict], cookies_b: list[dict], cookies_selector: list[dict], host_a: str, host_b: str) -> bool:
+    def drill_cookie(cookies: list[dict], expected_value: str, expected_host: str) -> None:
+        entries = [cookie for cookie in cookies if cookie.get("name") == "drill_node"]
+        if len(entries) != 1 or entries[0].get("value") != expected_value:
+            raise RuntimeError("browser cookie jar had the wrong node cookie")
+        domain = str(entries[0].get("domain", "")).lstrip(".").lower()
+        if domain != expected_host.lower():
+            raise RuntimeError("browser drill cookie was not host-only for its node")
+
+    drill_cookie(cookies_a, "A", host_a)
+    drill_cookie(cookies_b, "B", host_b)
+    if any(cookie.get("name") == "drill_node" for cookie in cookies_selector):
+        raise RuntimeError("selector browser cookie jar received a downstream drill cookie")
+    return True
+
+
 def browser_text(driver, locator: tuple[str, str]) -> str:
     return driver.find_element(*locator).text.strip()
 
@@ -330,22 +346,15 @@ def run(args: argparse.Namespace) -> int:
             raise RuntimeError("browser Open B displayed Node A content")
         selector_open_b = True
 
-        cookies_a = driver.get_cookies()
         driver.get(open_urls["a"])
         cookies_a = driver.get_cookies()
-        node_a_host = open_urls["a"].split("//", 1)[1].split("/", 1)[0].split(":", 1)[0].lower()
-        a_cookie_names = {cookie.get("name") for cookie in cookies_a if cookie.get("name")}
-        if any(cookie.get("domain", "").lstrip(".").lower() != node_a_host for cookie in cookies_a if cookie.get("name") == "drill_node"):
-            raise RuntimeError("Node A drill cookie was not host-only")
         driver.get(open_urls["b"])
         cookies_b = driver.get_cookies()
-        b_cookie_names = {cookie.get("name") for cookie in cookies_b if cookie.get("name")}
         driver.get(selector_url)
         selector_cookies = driver.get_cookies()
-        selector_cookie_names = {cookie.get("name") for cookie in selector_cookies if cookie.get("name")}
-        cookie_isolated = "drill_node" in a_cookie_names and "drill_node" not in b_cookie_names and "drill_node" not in selector_cookie_names
-        if not cookie_isolated:
-            raise RuntimeError("browser cookie jar isolation failed")
+        node_a_host = urlparse(open_urls["a"]).hostname or ""
+        node_b_host = urlparse(open_urls["b"]).hostname or ""
+        cookie_isolated = verify_cookie_jar_isolation(cookies_a, cookies_b, selector_cookies, node_a_host, node_b_host)
 
         lifecycle = {
             **bindings,
