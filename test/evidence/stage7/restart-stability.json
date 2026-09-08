@@ -1,0 +1,8 @@
+{
+  "artifact": "restart-stability",
+  "testedCandidateCommit": "190b296352513b1d92d359fefebf0f40569675aa",
+  "hubRestart": { "sameNodeIds": true, "sameRouteTargets": true, "sameActiveKeySet": true, "allEligible": true },
+  "nodeAAndGatewayRecovery": { "sharedNamespaceListenerRestartRequired": true, "recoveredWithoutDataReset": true, "routeReadyStatus": 200 },
+  "physicalHttpWsCleanup": { "status": "NOT_EXECUTED", "classification": "NON-BLOCKING_SUPPLEMENTAL_OBSERVATION", "reason": "independent physical abort-counter measurement was not completed; automated C7-F12 and Stage 4 capacity/cleanup integration passed separately" },
+  "status": "PASS"
+}

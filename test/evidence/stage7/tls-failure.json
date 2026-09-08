@@ -1,0 +1,13 @@
+{
+  "artifact": "tls-failure",
+  "testedCandidateCommit": "190b296352513b1d92d359fefebf0f40569675aa",
+  "endpoint": "node-a.stage7.local route ingress on isolated Node A",
+  "certificate": { "issuer": "CN=DSH Orbit Stage7 C7.2 Physical CA", "subject": "CN=node-a.stage7.local", "san": ["IP:<nas-node-a-address>", "DNS:node-a.stage7.local"] },
+  "matrix": {
+    "unknownCa": { "rejected": true, "verifyCode": "unable to get local issuer certificate" },
+    "wrongSan": { "rejected": true, "verifyCode": "hostname mismatch" },
+    "matchingCaAndSan": { "accepted": true, "verifyCode": "0 (ok)" }
+  },
+  "tlsBypass": false,
+  "status": "PASS"
+}

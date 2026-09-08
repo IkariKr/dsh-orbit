@@ -1,0 +1,33 @@
+{
+  "artifact": "automated-drill",
+  "testedCandidateCommit": "190b296352513b1d92d359fefebf0f40569675aa",
+  "branch": "chore/v0.4-stage7-corrective-evidence",
+  "source": "runner-owned data/stage7-drill-evidence.json",
+  "runId": "stage7-20260908085038002-58000",
+  "cleanWorktreeBefore": true,
+  "schemaVersion": 5,
+  "success": true,
+  "failedPredicates": [],
+  "requiredPredicates": {
+    "migrations": true,
+    "migrationV04": true,
+    "routeIdentityBackupRestore": true,
+    "secretProtection": true,
+    "routeIdentityCorruption": true,
+    "hubRouteKeyRotation": true,
+    "nonceRestartSemantics": true,
+    "tlsFailureMatrix": true,
+    "compatibilityWithdrawal": true,
+    "dshLossRecovery": true,
+    "bookmarkReenroll": true,
+    "httpWsCleanup": true,
+    "restartStability": true,
+    "failureModes": true,
+    "freshInstall": true,
+    "backupRestore": true,
+    "retention": true,
+    "processBoundary": true,
+    "cleanup": true
+  },
+  "secretPolicy": "sanitized runner summary; no private keys, token values/digests, passwords, cookies, CSRF values, or authenticated headers"
+}

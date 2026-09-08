@@ -1,0 +1,25 @@
+{
+  "artifact": "live-two-host",
+  "testedCandidateCommit": "190b296352513b1d92d359fefebf0f40569675aa",
+  "topology": "isolated NAS-class Node A + workstation-class Node B",
+  "capturedAt": "2026-09-08T08:52:39.878Z",
+  "nodes": [
+    {
+      "nodeId": "node_c225828f64597c70f715b3bdb1516093",
+      "state": "active",
+      "routeTarget": "https://<nas-node-a-route>:25081",
+      "hubRouteKeys": [{ "keyId": "b6398ce068eb106cc96bf6b50dd4e80c", "state": "active", "overlapUntil": null }],
+      "health": { "registryContact": "fresh", "dshHealthy": "ok", "orbitCompatible": "pass", "reachable": "ok", "capabilities": ["sessions.resume", "settings.remote", "web.routes"] }
+    },
+    {
+      "nodeId": "node_a7fa8eb2a60d3554702ad1457640c0bc",
+      "state": "active",
+      "routeTarget": "https://<workstation-node-b-route>:25082",
+      "hubRouteKeys": [{ "keyId": "f7a94ea5351f5259fd365c2204d799bd", "state": "active", "overlapUntil": null }],
+      "health": { "registryContact": "fresh", "dshHealthy": "ok", "orbitCompatible": "pass", "reachable": "ok", "capabilities": ["sessions.resume", "settings.remote", "web.routes"] }
+    }
+  ],
+  "hubRestart": { "sameNodeIds": true, "sameRouteTargets": true, "sameRouteKeyIds": true, "allEligible": true },
+  "isolation": { "nodeBLiveDuringNodeALoss": true, "nodeBReachableAfterNodeALoss": "ok", "crossTalkObserved": false },
+  "tls": { "explicitCa": true, "rejectUnauthorized": true, "hostnameValidation": true, "bypass": false }
+}

@@ -1,0 +1,27 @@
+{
+  "artifact": "verification-summary",
+  "testedCandidateCommit": "190b296352513b1d92d359fefebf0f40569675aa",
+  "branch": "chore/v0.4-stage7-corrective-evidence",
+  "generatedAt": "2026-09-08T09:02:07.917Z",
+  "focusedTests": { "total": 35, "pass": 33, "fail": 0, "skip": 2, "skipReason": "Windows POSIX permission-bit checks" },
+  "stage7Drill": { "exitCode": 0, "success": true, "failedPredicates": [] },
+  "fullCheck": { "total": 385, "pass": 380, "fail": 0, "skip": 5, "skipReason": "Windows POSIX permission checks and GNU tar Windows-path environment skips" },
+  "realDsh": { "version": "0.1.1-rc.2", "commitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e", "pass": 1, "fail": 0, "skip": 0 },
+  "publicTree": "PASS",
+  "diffCheck": "PASS",
+  "workingTreeBeforeEvidence": "clean",
+  "physical": {
+    "topology": "isolated NAS-class + workstation-class two-host rehearsal",
+    "hubRestartPersistence": "PASS",
+    "dshLossRecovery": "PASS",
+    "routeKeyOverlapAndRestart": "PASS",
+    "scheduledPhysicalRevocation": "NOT_EXECUTED / NON-BLOCKING_SUPPLEMENTAL_OBSERVATION",
+    "tlsFailureMatrix": "PASS",
+    "deleteReenroll": "PASS",
+    "physicalHttpWsAbortCounter": "NOT_EXECUTED / NON-BLOCKING_SUPPLEMENTAL_OBSERVATION",
+    "nodeBIsolation": "PASS"
+  },
+  "reviewGate": "READY_FOR_INDEPENDENT_STAGE7_FINAL_REVIEW",
+  "stage8": "NOT_STARTED",
+  "securityBoundary": "No TLS bypass; no credentials, tokens, private keys, cookies, CSRF values, or raw authenticated headers included"
+}

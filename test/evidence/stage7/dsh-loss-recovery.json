@@ -1,0 +1,9 @@
+{
+  "artifact": "dsh-loss-recovery",
+  "testedCandidateCommit": "190b296352513b1d92d359fefebf0f40569675aa",
+  "nodeA": "node_c225828f64597c70f715b3bdb1516093",
+  "loss": { "dshContainerStopped": true, "routeIngressKeptAlive": true, "reachable": "unreachable", "nodeBRemainedReachable": "ok" },
+  "recovery": { "dshRestored": true, "signedRouteReadyStatus": 200, "ready": true, "reachable": "ok", "registryContact": "fresh" },
+  "tlsVerification": { "explicitCa": true, "matchingSan": true, "rejectUnauthorized": true, "bypass": false },
+  "status": "PASS"
+}

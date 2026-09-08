@@ -1,0 +1,11 @@
+{
+  "artifact": "route-key-rotation",
+  "testedCandidateCommit": "190b296352513b1d92d359fefebf0f40569675aa",
+  "nodeId": "node_c225828f64597c70f715b3bdb1516093",
+  "initialKeyId": "10db807057bba7eb2e0fa6acdfb83947",
+  "newKeyId": "34e3261746a13b68fac869d5204b8a30",
+  "overlap": { "oldState": "rotating", "newState": "active", "oldOverlapUntil": "2026-09-22T08:22:06.405Z", "thirdKeyObserved": false },
+  "hubRestart": { "overlapPersisted": true, "newKeyRemainedActive": true, "oldKeyRemainedRotating": true },
+  "scheduledOldKeyRevocation": { "status": "NOT_EXECUTED", "classification": "NON-BLOCKING_SUPPLEMENTAL_OBSERVATION", "reason": "physical 14-day window was not elapsed; deterministic automated S7-F6 revocation semantics passed" },
+  "status": "PASS"
+}
