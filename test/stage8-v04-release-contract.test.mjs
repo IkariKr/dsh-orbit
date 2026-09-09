@@ -94,6 +94,72 @@ function assertRequiredClosureArtifactSet(manifest) {
   );
 }
 
+function assertFinalReleaseArtifactResults({ artifacts }) {
+  const acceptanceKinds = {
+    "fresh-install.json": "stage8-fresh-install-acceptance",
+    "migration.json": "stage8-migration-acceptance",
+    "backup-restore.json": "stage8-backup-restore-acceptance",
+  };
+  for (const [fileName, kind] of Object.entries(acceptanceKinds)) {
+    assert.equal(artifacts[fileName]?.json?.kind, kind, `${fileName} kind mismatch`);
+    assert.equal(
+      artifacts[fileName]?.json?.result,
+      "PASS",
+      `final release requires ${fileName} result PASS`,
+    );
+  }
+
+  const promotionPlan = artifacts["promotion-plan-validation.json"]?.json;
+  assert.equal(promotionPlan?.schemaVersion, 1, "promotion plan schemaVersion must be 1");
+  assert.equal(promotionPlan?.kind, "stage8-promotion-plan-validation", "promotion plan kind mismatch");
+  assert.deepEqual(
+    promotionPlan?.productionTarget,
+    {
+      authorityApex: "dsh.ikarikore.top",
+      wildcardRouteDomain: "*.dsh.ikarikore.top",
+      rollbackContract: "gateway-and-dns-only-no-identity-destruction",
+    },
+    "promotion plan must preserve the gateway/DNS-only rollback contract",
+  );
+  assert.equal(
+    promotionPlan?.preflightChecksPass,
+    true,
+    "final release requires promotion preflightChecksPass true",
+  );
+  assert.equal(
+    promotionPlan?.cutoverStepsReviewed,
+    true,
+    "final release requires promotion cutoverStepsReviewed true",
+  );
+  assert.equal(
+    promotionPlan?.status,
+    "PLAN_DOCUMENTED_PROMOTION_DEFERRED_UNTIL_FINAL_REVIEW",
+    "final release requires promotion to remain deferred until final review",
+  );
+  assert.equal(
+    typeof promotionPlan?.rollbackTestedInStaging,
+    "boolean",
+    "promotion plan rollbackTestedInStaging must be explicit",
+  );
+}
+
+function replaceArtifact({ manifest, artifacts }, fileName, json) {
+  const buffer = Buffer.from(JSON.stringify(json));
+  return {
+    manifest: {
+      ...manifest,
+      artifacts: {
+        ...manifest.artifacts,
+        [fileName]: { sha256: sha256(buffer), bytes: buffer.byteLength },
+      },
+    },
+    artifacts: {
+      ...artifacts,
+      [fileName]: { buffer, json },
+    },
+  };
+}
+
 async function detectProvenanceMode() {
   const attestationPath = new URL("../docs/release-attestations/v0.4.0-rc.1.md", import.meta.url);
   const manifestPath = new URL("../test/evidence/stage8/manifest.json", import.meta.url);
@@ -128,7 +194,7 @@ function validateMountedBinding({ mountedArtifact, rawArtifact, rawBuffer, manif
 
 /**
  * Mechanically validates a frozen candidate/closure bundle.
- * Final-release mode requires mounted PASS, strict chronology, hashes, and no pending wording.
+ * Final-release mode requires typed artifact outcomes, mounted PASS, strict chronology, hashes, and no pending wording.
  * The closure SHA is never required inside the attestation itself.
  */
 function validateReleaseProvenance({
@@ -175,6 +241,10 @@ function validateReleaseProvenance({
       executedDate.getTime() < closureCommitDate.getTime(),
       `chronology: ${fileName} executedAt (${executedDate.toISOString()}) must precede closure commit (${closureCommitDate.toISOString()})`,
     );
+  }
+
+  if (mode.startsWith("final-release")) {
+    assertFinalReleaseArtifactResults({ artifacts });
   }
 
   const mountedArtifact = artifacts["two-node-mounted-smoke.json"]?.json;
@@ -330,9 +400,39 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
 
   const validFreshInstallJson = {
     schemaVersion: 1,
+    kind: "stage8-fresh-install-acceptance",
     candidateCommit,
     executedAt: "2026-09-07T08:00:00.000Z",
     result: "PASS",
+  };
+  const validMigrationJson = {
+    schemaVersion: 1,
+    kind: "stage8-migration-acceptance",
+    candidateCommit,
+    executedAt: "2026-09-07T08:01:00.000Z",
+    result: "PASS",
+  };
+  const validBackupRestoreJson = {
+    schemaVersion: 1,
+    kind: "stage8-backup-restore-acceptance",
+    candidateCommit,
+    executedAt: "2026-09-07T08:02:00.000Z",
+    result: "PASS",
+  };
+  const validPromotionPlanJson = {
+    schemaVersion: 1,
+    kind: "stage8-promotion-plan-validation",
+    candidateCommit,
+    executedAt: "2026-09-07T08:03:00.000Z",
+    productionTarget: {
+      authorityApex: "dsh.ikarikore.top",
+      wildcardRouteDomain: "*.dsh.ikarikore.top",
+      rollbackContract: "gateway-and-dns-only-no-identity-destruction",
+    },
+    preflightChecksPass: true,
+    cutoverStepsReviewed: true,
+    rollbackTestedInStaging: false,
+    status: "PLAN_DOCUMENTED_PROMOTION_DEFERRED_UNTIL_FINAL_REVIEW",
   };
   const validMatrix = Object.fromEntries(REQUIRED_MOUNTED_MATRIX_FIELDS.map((field) => [field, "PASS"]));
   const validRawJson = {
@@ -363,16 +463,19 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
     },
   };
   const freshBuf = Buffer.from(JSON.stringify(validFreshInstallJson));
+  const migrationBuf = Buffer.from(JSON.stringify(validMigrationJson));
+  const backupRestoreBuf = Buffer.from(JSON.stringify(validBackupRestoreJson));
+  const promotionPlanBuf = Buffer.from(JSON.stringify(validPromotionPlanJson));
   const mountedBuf = Buffer.from(JSON.stringify(validMountedSmokeJson));
   const rawArtifact = { buffer: rawBuf, json: validRawJson };
 
   const validArtifactBuffers = {
     "fresh-install.json": freshBuf,
-    "migration.json": freshBuf,
-    "backup-restore.json": freshBuf,
+    "migration.json": migrationBuf,
+    "backup-restore.json": backupRestoreBuf,
     "mounted-runner-raw.json": rawBuf,
     "two-node-mounted-smoke.json": mountedBuf,
-    "promotion-plan-validation.json": freshBuf,
+    "promotion-plan-validation.json": promotionPlanBuf,
   };
   const validManifest = {
     testedCandidateCommit: candidateCommit,
@@ -387,11 +490,14 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
 
   const validAttestation = `Candidate: ${candidateCommit}\nClosure: ${releaseClosureCommit}\nParent: ${STAGE8_E73_BASE}\nStatus: PASS`;
 
-  const validArtifacts = Object.fromEntries(REQUIRED_CLOSURE_ARTIFACTS.map((name) => {
-    if (name === "mounted-runner-raw.json") return [name, rawArtifact];
-    if (name === "two-node-mounted-smoke.json") return [name, { buffer: mountedBuf, json: validMountedSmokeJson }];
-    return [name, { buffer: freshBuf, json: validFreshInstallJson }];
-  }));
+  const validArtifacts = {
+    "fresh-install.json": { buffer: freshBuf, json: validFreshInstallJson },
+    "migration.json": { buffer: migrationBuf, json: validMigrationJson },
+    "backup-restore.json": { buffer: backupRestoreBuf, json: validBackupRestoreJson },
+    "mounted-runner-raw.json": rawArtifact,
+    "two-node-mounted-smoke.json": { buffer: mountedBuf, json: validMountedSmokeJson },
+    "promotion-plan-validation.json": { buffer: promotionPlanBuf, json: validPromotionPlanJson },
+  };
 
   // 1. Valid final release bundle passes
   const validResult = validateReleaseProvenance({
@@ -407,7 +513,57 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
   });
   assert.equal(validResult.isPass, true);
 
-  // 2. Fails closed if mounted smoke result is not PASS
+  const assertArtifactRejected = (fileName, json, message) => {
+    const variant = replaceArtifact({ manifest: validManifest, artifacts: validArtifacts }, fileName, json);
+    assert.throws(
+      () =>
+        validateReleaseProvenance({
+          candidateCommit,
+          releaseClosureCommit,
+          candidateCommitDate,
+          closureCommitDate,
+          parentBaseline: STAGE8_E73_BASE,
+          ...variant,
+          attestationText: validAttestation,
+          mode: "final-release-synthetic",
+        }),
+      message,
+    );
+  };
+
+  // 2. Non-mounted acceptance artifacts must report their own successful result.
+  assertArtifactRejected(
+    "fresh-install.json",
+    { ...validFreshInstallJson, result: "FAIL" },
+    /final release requires fresh-install\.json result PASS/,
+  );
+  assertArtifactRejected(
+    "migration.json",
+    { ...validMigrationJson, result: "FAIL" },
+    /final release requires migration\.json result PASS/,
+  );
+  assertArtifactRejected(
+    "backup-restore.json",
+    { ...validBackupRestoreJson, result: "FAIL" },
+    /final release requires backup-restore\.json result PASS/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, preflightChecksPass: false },
+    /final release requires promotion preflightChecksPass true/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, cutoverStepsReviewed: false },
+    /final release requires promotion cutoverStepsReviewed true/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, status: "PROMOTION_EXECUTED" },
+    /final release requires promotion to remain deferred until final review/,
+  );
+
+  // 3. Fails closed if mounted smoke result is not PASS
   const blockedMountedJson = { ...validMountedSmokeJson, result: "BLOCKED" };
   const blockedBuf = Buffer.from(JSON.stringify(blockedMountedJson));
   assert.throws(
