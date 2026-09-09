@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 import { execFile, spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -236,7 +237,13 @@ function makeGatewayRequest({
   });
 }
 
-function startHubProcess({ dbPath, port = 0, caCertPath, routeDomain = REHEARSAL_DOMAIN, cadenceSeconds = 1 }) {
+async function startHubProcess({ dbPath, port = null, caCertPath, routeDomain = REHEARSAL_DOMAIN, cadenceSeconds = 1 }) {
+  if (port === null) {
+    const reservation = net.createServer();
+    await new Promise((resolve) => reservation.listen(0, "127.0.0.1", resolve));
+    port = reservation.address().port;
+    await new Promise((resolve) => reservation.close(resolve));
+  }
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["bin/dsh-orbit-hub.mjs"], {
       cwd: REPO_ROOT,
@@ -244,6 +251,7 @@ function startHubProcess({ dbPath, port = 0, caCertPath, routeDomain = REHEARSAL
         ...process.env,
         DSH_ORBIT_HUB_DB: dbPath,
         DSH_ORBIT_HUB_PORT: String(port),
+        DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: `127.0.0.1:${port}`,
         DSH_ORBIT_HUB_LISTEN: "127.0.0.1",
         DSH_ORBIT_HUB_ROUTE_DOMAIN: routeDomain,
         DSH_ORBIT_HUB_CA_CERT: caCertPath,
@@ -464,6 +472,7 @@ async function getOperatorSession(hubBaseUrl) {
     headers: {
       ...GATEWAY_HEADERS,
       origin,
+      host: new URL(hubBaseUrl).host,
       "sec-fetch-site": "same-origin",
     },
   });
@@ -483,6 +492,7 @@ async function operatorMintToken(hubBaseUrl, session) {
       cookie: `dsh-orbit-hub-session=${session.cookie}`,
       "x-csrf-token": session.csrfToken,
       origin,
+      host: new URL(hubBaseUrl).host,
       "sec-fetch-site": "same-origin",
     },
     body: JSON.stringify({ purpose: "enroll" }),
@@ -502,6 +512,7 @@ async function operatorSetRouteTarget(hubBaseUrl, session, nodeId, routeTarget) 
       cookie: `dsh-orbit-hub-session=${session.cookie}`,
       "x-csrf-token": session.csrfToken,
       origin,
+      host: new URL(hubBaseUrl).host,
       "sec-fetch-site": "same-origin",
     },
     body: JSON.stringify({ routeTarget }),
@@ -518,6 +529,7 @@ async function operatorGetNode(hubBaseUrl, session, nodeId) {
       ...GATEWAY_HEADERS,
       cookie: `dsh-orbit-hub-session=${session.cookie}`,
       origin,
+      host: new URL(hubBaseUrl).host,
       "sec-fetch-site": "same-origin",
     },
   });

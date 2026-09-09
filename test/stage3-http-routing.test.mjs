@@ -487,17 +487,15 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
     const multiTrailingDotBody = await multiTrailingDotRes.json();
     assert.equal(multiTrailingDotBody.error.code, "route-not-found");
 
-    // Stage 3 routing classification must not break the pre-existing IPv6
-    // loopback Registry/browser ingress. Bracketed IPv6 is unrelated to the
-    // DNS route domain and therefore continues to the ordinary UI shell.
+    // Bracketed IPv6 is outside the supported public authority grammar and
+    // must fail closed rather than become an implicit management authority.
     const ipv6LoopbackHostRes = await makeHttpRequest({
       port: hubPort,
       path: "/",
       method: "GET",
       headers: { host: "[::1]:5445" },
     });
-    assert.equal(ipv6LoopbackHostRes.status, 200);
-    assert.match(await ipv6LoopbackHostRes.text(), /<!doctype html|<html/i);
+    assert.equal(ipv6LoopbackHostRes.status, 404);
 
     const invalidSessionRes = await makeHttpRequest({
       port: hubPort,

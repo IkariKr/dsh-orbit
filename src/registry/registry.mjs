@@ -113,6 +113,7 @@ export class Registry {
     hubRouteOverlapDays = HUB_ROUTE_ROTATION_OVERLAP_DAYS_DEFAULT,
     routeDomain = DEFAULT_ROUTE_DOMAIN,
     trustedExternalScheme = null,
+    managementAuthority = null,
     caCertificates = null,
   }) {
     this.db = db;
@@ -133,6 +134,7 @@ export class Registry {
     this.hubRouteOverlapDays = hubRouteOverlapDays;
     this.routeDomain = validateRouteDomain(routeDomain);
     this.trustedExternalScheme = trustedExternalScheme;
+    this.managementAuthority = managementAuthority;
     this.caCertificates = caCertificates;
     this.routeProbeFailures = new Map();
     this.reconcileCapabilities();

@@ -5,6 +5,8 @@
 // listen is refused unconditionally in v0.3 — there is no production
 // escape hatch.
 
+import { validateManagementAuthority } from "./protocol.mjs";
+
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"]);
 
 export function isLoopbackListen(host) {
@@ -42,7 +44,7 @@ export function validateWebSocketConfig({ maxWsGlobal, maxWsPerNode, wsHandshake
 
 // Returns a list of human-readable configuration errors (empty when the
 // configuration is acceptable for startup).
-export function validateHubConfig({ listen, trustedExternalScheme, maxWsGlobal, maxWsPerNode, wsHandshakeTimeoutMs }) {
+export function validateHubConfig({ listen, trustedExternalScheme, managementAuthority = null, routeDomain = null, maxWsGlobal, maxWsPerNode, wsHandshakeTimeoutMs }) {
   const errors = [];
   if (typeof listen !== "string" || listen === "") {
     errors.push("DSH_ORBIT_HUB_LISTEN must be a hostname or address");
@@ -53,6 +55,13 @@ export function validateHubConfig({ listen, trustedExternalScheme, maxWsGlobal, 
   }
   if (trustedExternalScheme !== "http" && trustedExternalScheme !== "https") {
     errors.push(`DSH_ORBIT_HUB_TRUSTED_SCHEME must be http or https (got ${JSON.stringify(trustedExternalScheme)})`);
+  }
+  if (managementAuthority !== null) {
+    try {
+      validateManagementAuthority(managementAuthority, routeDomain ?? "localhost");
+    } catch (error) {
+      errors.push(`DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY is invalid: ${error.message}`);
+    }
   }
   errors.push(...validateWebSocketConfig({ maxWsGlobal, maxWsPerNode, wsHandshakeTimeoutMs }));
   return errors;

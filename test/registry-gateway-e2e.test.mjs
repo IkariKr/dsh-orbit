@@ -14,6 +14,7 @@ import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { createServer as createTlsServer } from "node:https";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
@@ -79,7 +80,7 @@ async function makeTlsMaterials(dir) {
 // Minimal Caddy-equivalent gateway: TLS termination, basic-auth gate,
 // strip + inject of the internal headers, browser-surface proxying
 // only; the machine surface is refused with 403.
-async function startGateway({ certPath, keyPath, hubUrl, onProxied }) {
+async function startGateway({ certPath, keyPath, hubUrl, onProxied, port = 0 }) {
   const tlsOptions = { key: await readFile(keyPath), cert: await readFile(certPath) };
   const server = createTlsServer(tlsOptions, (request, response) => {
     const path = new URL(request.url, "https://registry.test").pathname;
@@ -109,7 +110,7 @@ async function startGateway({ certPath, keyPath, hubUrl, onProxied }) {
     onProxied?.({ method: request.method, path, headers: request.headers });
     const upstream = httpRequest(
       hubUrl.replace(/\/$/, "") + path,
-      { method: request.method, headers: request.headers },
+      { method: request.method, headers: { ...request.headers, host: request.headers.host } },
       (upstreamResponse) => {
         response.writeHead(upstreamResponse.statusCode, upstreamResponse.headers);
         upstreamResponse.pipe(response);
@@ -121,7 +122,7 @@ async function startGateway({ certPath, keyPath, hubUrl, onProxied }) {
     });
     request.pipe(upstream);
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
   const baseUrl = `https://127.0.0.1:${server.address().port}`;
   return {
     baseUrl,
@@ -184,11 +185,18 @@ test("gateway E2E: TLS + auth gate + strip/inject pass-through, machine denied, 
   const clock = { now: new Date() };
   const runNow = () => clock.now;
 
+  // Reserve the external gateway port first so Hub's configured management
+  // authority and the browser-visible gateway authority are identical.
+  const gatewayPortReservation = net.createServer();
+  await new Promise((resolve) => gatewayPortReservation.listen(0, "127.0.0.1", resolve));
+  const gatewayPort = gatewayPortReservation.address().port;
+  await new Promise((resolve) => gatewayPortReservation.close(resolve));
+
   // Hub on the loopback with a FILE-backed registry.
   let registry = new Registry({ db: openRegistryDatabase(dbPath) });
   let hub = createHubServer({
     registry,
-    options: { gatewayAssertionSecret: ASSERTION, operatorPrincipal: { mode: "inject" }, trustedExternalScheme: "https" },
+    options: { gatewayAssertionSecret: ASSERTION, operatorPrincipal: { mode: "inject" }, trustedExternalScheme: "https", managementAuthority: `127.0.0.1:${gatewayPort}` },
   });
   await new Promise((resolve) => hub.server.listen(0, "127.0.0.1", resolve));
   const hubPort = hub.server.address().port;
@@ -205,7 +213,7 @@ test("gateway E2E: TLS + auth gate + strip/inject pass-through, machine denied, 
   });
 
   const seen = [];
-  let gateway = await startGateway({ certPath, keyPath, hubUrl, onProxied: (info) => seen.push(info) });
+  let gateway = await startGateway({ certPath, keyPath, hubUrl, port: gatewayPort, onProxied: (info) => seen.push(info) });
 
   // 1. The gate refuses unauthenticated requests BEFORE the hub; a
   // forged internal assertion is stripped, never trusted.
@@ -261,7 +269,7 @@ test("gateway E2E: TLS + auth gate + strip/inject pass-through, machine denied, 
   assert.equal(whileDown, null, "browser path must be down while the gateway is down");
   assert.equal(registry.getNode(a.nodeId).health.registryContact, "fresh");
   assert.equal(registry.getNode(b.nodeId).health.registryContact, "fresh");
-  gateway = await startGateway({ certPath, keyPath, hubUrl, onProxied: (info) => seen.push(info) });
+  gateway = await startGateway({ certPath, keyPath, hubUrl, port: gatewayPort, onProxied: (info) => seen.push(info) });
   const reBootstrap = await gatewayFetch(gateway.baseUrl, "/hub/session", {
     method: "POST",
     headers: { authorization: AUTH_HEADER, origin: gateway.baseUrl, "sec-fetch-site": "same-origin" },
@@ -309,7 +317,7 @@ test("gateway E2E: TLS + auth gate + strip/inject pass-through, machine denied, 
   registry = new Registry({ db: openRegistryDatabase(dbPath) });
   hub = createHubServer({
     registry,
-    options: { gatewayAssertionSecret: ASSERTION, operatorPrincipal: { mode: "inject" }, trustedExternalScheme: "https" },
+    options: { gatewayAssertionSecret: ASSERTION, operatorPrincipal: { mode: "inject" }, trustedExternalScheme: "https", managementAuthority: `127.0.0.1:${gatewayPort}` },
   });
   await new Promise((resolve) => hub.server.listen(hubPort, "127.0.0.1", resolve));
   registry.now = () => clock.now;

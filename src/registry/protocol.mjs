@@ -121,6 +121,42 @@ export function validateRouteDomain(value) {
   return trimmed;
 }
 
+export function normalizeAuthority(value, label = "authority") {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${label} is required`);
+  }
+  if (value !== value.trim() || /[\s/?#@]/.test(value) || value.includes("://")) {
+    throw new Error(`${label} must be a host[:port] authority without scheme, path, query, credentials, or whitespace`);
+  }
+  const lower = value.toLowerCase();
+  if (lower.startsWith("[") || lower.includes("]")) {
+    throw new Error(`${label} must use the supported DNS/IPv4 authority grammar`);
+  }
+  const match = /^([a-z0-9.-]+)(?::([0-9]+))?$/.exec(lower);
+  if (!match) throw new Error(`${label} is malformed`);
+  let hostname = match[1];
+  if (hostname.endsWith("..")) throw new Error(`${label} has multiple trailing dots`);
+  hostname = hostname.replace(/\.$/, "");
+  if (hostname === "" || hostname.includes("..")) throw new Error(`${label} has an empty hostname label`);
+  if (match[2] !== undefined) {
+    const port = Number(match[2]);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`${label} has an invalid port`);
+    return `${hostname}:${port}`;
+  }
+  return hostname;
+}
+
+export function validateManagementAuthority(value, routeDomain) {
+  const authority = normalizeAuthority(value, "managementAuthority");
+  const route = validateRouteDomain(routeDomain);
+  const authorityHost = authority.split(":")[0];
+  const routeHost = route.split(":")[0];
+  if (authorityHost === routeHost || authorityHost.endsWith(`.${routeHost}`)) {
+    throw new Error("managementAuthority must not belong to the routeDomain namespace");
+  }
+  return authority;
+}
+
 export function computeRouteAuthority(nodeId, routeDomain = DEFAULT_ROUTE_DOMAIN) {
   if (typeof nodeId !== "string" || !NODE_ID_PATTERN.test(nodeId)) {
     throw new Error(`invalid nodeId for route authority: ${JSON.stringify(nodeId)}`);

@@ -19,6 +19,8 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /BROWSER_BINDINGS_PATH/);
   assert.match(source, /resolveOpenSsl\(\)/);
   assert.match(source, /DSH_ORBIT_OPENSSL_BIN/);
+  assert.match(source, /ROUTE_DOMAIN_HOST/);
+  assert.match(source, /ROUTE_DOMAIN =/);
   assert.match(source, /checkpoint\.leafFingerprint/);
   assert.match(source, /runner-owned-firefox-selenium/);
   assert.match(source, /DSH_ORBIT_BROWSER_CHALLENGE/);
@@ -32,6 +34,8 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /runVerificationSequence\(/);
   assert.match(source, /createCompatibilityReport\(/);
   assert.match(source, /REQUIRED_MOUNTED_MATRIX_FIELDS/);
+  assert.match(source, /ROUTE_DOMAIN/);
+  assert.match(source, /GATEWAY_URL/);
   assert.match(source, /requiredMatrix/);
   assert.match(source, /browserCheckpoint\.selectorOpenAVerified/);
   assert.match(source, /browserCheckpoint\.cookieIsolationVerified/);

@@ -36,6 +36,7 @@ const gatewaySecret = process.env.DSH_ORBIT_HUB_GATEWAY_SECRET ?? null;
 const singlePrincipal = process.env.DSH_ORBIT_HUB_OPERATOR_PRINCIPAL ?? null;
 const lanBoundaryOnly = process.env.DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY === "1";
 const trustedExternalScheme = process.env.DSH_ORBIT_HUB_TRUSTED_SCHEME ?? "http";
+const managementAuthority = process.env.DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY ?? null;
 const rotationOverlapHours = Number.parseInt(process.env.DSH_ORBIT_HUB_ROTATION_OVERLAP_H ?? "24", 10);
 const routeDomain = process.env.DSH_ORBIT_HUB_ROUTE_DOMAIN ?? "localhost";
 const probeCadenceSeconds = Number(process.env.DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS ?? "60");
@@ -93,7 +94,7 @@ const drillContactNow = acceleratedAging
     }
   : null;
 
-const configErrors = validateHubConfig({ listen, trustedExternalScheme });
+const configErrors = validateHubConfig({ listen, trustedExternalScheme, managementAuthority, routeDomain });
 if (configErrors.length > 0) {
   for (const error of configErrors) {
     console.error(`dsh-orbit-hub: ${error}`);
@@ -123,10 +124,11 @@ const registry = new Registry({
   hubRouteOverlapDays,
   routeDomain,
   trustedExternalScheme,
+  managementAuthority,
   caCertificates,
   ...(drillContactNow ? { registryContactNow: drillContactNow } : {}),
 });
-const options = { lanBoundaryOnly, trustedExternalScheme };
+const options = { lanBoundaryOnly, trustedExternalScheme, managementAuthority };
 if (gatewaySecret !== null) options.gatewayAssertionSecret = gatewaySecret;
 if (singlePrincipal !== null) {
   options.operatorPrincipal = { mode: "single", principal: singlePrincipal };

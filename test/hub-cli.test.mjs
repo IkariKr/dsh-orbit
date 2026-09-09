@@ -46,6 +46,7 @@ test("Hub refuses unsupported or malformed persistent databases before serving",
     DSH_ORBIT_HUB_PORT: "0",
     DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
     DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+    DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: "127.0.0.1:443",
   };
 
   const futurePath = join(dir, "future.db");
@@ -104,6 +105,7 @@ test("Hub rejects valid-header page corruption and existing FK violations before
     DSH_ORBIT_HUB_PORT: "0",
     DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
     DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+    DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: "127.0.0.1:443",
   };
   for (const kind of ["page", "fk"]) {
     const path = join(dir, `${kind}.db`);
@@ -125,6 +127,7 @@ test("Hub drill aging flags fail closed unless both controls are present", async
     DSH_ORBIT_HUB_PORT: "0",
     DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
     DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+    DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: "127.0.0.1:443",
   };
 
   const pathWithoutFlag = await runHub({ ...base, DSH_ORBIT_HUB_DRILL_AGING_CLOCK: join(dir, "clock.json") });
@@ -147,6 +150,7 @@ test("Hub accepts an explicit empty node-scoped aging map in drill mode", async 
     DSH_ORBIT_HUB_PORT: "0",
     DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
     DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+    DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: "127.0.0.1:443",
     DSH_ORBIT_HUB_DRILL_AGING: "1",
     DSH_ORBIT_HUB_DRILL_AGING_CLOCK: clock,
   }, { stopWhenReady: true });
@@ -163,6 +167,7 @@ test("Hub drill aging rejects missing and malformed clock files before serving",
     DSH_ORBIT_HUB_PORT: "0",
     DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
     DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+    DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: "127.0.0.1:443",
     DSH_ORBIT_HUB_DRILL_AGING: "1",
   };
   const missing = await runHub({ ...base, DSH_ORBIT_HUB_DRILL_AGING_CLOCK: join(dir, "missing.json") });

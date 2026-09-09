@@ -2,6 +2,7 @@
 // listener with the full protection stack, and machine-request helpers
 // that build and sign ORBIT-MACHINE-V1 / ORBIT-REENROLL-V1 requests.
 
+import net from "node:net";
 import { openRegistryDatabase } from "../../src/registry/sqlite.mjs";
 import { Registry } from "../../src/registry/registry.mjs";
 import { createHubServer } from "../../src/registry/server.mjs";
@@ -18,12 +19,19 @@ export function createTestRegistry(options = {}) {
 }
 
 export async function createTestServer(registry, options = {}) {
-  const { server } = createHubServer({ registry, options });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const browserEnabled = options.gatewayAssertionSecret !== undefined || options.operatorPrincipal !== undefined || options.lanBoundaryOnly === true;
+  const managementAuthority = options.managementAuthority ?? (browserEnabled ? "127.0.0.1" : null);
+  const reservation = net.createServer();
+  await new Promise((resolve) => reservation.listen(0, "127.0.0.1", resolve));
+  const port = reservation.address().port;
+  await new Promise((resolve) => reservation.close(resolve));
+  const authority = managementAuthority?.includes(":") ? managementAuthority : (managementAuthority ? `${managementAuthority}:${port}` : null);
+  const { server } = createHubServer({ registry, options: { ...options, ...(authority === null ? {} : { managementAuthority: authority }) } });
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${port}`;
   return {
     baseUrl,
+    managementAuthority: authority,
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }

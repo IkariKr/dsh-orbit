@@ -67,6 +67,7 @@ test("Stage 5 Selector API & Read Model Security: privacy, allowlist, and server
         gatewayAssertionSecret: GATEWAY_SECRET,
         operatorPrincipal: { mode: "single", principal: OPERATOR_ID },
         trustedExternalScheme: "https",
+        managementAuthority: "registration.example",
       },
     });
     server = hubInstance.server;
@@ -394,6 +395,7 @@ test("Stage 5 Selector Integration: Scheme wiring regression (trustedExternalSch
         gatewayAssertionSecret: GATEWAY_SECRET,
         operatorPrincipal: { mode: "single", principal: OPERATOR_ID },
         trustedExternalScheme: "http",
+        managementAuthority: "registration.example",
       },
     });
     serverHttp = hubInstance.server;

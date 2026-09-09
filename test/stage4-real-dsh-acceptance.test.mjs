@@ -25,6 +25,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import http from "node:http";
+import net from "node:net";
 import https from "node:https";
 import tls from "node:tls";
 import { execFile, execFileSync, spawn } from "node:child_process";
@@ -385,7 +386,11 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
     await rm(dir, { recursive: true, force: true });
   });
 
-  // Step 1: Start Hub
+  // Step 1: Reserve the Hub port so management authority is explicit.
+  const hubPortReservation = net.createServer();
+  await new Promise((resolve) => hubPortReservation.listen(0, "127.0.0.1", resolve));
+  const reservedHubPort = hubPortReservation.address().port;
+  await new Promise((resolve) => hubPortReservation.close(resolve));
   const hubPort = await new Promise((resolve, reject) => {
     hubChild = spawn(
       process.execPath,
@@ -395,13 +400,14 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
         env: {
           ...process.env,
           DSH_ORBIT_HUB_DB: dbPath,
-          DSH_ORBIT_HUB_PORT: "0",
+          DSH_ORBIT_HUB_PORT: String(reservedHubPort),
           DSH_ORBIT_HUB_LISTEN: "127.0.0.1",
           DSH_ORBIT_HUB_ROUTE_DOMAIN: REHEARSAL_DOMAIN,
           DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS: "1",
           DSH_ORBIT_HUB_GATEWAY_SECRET: "test-gateway-secret",
           DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
           DSH_ORBIT_HUB_TRUSTED_SCHEME: "https",
+          DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: `127.0.0.1:${reservedHubPort}`,
         },
         stdio: ["ignore", "pipe", "pipe"],
       },

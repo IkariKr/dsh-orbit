@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
-import { createHubServer } from "../src/registry/server.mjs";
+import { createTestServer } from "./helpers/registry-fixture.mjs";
 import { createRegistryUi } from "../ui/app.mjs";
 
 const ASSERTION = "gateway-held-assertion-secret";
@@ -105,15 +105,13 @@ function browserFetch(baseUrl) {
 
 async function withHub(t) {
   const registry = new Registry({ db: openRegistryDatabase(":memory:") });
-  const { server } = createHubServer({
-    registry,
-    options: { gatewayAssertionSecret: ASSERTION, operatorPrincipal: { mode: "inject" } },
+  const server = await createTestServer(registry, {
+    gatewayAssertionSecret: ASSERTION,
+    operatorPrincipal: { mode: "inject" },
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const baseUrl = server.baseUrl;
   t.after(async () => {
-    server.closeAllConnections?.();
-    await new Promise((resolve) => server.close(resolve));
+    await server.close();
     registry.close();
   });
   return { registry, baseUrl };

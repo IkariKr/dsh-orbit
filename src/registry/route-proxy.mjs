@@ -9,7 +9,7 @@ import net from "node:net";
 import tls from "node:tls";
 import { URL } from "node:url";
 import { randomHex } from "./crypto.mjs";
-import { computeRouteAuthority, isValidOriginFormTarget, validateRouteDomain } from "./protocol.mjs";
+import { computeRouteAuthority, isValidOriginFormTarget, normalizeAuthority, validateRouteDomain } from "./protocol.mjs";
 import { signRouteRequest } from "./route-auth.mjs";
 import { extendDefaultCaCertificates } from "../tls-trust.mjs";
 import { isHtmlAccept, renderUnavailableHtml } from "./selector-view.mjs";
@@ -26,12 +26,23 @@ const ROUTE_HOST_PATTERN = /^n-([0-9a-f]{32})\.(.+)$/i;
 // - { type: "selector-apex", authority } (exact apex selector authority e.g. "dsh.example.com")
 // - { type: "invalid-route-domain", reason } (any other host inside or targeting the routeDomain namespace)
 // - { type: "unrelated", authority } (unrelated host e.g. "127.0.0.1", "localhost", "registration.example")
-export function classifyHostAuthority(hostHeader, configuredRouteDomain) {
+export function classifyHostAuthority(hostHeader, configuredRouteDomain, configuredManagementAuthority = null) {
   if (typeof hostHeader !== "string" || !hostHeader) {
     return { type: "unrelated", authority: null };
   }
 
   const cleanHost = hostHeader.trim().toLowerCase();
+
+  if (configuredManagementAuthority !== null) {
+    try {
+      if (normalizeAuthority(cleanHost, "request authority") === normalizeAuthority(configuredManagementAuthority, "managementAuthority")) {
+        return { type: "management", authority: normalizeAuthority(configuredManagementAuthority, "managementAuthority") };
+      }
+    } catch {
+      // Continue through the route-domain classifier so malformed values that
+      // target the route namespace retain its existing fail-closed reason.
+    }
+  }
 
   if (!configuredRouteDomain) {
     return { type: "unrelated", authority: cleanHost };

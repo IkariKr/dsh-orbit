@@ -7,7 +7,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
-import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS } from "./protocol.mjs";
+import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS, normalizeAuthority, validateManagementAuthority } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
 import { validateWebSocketConfig } from "./config.mjs";
 import {
@@ -152,9 +152,17 @@ export function createHubServer({ registry, options = {} }) {
     // trust client-supplied X-Forwarded-Proto. The operator pins the
     // trusted external scheme explicitly (P1-09).
     trustedExternalScheme = options.trustedExternalScheme ?? registry.trustedExternalScheme ?? "http",
+    managementAuthority = options.managementAuthority ?? registry.managementAuthority ?? null,
   } = options;
   if (trustedExternalScheme !== "http" && trustedExternalScheme !== "https") {
     throw new Error(`trustedExternalScheme must be http or https (got ${JSON.stringify(trustedExternalScheme)})`);
+  }
+  const canonicalManagementAuthority = managementAuthority === null
+    ? null
+    : validateManagementAuthority(managementAuthority, registry.routeDomain);
+  const browserManagementEnabled = gatewayAssertionSecret !== null || operatorPrincipal !== null || lanBoundaryOnly;
+  if (browserManagementEnabled && canonicalManagementAuthority === null) {
+    throw new Error("managementAuthority is required when browser management is enabled");
   }
   const limiter = new SlidingWindowLimiter();
 
@@ -195,7 +203,9 @@ export function createHubServer({ registry, options = {} }) {
     }
 
     const hostHeader = rawHost;
-    const hostClass = registry.routeDomain ? classifyHostAuthority(hostHeader, registry.routeDomain) : { type: "unrelated" };
+    const hostClass = registry.routeDomain
+      ? classifyHostAuthority(hostHeader, registry.routeDomain, canonicalManagementAuthority)
+      : { type: canonicalManagementAuthority && rawHost === canonicalManagementAuthority ? "management" : "unrelated", authority: rawHost ?? null };
 
     if (hostClass.type === "node-route") {
       // Validate origin-form request-target
@@ -333,6 +343,24 @@ export function createHubServer({ registry, options = {} }) {
     }
     const path = url.pathname;
 
+    if (MACHINE_ROUTES.has(path)) {
+      const browserHeadersPresent = Boolean(
+        request.headers[ASSERTION_HEADER] ||
+        request.headers[PRINCIPAL_HEADER] ||
+        request.headers.origin ||
+        request.headers["sec-fetch-site"],
+      );
+      if (hostClass.type === "selector-apex" || hostClass.type === "node-route" || hostClass.type === "invalid-route-domain" || browserHeadersPresent) {
+        return sendJson(response, 404, { error: { code: "machine-ingress-private", message: "the machine surface is private" } });
+      }
+      handleMachineRequest(request, response, path).catch((error) => sendError(response, error));
+      return;
+    }
+
+    if (hostClass.type !== "management") {
+      return sendJson(response, 404, { error: { code: "authority-not-allowed", message: "request authority is not configured for this surface" } });
+    }
+
     if (request.method === "GET" && UI_ASSETS.has(path)) {
       const [fileName, contentType] = UI_ASSETS.get(path);
       readFile(new URL(fileName, UI_ROOT))
@@ -344,10 +372,6 @@ export function createHubServer({ registry, options = {} }) {
       return;
     }
 
-    if (MACHINE_ROUTES.has(path)) {
-      handleMachineRequest(request, response, path).catch((error) => sendError(response, error));
-      return;
-    }
     if (path.startsWith("/hub")) {
       handleBrowserRequest(request, response, path).catch((error) => sendError(response, error));
       return;
@@ -490,7 +514,19 @@ export function createHubServer({ registry, options = {} }) {
       }
       // Host AND scheme must match the trusted external scheme
       // (RFC-0007; P1-09). X-Forwarded-Proto is never trusted.
-      if (originUrl.protocol !== `${trustedExternalScheme}:` || originUrl.host !== request.headers.host) {
+      let requestAuthority;
+      try {
+        requestAuthority = normalizeAuthority(request.headers.host, "request authority");
+      } catch {
+        throw new DeniedError(403, "origin-denied", "request authority is malformed");
+      }
+      let originAuthority;
+      try {
+        originAuthority = normalizeAuthority(originUrl.host, "Origin authority");
+      } catch {
+        throw new DeniedError(403, "origin-denied", "Origin authority is malformed");
+      }
+      if (originUrl.protocol !== `${trustedExternalScheme}:` || originAuthority !== requestAuthority) {
         throw new DeniedError(403, "origin-denied", "Origin does not match the trusted scheme and host");
       }
     }
@@ -685,7 +721,9 @@ export function createHubServer({ registry, options = {} }) {
     }
 
     const hostHeader = rawHost;
-    const hostClass = registry.routeDomain ? classifyHostAuthority(hostHeader, registry.routeDomain) : { type: "unrelated" };
+    const hostClass = registry.routeDomain
+      ? classifyHostAuthority(hostHeader, registry.routeDomain, canonicalManagementAuthority)
+      : { type: canonicalManagementAuthority && rawHost === canonicalManagementAuthority ? "management" : "unrelated", authority: rawHost ?? null };
 
     if (hostClass.type === "node-route") {
       // Validate origin-form request-target

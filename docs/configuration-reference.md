@@ -19,6 +19,7 @@ Registry semantics.
 | `DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY` | one of two | `0` | Set to `1` only for the strict loopback boundary alternative. |
 | `DSH_ORBIT_HUB_OPERATOR_PRINCIPAL` | no | unset | Fixed principal. If absent, the gateway must inject `X-DSH-Operator-Id`. |
 | `DSH_ORBIT_HUB_TRUSTED_SCHEME` | no | `http` | Trusted browser scheme, `http` or `https`; `X-Forwarded-Proto` is not trusted. |
+| `DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY` | required when browser management is enabled | unset | Canonical `host[:port]` authority for the Hub management surface. It must be valid, include an explicitly configured non-default port, and remain outside the complete `DSH_ORBIT_HUB_ROUTE_DOMAIN` namespace. Orbit never derives it from request Host or forwarded headers. |
 | `DSH_ORBIT_HUB_ROTATION_OVERLAP_H` | no | `24` | Node credential overlap in hours, bounded by the frozen Registry contract. |
 | `DSH_ORBIT_HUB_ROUTE_DOMAIN` | no | `localhost` | v0.4 deterministic route domain used to derive `n-<nodeId-hex>.<domain>`. Stage 2 uses it only as protocol data; Stage 3 publishes the wildcard route. Must match the Node route-domain setting. |
 | `DSH_ORBIT_HUB_CA_CERT` | no | unset | Additional operator-managed private-CA PEM or PEM file for HTTPS Node route targets. It extends the runtime default trust set; hostname/SAN validation stays enabled. |
@@ -71,7 +72,8 @@ runbook at [`docs/sop/v0.3-node-enrollment-sop.md`](sop/v0.3-node-enrollment-sop
 - Do not accept client-supplied assertion or principal headers.
 - Keep the Hub loopback-only and keep machine ingress private.
 - Keep trusted certificate validation enabled.
-- For Stage 3 public node routing (`*.routeDomain`), terminate wildcard TLS at the outer gateway, preserve canonical `Host`, strip outer gateway credentials, and deny `/api/v1/*` machine surface.
+- For Stage 3 public node routing (`*.routeDomain`), terminate wildcard TLS at the outer gateway, preserve the complete canonical `Host` authority including an explicitly configured port, strip outer gateway credentials, and deny `/api/v1/*` machine surface.
+- Configure `DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY` for the browser management authority; Orbit validates it independently from the Selector/Node route namespace and never derives it from forwarded headers.
 
 The example Registry Compose file is
 [`docker-registry/compose.example.yaml`](../docker-registry/compose.example.yaml).
