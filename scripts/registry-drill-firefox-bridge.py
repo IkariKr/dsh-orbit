@@ -28,7 +28,9 @@ from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.remote_connection import FirefoxRemoteConnection
 from selenium.webdriver.firefox.service import Service
+from selenium.webdriver.remote.client_config import ClientConfig
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -220,6 +222,7 @@ def run(args: argparse.Namespace) -> int:
     profile_dir = Path(tempfile.mkdtemp(prefix="dsh-orbit-firefox-"))
     gecko_log = log_path.with_name("geckodriver.log")
     driver = None
+    service = None
     proxy_server = None
     try:
         proxy_server = LocalConnectProxy(("127.0.0.1", 0), ConnectHandler)
@@ -241,8 +244,23 @@ def run(args: argparse.Namespace) -> int:
         options.accept_insecure_certs = False
         log("starting-firefox")
         service = Service(resolve_geckodriver(), log_output=str(gecko_log))
-        driver = webdriver.Firefox(options=options, service=service, keep_alive=True)
-        driver.command_executor._client_config.timeout = WEBDRIVER_COMMAND_TIMEOUT_SECONDS
+        service.start()
+        client_config = ClientConfig(
+            remote_server_addr=service.service_url,
+            keep_alive=True,
+            timeout=WEBDRIVER_COMMAND_TIMEOUT_SECONDS,
+        )
+        command_executor = FirefoxRemoteConnection(
+            service.service_url,
+            keep_alive=True,
+            ignore_proxy=options._ignore_local_proxy,
+            client_config=client_config,
+        )
+        driver = webdriver.Remote(
+            command_executor=command_executor,
+            options=options,
+            keep_alive=True,
+        )
         log("firefox-started")
         driver.set_page_load_timeout(60)
         wait = WebDriverWait(driver, WAIT_SECONDS, poll_frequency=POLL_SECONDS)
@@ -427,6 +445,11 @@ def run(args: argparse.Namespace) -> int:
             try:
                 driver.quit()
             except WebDriverException:
+                pass
+        if service is not None:
+            try:
+                service.stop()
+            except Exception:
                 pass
         remove_windows_root(thumbprint, owned_root)
         shutil.rmtree(profile_dir, ignore_errors=True)
