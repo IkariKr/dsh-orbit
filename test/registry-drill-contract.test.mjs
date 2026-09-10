@@ -96,8 +96,12 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /management-nodes-reloaded/);
   assert.match(source, /wait_for_node_ids\(driver, node_ids, stop_path, log=log\)/);
   assert.match(source, /nodes-observed:count=/);
+  assert.match(source, /WEBDRIVER_COMMAND_TIMEOUT_SECONDS = 20/);
+  assert.match(source, /driver\.command_executor\._client_config\.timeout = WEBDRIVER_COMMAND_TIMEOUT_SECONDS/);
   assert.match(source, /detail_ready_wait = WebDriverWait\(driver, 30, poll_frequency=0\.5\)/);
   assert.match(source, /detail_nodes = _driver\.find_elements\(By\.ID, "node-detail-view"\)/);
+  assert.match(source, /data-detail-state/);
+  assert.match(source, /node detail request failed for current-run node/);
   assert.match(source, /node detail did not render for current-run node/);
   assert.match(source, /node-detail-click-start/);
   assert.match(source, /driver\.execute_script\("arguments\[0\]\.click\(\)", node_target\)/);

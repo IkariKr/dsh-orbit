@@ -36,6 +36,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 WAIT_SECONDS = 1800
 POLL_SECONDS = 1.0
 CERTUTIL_TIMEOUT_SECONDS = 20
+WEBDRIVER_COMMAND_TIMEOUT_SECONDS = 20
 
 
 class LocalConnectProxy(socketserver.ThreadingTCPServer):
@@ -239,7 +240,9 @@ def run(args: argparse.Namespace) -> int:
         options.set_preference("network.proxy.no_proxies_on", "")
         options.accept_insecure_certs = False
         log("starting-firefox")
-        driver = webdriver.Firefox(options=options, service=Service(resolve_geckodriver(), log_output=str(gecko_log)))
+        service = Service(resolve_geckodriver(), log_output=str(gecko_log))
+        driver = webdriver.Firefox(options=options, service=service, keep_alive=True)
+        driver.command_executor._client_config.timeout = WEBDRIVER_COMMAND_TIMEOUT_SECONDS
         log("firefox-started")
         driver.set_page_load_timeout(60)
         wait = WebDriverWait(driver, WAIT_SECONDS, poll_frequency=POLL_SECONDS)
@@ -327,10 +330,16 @@ def run(args: argparse.Namespace) -> int:
         def detail_ready(_driver):
             detail_nodes = _driver.find_elements(By.ID, "node-detail-view")
             headings = _driver.find_elements(By.CSS_SELECTOR, "#node-detail-view h2")
-            if len(detail_nodes) != 1 or len(headings) != 1:
+            if len(detail_nodes) != 1:
                 return False
             detail_node = detail_nodes[0]
-            return detail_node.get_attribute("hidden") is None and headings[0].text.strip() == node_ids[0]
+            state = detail_node.get_attribute("data-detail-state")
+            if state == "error":
+                message = detail_node.text.strip().replace("\\n", " ")[:240]
+                raise RuntimeError(f"node detail request failed for current-run node: {message!r}")
+            if len(headings) != 1:
+                return False
+            return state == "ready" and detail_node.get_attribute("hidden") is None and headings[0].text.strip() == node_ids[0]
 
         detail_ready_wait = WebDriverWait(driver, 30, poll_frequency=0.5)
         if not detail_ready_wait.until(detail_ready):

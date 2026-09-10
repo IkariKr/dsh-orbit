@@ -22,6 +22,7 @@ import {
 } from "./view-model.mjs";
 
 const SESSION_ERRORS = new Set(["gateway-denied", "no-principal", "no-session"]);
+const API_TIMEOUT_MS = 15_000;
 
 export function createRegistryUi({ document, fetchImpl }) {
   let csrfToken = null;
@@ -34,19 +35,31 @@ export function createRegistryUi({ document, fetchImpl }) {
   async function api(path, { method = "GET", body } = {}) {
     const headers = { "content-type": "application/json" };
     if (csrfToken !== null && method !== "GET") headers["x-csrf-token"] = csrfToken;
-    const response = await fetchImpl(path, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const parsed = await response.json().catch(() => ({}));
-    if (response.status === 401 && SESSION_ERRORS.has(parsed?.error?.code)) {
-      throw Object.assign(new Error("session required"), { sessionRequired: true });
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timeout = controller === null ? null : setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    try {
+      const response = await fetchImpl(path, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        ...(controller === null ? {} : { signal: controller.signal }),
+      });
+      const parsed = await response.json().catch(() => ({}));
+      if (response.status === 401 && SESSION_ERRORS.has(parsed?.error?.code)) {
+        throw Object.assign(new Error("session required"), { sessionRequired: true });
+      }
+      if (!response.ok) {
+        throw Object.assign(new Error(mapApiError(parsed).message), { code: parsed?.error?.code, status: response.status });
+      }
+      return parsed;
+    } catch (error) {
+      if (controller?.signal.aborted) {
+        throw Object.assign(new Error(`request timed out after ${API_TIMEOUT_MS}ms`), { code: "request-timeout" });
+      }
+      throw error;
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
     }
-    if (!response.ok) {
-      throw Object.assign(new Error(mapApiError(parsed).message), { code: parsed?.error?.code, status: response.status });
-    }
-    return parsed;
   }
 
   async function bootstrap() {
@@ -425,13 +438,19 @@ export function createRegistryUi({ document, fetchImpl }) {
 
   async function loadNodeDetail(nodeId) {
     showBanner(LOADING_STATE);
+    const detailView = $("node-detail-view");
+    detailView.dataset.detailState = "loading";
     try {
       const body = await api(`/hub/nodes/${nodeId}`);
       $("nodes-list").innerHTML = "";
-      $("node-detail-view").hidden = false;
+      detailView.hidden = false;
       renderDetail(body);
+      detailView.dataset.detailState = "ready";
       showBanner({});
     } catch (error) {
+      detailView.hidden = false;
+      detailView.dataset.detailState = "error";
+      detailView.innerHTML = `<div class="banner error">failed to load node: ${escapeHtml(error.message)}</div>`;
       showBanner({ message: `failed to load node: ${error.message}` });
     }
   }
