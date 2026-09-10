@@ -170,20 +170,24 @@ def browser_text(driver, locator: tuple[str, str]) -> str:
     return driver.find_element(*locator).text.strip()
 
 
-def wait_for_node_ids(driver, expected: list[str], stop_path: Path) -> bool:
+def wait_for_node_ids(driver, expected: list[str], stop_path: Path, log=None) -> bool:
     deadline = time.monotonic() + WAIT_SECONDS
     while time.monotonic() < deadline:
         if stop_path.exists():
             return False
-        driver.find_element(By.ID, "nav-nodes").click()
-        time.sleep(0.25)
-        ids = {
-            element.text.strip()
-            for element in driver.find_elements(By.CSS_SELECTOR, ".node-id")
-            if element.text.strip()
-        }
-        if all(node_id in ids for node_id in expected):
-            return True
+        try:
+            ids = {
+                element.text.strip()
+                for element in driver.find_elements(By.CSS_SELECTOR, ".node-id")
+                if element.text.strip()
+            }
+            if log is not None:
+                log(f"nodes-observed:count={len(ids)}:url={driver.current_url!r}")
+            if all(node_id in ids for node_id in expected):
+                return True
+        except WebDriverException as error:
+            if log is not None:
+                log(f"nodes-observation-error:{type(error).__name__}")
         time.sleep(POLL_SECONDS)
     raise RuntimeError("current-run node IDs did not appear in the Nodes list before timeout")
 
@@ -300,7 +304,7 @@ def run(args: argparse.Namespace) -> int:
 
         driver.find_element(By.ID, "nav-nodes").click()
         wait_for(wait, EC.visibility_of_element_located((By.ID, "nodes-view")))
-        if not wait_for_node_ids(driver, node_ids, stop_path):
+        if not wait_for_node_ids(driver, node_ids, stop_path, log=log):
             return 0
         node_elements = driver.find_elements(By.CSS_SELECTOR, ".node-id")
         visible_ids = {element.text.strip() for element in node_elements}
