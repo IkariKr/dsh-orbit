@@ -75,11 +75,14 @@ def certutil_run(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
     if not certutil:
         raise RuntimeError("Firefox trust setup unavailable: certutil.exe was not found")
     try:
-        # certutil emits localized output in the host code page. Keep the
-        # capture binary so decoding cannot block or fail before Firefox starts.
+        # certutil emits localized output and may wait on an inherited
+        # console/store handle. Detach all standard streams so the bounded
+        # trust setup cannot block before Firefox starts.
         return subprocess.run(
             [certutil, *arguments],
-            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             text=False,
             timeout=CERTUTIL_TIMEOUT_SECONDS,
             creationflags=creationflags,

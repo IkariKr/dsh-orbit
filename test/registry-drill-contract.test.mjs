@@ -87,6 +87,9 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /CERTUTIL_TIMEOUT_SECONDS/);
   assert.match(source, /certutil timed out/);
   assert.match(source, /forced import is idempotent/);
+  assert.match(source, /stdin=subprocess\.DEVNULL/);
+  assert.match(source, /stdout=subprocess\.DEVNULL/);
+  assert.match(source, /stderr=subprocess\.DEVNULL/);
   assert.doesNotMatch(source, /certutil_run\(\["-user", "-store", "Root"/);
   assert.match(source, /Firefox trust setup unavailable/);
   assert.match(source, /driver\.get\(gateway \+ "\/"\)/);
