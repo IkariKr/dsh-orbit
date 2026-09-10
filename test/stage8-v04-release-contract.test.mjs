@@ -112,9 +112,15 @@ function assertFinalReleaseArtifactResults({ artifacts }) {
   const promotionPlan = artifacts["promotion-plan-validation.json"]?.json;
   assert.equal(promotionPlan?.schemaVersion, 1, "promotion plan schemaVersion must be 1");
   assert.equal(promotionPlan?.kind, "stage8-promotion-plan-validation", "promotion plan kind mismatch");
+  assert.match(
+    promotionPlan?.productionTarget?.managementAuthority ?? "",
+    /^(?!dsh\.ikarikore\.top$)(?!.*\.dsh\.ikarikore\.top$)[a-z0-9.-]+(?::[0-9]+)?$/,
+    "promotion plan must define a valid management authority outside the route namespace",
+  );
   assert.deepEqual(
     promotionPlan?.productionTarget,
     {
+      managementAuthority: "orbit-admin.ikarikore.top",
       authorityApex: "dsh.ikarikore.top",
       wildcardRouteDomain: "*.dsh.ikarikore.top",
       rollbackContract: "gateway-and-dns-only-no-identity-destruction",
@@ -425,6 +431,7 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
     candidateCommit,
     executedAt: "2026-09-07T08:03:00.000Z",
     productionTarget: {
+      managementAuthority: "orbit-admin.ikarikore.top",
       authorityApex: "dsh.ikarikore.top",
       wildcardRouteDomain: "*.dsh.ikarikore.top",
       rollbackContract: "gateway-and-dns-only-no-identity-destruction",
@@ -546,6 +553,16 @@ test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed
     "backup-restore.json",
     { ...validBackupRestoreJson, result: "FAIL" },
     /final release requires backup-restore\.json result PASS/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, productionTarget: { ...validPromotionPlanJson.productionTarget, managementAuthority: "dsh.ikarikore.top" } },
+    /promotion plan must define (?:a valid )?management authority outside the route namespace/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, productionTarget: { ...validPromotionPlanJson.productionTarget, managementAuthority: undefined } },
+    /promotion plan must define (?:a valid )?management authority outside the route namespace/,
   );
   assertArtifactRejected(
     "promotion-plan-validation.json",

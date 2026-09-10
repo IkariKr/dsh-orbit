@@ -36,6 +36,7 @@ registration.example.invalid {
             operator $2a$10$REPLACE_WITH_BCRYPT_HASH
         }
         reverse_proxy 127.0.0.1:5445 {
+            header_up Host {http.request.hostport}
             header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
             header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
         }
@@ -48,6 +49,7 @@ registration.example.invalid {
             operator $2a$10$REPLACE_WITH_BCRYPT_HASH
         }
         reverse_proxy 127.0.0.1:5445 {
+            header_up Host {http.request.hostport}
             header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
             header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
             # Cookie / Origin / Sec-Fetch-Site pass through untouched.
@@ -71,7 +73,9 @@ dsh.example.local, *.dsh.example.local {
         operator $2a$10$REPLACE_WITH_BCRYPT_HASH
     }
     reverse_proxy 127.0.0.1:5445 {
-        header_up Host {host}
+        header_up Host {http.request.hostport}
+        header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
+        header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
         header_up -Authorization
         header_up -X-Gateway-Auth
     }

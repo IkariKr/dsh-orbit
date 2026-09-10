@@ -39,7 +39,7 @@ function fakeFetch(...responses) {
   return async (_url, options = {}) => {
     const configured = responses[Math.min(index, responses.length - 1)];
     index += 1;
-    assert.equal(options.headers.host, "registry-hub:5446");
+    assert.equal(options.headers.host, undefined);
     return { status: configured.status, json: async () => configured.body ?? {} };
   };
 }

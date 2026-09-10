@@ -30,7 +30,6 @@ const REPORT_PATH = "/api/v1/report-upload";
 const ROTATE_PATH = "/api/v1/credential-rotate";
 const REENROLL_PATH = "/api/v1/reenroll";
 const ENROLL_PATH = "/api/v1/enroll";
-const PRIVATE_MACHINE_AUTHORITY = "registry-hub:5446";
 
 export const HEARTBEAT_CADENCE_SECONDS_MIN = 30;
 export const HEARTBEAT_CADENCE_SECONDS_MAX = 300;
@@ -311,7 +310,7 @@ export class NodeClient {
     try {
       response = await this.callFetch(targetUrl, {
         method: "POST",
-        headers: { "content-type": "application/json", host: PRIVATE_MACHINE_AUTHORITY, ...headers },
+        headers: { "content-type": "application/json", ...headers },
         body: Buffer.from(JSON.stringify(body)),
       });
     } catch (error) {

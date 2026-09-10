@@ -77,6 +77,13 @@ test("Stage 8 construction candidate artifact set exists", async () => {
 
 test("Registry Compose requires an explicit release image tag", async () => {
   const compose = await text("docker-registry/compose.example.yaml");
+  assert.match(compose, /DSH_ORBIT_HUB_ROUTE_DOMAIN:\s*dsh\.example\.local/);
+  assert.match(compose, /DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY:\s*registration\.example\.invalid/);
+
+  const caddy = await text("docker-registry/Caddyfile.example");
+  assert.match(caddy, /header_up Host \{http\.request\.hostport\}/);
+  assert.match(caddy, /header_up X-DSH-Authenticated-Proxy/);
+  assert.match(caddy, /header_up X-DSH-Operator-Id/);
   const imageLine = /^\s*image:\s+[^\n]+$/m.exec(compose)?.[0] ?? "";
   assert.match(
     imageLine,
@@ -142,6 +149,9 @@ test("Operator readiness and release status wording match the implementation", a
   assert.doesNotMatch(operator, /health endpoint|`\/health`/i);
 
   const deployment = await text("docs/registry-deployment.md");
+  const promotion = await text("docs/sop/v0.4-production-promotion-rollback-plan.md");
+  assert.match(promotion, /DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY=orbit-admin\.ikarikore\.top/);
+  assert.match(promotion, /Management Authority.*orbit-admin\.ikarikore\.top/s);
   const stage7 = await text("docs/release-attestations/v0.3-stage7-operational-hardening.md");
   assert.match(deployment, /Stage 7 is\s+complete and accepted/);
   assert.doesNotMatch(deployment, /Stage 7[^\n]*awaiting review/i);

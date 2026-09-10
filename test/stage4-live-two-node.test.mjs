@@ -42,6 +42,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
 import { validReport } from "./helpers/registry-fixture.mjs";
+import { startMachineIngress } from "./helpers/machine-ingress-fixture.mjs";
 import { startWildcardGateway } from "./helpers/wildcard-gateway-fixture.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
 
@@ -832,11 +833,13 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   let nodeB = null;
   let dshA = null;
   let dshB = null;
+  let machineIngress = null;
 
   t.after(async () => {
     await killProcess(nodeA?.child);
     await killProcess(nodeB?.child);
     await killProcess(hub?.child);
+    if (machineIngress) await machineIngress.close();
     if (gateway) await gateway.close();
     if (dshA) await dshA.close();
     if (dshB) await dshB.close();
@@ -851,6 +854,7 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
 
   console.log("\n=== STEP 2: Start Hub Daemon with Route Domain & Private CA ===");
   hub = await startHubProcess({ dbPath, caCertPath: nodeCertPath, routeDomain: REHEARSAL_DOMAIN, cadenceSeconds: 1 });
+  machineIngress = await startMachineIngress(hub.baseUrl);
   console.log(`[Evidence] Hub running on ${hub.baseUrl} (routeDomain ${REHEARSAL_DOMAIN})`);
   let opSession = await getOperatorSession(hub.baseUrl);
 
@@ -963,19 +967,19 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
 
   console.log("\n=== STEP 5: Enroll and Upload Compatibility Reports for Both Nodes ===");
   const tokenA = await operatorMintToken(hub.baseUrl, opSession);
-  const enrollResA = await runNodeEnroll({ statePath: statePathA, hubUrl: hub.baseUrl, enrollTokenValue: tokenA, caCertPath: nodeCertPath });
-  await runNodeUploadReport({ statePath: statePathA, hubUrl: hub.baseUrl, reportPath, caCertPath: nodeCertPath });
+  const enrollResA = await runNodeEnroll({ statePath: statePathA, hubUrl: machineIngress.baseUrl, enrollTokenValue: tokenA, caCertPath: nodeCertPath });
+  await runNodeUploadReport({ statePath: statePathA, hubUrl: machineIngress.baseUrl, reportPath, caCertPath: nodeCertPath });
   console.log(`[Evidence] Enrolled Node A: ${enrollResA.nodeId} and uploaded report with webSocketTransport (web.routes active)`);
 
   const tokenB = await operatorMintToken(hub.baseUrl, opSession);
-  const enrollResB = await runNodeEnroll({ statePath: statePathB, hubUrl: hub.baseUrl, enrollTokenValue: tokenB });
-  await runNodeUploadReport({ statePath: statePathB, hubUrl: hub.baseUrl, reportPath });
+  const enrollResB = await runNodeEnroll({ statePath: statePathB, hubUrl: machineIngress.baseUrl, enrollTokenValue: tokenB });
+  await runNodeUploadReport({ statePath: statePathB, hubUrl: machineIngress.baseUrl, reportPath });
   console.log(`[Evidence] Enrolled Node B: ${enrollResB.nodeId} and uploaded report with webSocketTransport (web.routes active)`);
 
   console.log("\n=== STEP 6: Start Node Daemons (Node A on HTTPS + Private CA, Node B on HTTP) ===");
   nodeA = await startNodeDaemon({
     statePath: statePathA,
-    hubUrl: hub.baseUrl,
+    hubUrl: machineIngress.baseUrl,
     dshTarget: dshA.target,
     tlsKeyPath: nodeKeyPath,
     tlsCertPath: nodeCertPath,
@@ -986,7 +990,7 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
 
   nodeB = await startNodeDaemon({
     statePath: statePathB,
-    hubUrl: hub.baseUrl,
+    hubUrl: machineIngress.baseUrl,
     dshTarget: dshB.target,
     cadence: 30,
   });
@@ -1164,7 +1168,7 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   // Restart Node A on same state file & ingress port
   nodeA = await startNodeDaemon({
     statePath: statePathA,
-    hubUrl: hub.baseUrl,
+    hubUrl: machineIngress.baseUrl,
     ingressPort: nodeAPort,
     dshTarget: dshA.target,
     tlsKeyPath: nodeKeyPath,
@@ -1177,7 +1181,7 @@ test("Live Two-Node Stage 4 Evidence: Rehearsal WSS Wildcard Gateway, WebSockets
   // Restart Node B on same state file & ingress port
   nodeB = await startNodeDaemon({
     statePath: statePathB,
-    hubUrl: hub.baseUrl,
+    hubUrl: machineIngress.baseUrl,
     ingressPort: nodeBPort,
     dshTarget: dshB.target,
     cadence: 30,

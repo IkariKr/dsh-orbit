@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
+import { startMachineIngress } from "./helpers/machine-ingress-fixture.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 
@@ -291,11 +292,13 @@ test("Live Two-Node Integration Evidence (True Child Processes): Topology, Heart
   let nodeB = null;
   let dshA = null;
   let dshB = null;
+  let machineIngress = null;
 
   t.after(async () => {
     await killProcess(nodeA?.child);
     await killProcess(nodeB?.child);
     await killProcess(hub?.child);
+    if (machineIngress) await machineIngress.close();
     if (dshA) await dshA.close();
     if (dshB) await dshB.close();
     await rm(dir, { recursive: true, force: true });
@@ -308,22 +311,23 @@ test("Live Two-Node Integration Evidence (True Child Processes): Topology, Heart
   console.log(`[Evidence] Downstream DSH B running on ${dshB.target}`);
 
   hub = await startHubProcess({ dbPath, caCertPath: certPath, cadenceSeconds: 1 });
+  machineIngress = await startMachineIngress(hub.baseUrl);
   console.log(`[Evidence] Hub child process started on ${hub.baseUrl}`);
   let opSession = await getOperatorSession(hub.baseUrl);
 
   console.log("\n=== STEP 2: Enroll Node A and Node B via CLI ===");
   const tokenA = await operatorMintToken(hub.baseUrl, opSession);
-  const enrollResA = await runNodeEnroll({ statePath: statePathA, hubUrl: hub.baseUrl, enrollTokenValue: tokenA, caCertPath: certPath });
+  const enrollResA = await runNodeEnroll({ statePath: statePathA, hubUrl: machineIngress.baseUrl, enrollTokenValue: tokenA, caCertPath: certPath });
   console.log(`[Evidence] Enrolled Node A via CLI: ${enrollResA.nodeId} (keyId ${enrollResA.keyId})`);
 
   const tokenB = await operatorMintToken(hub.baseUrl, opSession);
-  const enrollResB = await runNodeEnroll({ statePath: statePathB, hubUrl: hub.baseUrl, enrollTokenValue: tokenB });
+  const enrollResB = await runNodeEnroll({ statePath: statePathB, hubUrl: machineIngress.baseUrl, enrollTokenValue: tokenB });
   console.log(`[Evidence] Enrolled Node B via CLI: ${enrollResB.nodeId} (keyId ${enrollResB.keyId})`);
 
   console.log("\n=== STEP 3: Start Node A (HTTPS + Private CA) and Node B (HTTP) Daemons ===");
   nodeA = await startNodeDaemon({
     statePath: statePathA,
-    hubUrl: hub.baseUrl,
+    hubUrl: machineIngress.baseUrl,
     dshTarget: dshA.target,
     tlsKeyPath: keyPath,
     tlsCertPath: certPath,
@@ -334,7 +338,7 @@ test("Live Two-Node Integration Evidence (True Child Processes): Topology, Heart
 
   nodeB = await startNodeDaemon({
     statePath: statePathB,
-    hubUrl: hub.baseUrl,
+    hubUrl: machineIngress.baseUrl,
     dshTarget: dshB.target,
     cadence: 30,
   });
@@ -375,7 +379,7 @@ test("Live Two-Node Integration Evidence (True Child Processes): Topology, Heart
   const nodeAPort = nodeA.port;
   nodeA = await startNodeDaemon({
     statePath: statePathA,
-    hubUrl: hub.baseUrl,
+    hubUrl: machineIngress.baseUrl,
     ingressPort: nodeAPort,
     dshTarget: dshATarget,
     tlsKeyPath: keyPath,
@@ -417,7 +421,7 @@ test("Live Two-Node Integration Evidence (True Child Processes): Topology, Heart
   // Restart Node A on the same state file & ingress port
   nodeA = await startNodeDaemon({
     statePath: statePathA,
-    hubUrl: hub.baseUrl,
+    hubUrl: machineIngress.baseUrl,
     ingressPort: nodeAPort,
     dshTarget: dshA.target,
     tlsKeyPath: keyPath,
@@ -430,7 +434,7 @@ test("Live Two-Node Integration Evidence (True Child Processes): Topology, Heart
   // Restart Node B on the same state file & ingress port
   nodeB = await startNodeDaemon({
     statePath: statePathB,
-    hubUrl: hub.baseUrl,
+    hubUrl: machineIngress.baseUrl,
     ingressPort: nodeB.port,
     dshTarget: dshB.target,
     cadence: 30,

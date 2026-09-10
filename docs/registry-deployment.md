@@ -102,9 +102,9 @@ for real container/browser evidence.
 ## Gate B and Stage 7 status
 
 Review Gate B was approved after the remediation evidence package. Stage 7 is
-complete and accepted. The Stage 8 release candidate is documentation-only and
-is awaiting final review; no tag, publication, or production promotion has
-occurred.
+complete and accepted. The Stage 8 release candidate includes the authority-boundary
+construction changes and is awaiting final review; no tag, publication, or production
+promotion has occurred.
 
 The remediation mounted run from clean commit
 `2f713e8bbd023ac49080bd2da44023c4a31323db` completed the trusted-browser,

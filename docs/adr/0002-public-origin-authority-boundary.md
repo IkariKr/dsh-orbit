@@ -174,7 +174,7 @@ The implementation should reuse or minimally extend the existing route-authority
 At minimum, management-authority validation must preserve the properties already important to Orbit routing:
 
 - DNS hostname comparison is case-insensitive;
-- an explicitly configured non-default port remains part of the authority;
+- when a port is explicitly configured, it remains part of the authority and must be matched exactly;
 - malformed authorities fail closed;
 - an authority cannot silently become a different surface;
 - scheme, path, query, fragment, userinfo, whitespace, and malformed port forms are rejected;
@@ -194,7 +194,7 @@ Orbit does not need to know whether the deployment uses Caddy, Nginx, Envoy, Tra
 The gateway contract is intentionally small:
 
 1. The Hub must receive a request authority that satisfies Orbit's configured authority policy.
-2. Dynamic Node authorities and required non-default ports must not be lost or replaced by internal service names.
+2. Dynamic Node authorities and any explicitly configured ports must not be lost or replaced by internal service names.
 3. Client-controlled forwarded headers must not become a way to redefine authority.
 4. Client-supplied internal authentication/principal headers must still be stripped before trusted gateway values are injected.
 
@@ -382,7 +382,7 @@ Approval of this ADR should authorize only the minimum work required to close th
 
 ### Gateway adapter
 
-- mounted gateway delivers the management authority including its non-default port;
+- mounted gateway delivers the configured management authority; when an explicit port is present, it is preserved as part of the authority;
 - mounted Node routes preserve the complete deterministic Node authority;
 - client `X-Forwarded-Host` / `X-Forwarded-Proto` cannot alter Orbit classification;
 - no product code branches on proxy brand;

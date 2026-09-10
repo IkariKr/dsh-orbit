@@ -27,6 +27,8 @@ services:
       DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:?set in .env}
       DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: ${DSH_ORBIT_HUB_OPERATOR_PRINCIPAL:-operator}
       DSH_ORBIT_HUB_TRUSTED_SCHEME: https
+      DSH_ORBIT_HUB_ROUTE_DOMAIN: dsh.example.local
+      DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: registration.example.invalid
     volumes:
       - ../data/orbit:/data/orbit:rw
     ports:

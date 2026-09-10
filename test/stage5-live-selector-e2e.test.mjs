@@ -13,6 +13,7 @@ import tls from "node:tls";
 import { validReport } from "./helpers/registry-fixture.mjs";
 import { startWildcardGateway } from "./helpers/wildcard-gateway-fixture.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
+import { startMachineIngress } from "./helpers/machine-ingress-fixture.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const REHEARSAL_DOMAIN = "stage5-e2e.example";
@@ -249,11 +250,13 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
   let nodeChildB = null;
   let dshA = null;
   let dshB = null;
+  let machineIngress = null;
 
   t.after(async () => {
     await killProcess(nodeChildA);
     await killProcess(nodeChildB);
     await killProcess(hubChild);
+    if (machineIngress) await machineIngress.close();
     if (gateway) await gateway.close();
     if (dshA) await dshA.close();
     if (dshB) await dshB.close();
@@ -306,6 +309,8 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
     hubChild.on("error", reject);
   });
   const hubBaseUrl = `http://127.0.0.1:${hubPort}`;
+  machineIngress = await startMachineIngress(hubBaseUrl);
+  const machineBaseUrl = machineIngress.baseUrl;
 
   // Step 3: Start Authenticated Wildcard Gateway
   gateway = await startWildcardGateway({
@@ -365,7 +370,7 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
   // Enroll A
   const enrollChildA = spawn(process.execPath, ["bin/dsh-orbit-node.mjs", "enroll"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, DSH_ORBIT_NODE_STATE: statePathA, DSH_ORBIT_HUB_URL: hubBaseUrl, DSH_ORBIT_ENROLL_TOKEN: tokenA },
+    env: { ...process.env, DSH_ORBIT_NODE_STATE: statePathA, DSH_ORBIT_HUB_URL: machineBaseUrl, DSH_ORBIT_ENROLL_TOKEN: tokenA },
   });
   let enrollOutA = "";
   enrollChildA.stdout.on("data", (c) => (enrollOutA += c));
@@ -376,7 +381,7 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
   // Enroll B
   const enrollChildB = spawn(process.execPath, ["bin/dsh-orbit-node.mjs", "enroll"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, DSH_ORBIT_NODE_STATE: statePathB, DSH_ORBIT_HUB_URL: hubBaseUrl, DSH_ORBIT_ENROLL_TOKEN: tokenB },
+    env: { ...process.env, DSH_ORBIT_NODE_STATE: statePathB, DSH_ORBIT_HUB_URL: machineBaseUrl, DSH_ORBIT_ENROLL_TOKEN: tokenB },
   });
   let enrollOutB = "";
   enrollChildB.stdout.on("data", (c) => (enrollOutB += c));
@@ -395,13 +400,13 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
 
   const repChildA = spawn(process.execPath, ["bin/dsh-orbit-node.mjs", "upload-report"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, DSH_ORBIT_NODE_STATE: statePathA, DSH_ORBIT_HUB_URL: hubBaseUrl, DSH_ORBIT_REPORT_FILE: reportPathA },
+    env: { ...process.env, DSH_ORBIT_NODE_STATE: statePathA, DSH_ORBIT_HUB_URL: machineBaseUrl, DSH_ORBIT_REPORT_FILE: reportPathA },
   });
   await new Promise((r) => repChildA.on("exit", r));
 
   const repChildB = spawn(process.execPath, ["bin/dsh-orbit-node.mjs", "upload-report"], {
     cwd: REPO_ROOT,
-    env: { ...process.env, DSH_ORBIT_NODE_STATE: statePathB, DSH_ORBIT_HUB_URL: hubBaseUrl, DSH_ORBIT_REPORT_FILE: reportPathB },
+    env: { ...process.env, DSH_ORBIT_NODE_STATE: statePathB, DSH_ORBIT_HUB_URL: machineBaseUrl, DSH_ORBIT_REPORT_FILE: reportPathB },
   });
   await new Promise((r) => repChildB.on("exit", r));
 
@@ -412,7 +417,7 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
       env: {
         ...process.env,
         DSH_ORBIT_NODE_STATE: statePathA,
-        DSH_ORBIT_HUB_URL: hubBaseUrl,
+        DSH_ORBIT_HUB_URL: machineBaseUrl,
         DSH_ORBIT_NODE_HEARTBEAT_SECONDS: "30",
         DSH_ORBIT_NODE_ORBIT_VERSION: "0.4.0",
         DSH_ORBIT_NODE_ORBIT_REVISION: "abc123",
@@ -440,7 +445,7 @@ test("Stage 5 Live End-to-End: Rehearsal Wildcard Gateway + Selector Shell + Ope
       env: {
         ...process.env,
         DSH_ORBIT_NODE_STATE: statePathB,
-        DSH_ORBIT_HUB_URL: hubBaseUrl,
+        DSH_ORBIT_HUB_URL: machineBaseUrl,
         DSH_ORBIT_NODE_HEARTBEAT_SECONDS: "30",
         DSH_ORBIT_NODE_ORBIT_VERSION: "0.4.0",
         DSH_ORBIT_NODE_ORBIT_REVISION: "abc123",

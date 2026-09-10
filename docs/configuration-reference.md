@@ -19,7 +19,7 @@ Registry semantics.
 | `DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY` | one of two | `0` | Set to `1` only for the strict loopback boundary alternative. |
 | `DSH_ORBIT_HUB_OPERATOR_PRINCIPAL` | no | unset | Fixed principal. If absent, the gateway must inject `X-DSH-Operator-Id`. |
 | `DSH_ORBIT_HUB_TRUSTED_SCHEME` | no | `http` | Trusted browser scheme, `http` or `https`; `X-Forwarded-Proto` is not trusted. |
-| `DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY` | required when browser management is enabled | unset | Canonical `host[:port]` authority for the Hub management surface. It must be valid, include an explicitly configured non-default port, and remain outside the complete `DSH_ORBIT_HUB_ROUTE_DOMAIN` namespace. Orbit never derives it from request Host or forwarded headers. |
+| `DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY` | required when browser management is enabled | unset | Canonical `host[:port]` authority for the Hub management surface. It must be valid and remain outside the complete `DSH_ORBIT_HUB_ROUTE_DOMAIN` namespace; when a port is explicitly configured, it is preserved and matched exactly. Orbit never derives it from request Host or forwarded headers. |
 | `DSH_ORBIT_HUB_ROTATION_OVERLAP_H` | no | `24` | Node credential overlap in hours, bounded by the frozen Registry contract. |
 | `DSH_ORBIT_HUB_ROUTE_DOMAIN` | no | `localhost` | v0.4 deterministic route domain used to derive `n-<nodeId-hex>.<domain>`. Stage 2 uses it only as protocol data; Stage 3 publishes the wildcard route. Must match the Node route-domain setting. |
 | `DSH_ORBIT_HUB_CA_CERT` | no | unset | Additional operator-managed private-CA PEM or PEM file for HTTPS Node route targets. It extends the runtime default trust set; hostname/SAN validation stays enabled. |
@@ -38,7 +38,7 @@ surface and must not be routed through the browser gateway. See
 | Variable | Required | Default | Meaning and constraints |
 | --- | --- | --- | --- |
 | `DSH_ORBIT_NODE_STATE` | no | `./node-state.json` | Atomic local state file; POSIX mode `0600`. |
-| `DSH_ORBIT_HUB_URL` | yes | none | Canonical private machine-ingress URL used for RFC-0006 transport. Once enrolled, it must match the persisted binding; machine requests retain the private `registry-hub:5446` Host authority and never use the browser management authority. |
+| `DSH_ORBIT_HUB_URL` | yes | none | Canonical private machine-ingress URL used for RFC-0006 transport. Once enrolled, it must match the persisted binding; the machine wire authority is derived from this URL and never uses the browser management authority. |
 | `DSH_ORBIT_ENROLL_TOKEN` | for `enroll` | none | One-time plaintext enrollment token; never persisted. |
 | `DSH_ORBIT_REENROLL_TOKEN` | for `reenroll` | none | Tombstone-bound operator token; recovery is explicit, never automatic. |
 | `DSH_ORBIT_NODE_HEARTBEAT_SECONDS` | no | `60` | Heartbeat cadence, bounded to 30–300 seconds. |

@@ -39,6 +39,7 @@ import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.m
 import { validReport } from "./helpers/registry-fixture.mjs";
 import { startWildcardGateway } from "./helpers/wildcard-gateway-fixture.mjs";
 import { computeRouteAuthority } from "../src/registry/protocol.mjs";
+import { startMachineIngress } from "./helpers/machine-ingress-fixture.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const REHEARSAL_DOMAIN = "stage4-test.example";
@@ -377,11 +378,13 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
   let gateway = null;
   let nodeChild = null;
   let dshChild = null;
+  let machineIngress = null;
 
   t.after(async () => {
     await killProcess(nodeChild);
     await killProcess(dshChild);
     await killProcess(hubChild);
+    if (machineIngress) await machineIngress.close();
     if (gateway) await gateway.close();
     await rm(dir, { recursive: true, force: true });
   });
@@ -428,6 +431,8 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
     hubChild.on("error", reject);
   });
   const hubBaseUrl = `http://127.0.0.1:${hubPort}`;
+  machineIngress = await startMachineIngress(hubBaseUrl);
+  const machineBaseUrl = machineIngress.baseUrl;
 
   // Step 2: Start Wildcard Gateway using shared authenticated fixture
   gateway = await startWildcardGateway({
@@ -468,7 +473,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
     env: {
       ...process.env,
       DSH_ORBIT_NODE_STATE: statePath,
-      DSH_ORBIT_HUB_URL: hubBaseUrl,
+      DSH_ORBIT_HUB_URL: machineBaseUrl,
       DSH_ORBIT_ENROLL_TOKEN: enrollToken,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -557,7 +562,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
     env: {
       ...process.env,
       DSH_ORBIT_NODE_STATE: statePath,
-      DSH_ORBIT_HUB_URL: hubBaseUrl,
+      DSH_ORBIT_HUB_URL: machineBaseUrl,
       DSH_ORBIT_REPORT_FILE: reportPath,
     },
   });
@@ -573,7 +578,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
         env: {
           ...process.env,
           DSH_ORBIT_NODE_STATE: statePath,
-          DSH_ORBIT_HUB_URL: hubBaseUrl,
+          DSH_ORBIT_HUB_URL: machineBaseUrl,
           DSH_ORBIT_NODE_HEARTBEAT_SECONDS: "30",
           DSH_ORBIT_NODE_ORBIT_VERSION: "0.4.0",
           DSH_ORBIT_NODE_ORBIT_REVISION: "abc123",
