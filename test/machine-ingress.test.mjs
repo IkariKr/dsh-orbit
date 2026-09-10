@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { request as httpsRequest } from "node:https";
 import { createServer, request as httpRequest } from "node:http";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createMachineIngressServer } from "../src/registry/machine-ingress.mjs";
+import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.mjs";
 
 async function listen(server) {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -24,6 +26,28 @@ function request(port, path, { method = "GET", headers = {}, body = "" } = {}) {
     headers: response.headers,
     body: await response.text(),
   }));
+}
+
+function httpsRawRequest(port, path, { method = "POST", headers = {}, body = "" } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest({
+      host: "127.0.0.1",
+      port,
+      method,
+      path,
+      headers,
+      ca: GATEWAY_CERT_PEM,
+      servername: "dsh.example.com",
+      rejectUnauthorized: true,
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
+    if (body !== "") req.write(body);
+    req.end();
+  });
 }
 
 function rawRequest(port, path, { method = "POST", headers = {}, body = "" } = {}) {
@@ -108,6 +132,38 @@ test("private machine ingress forwards only /api/v1 paths without changing metho
   assert.equal(seen[0].headers["x-orbit-node"], "node_test");
 });
 
+test("private machine ingress supports verified HTTPS without changing the loopback HTTP upstream", async (t) => {
+  const upstream = createServer((_request, response) => {
+    response.writeHead(201, { "content-type": "application/json" });
+    response.end(JSON.stringify({ accepted: true }));
+  });
+  const upstreamPort = await listen(upstream);
+  const ingress = createMachineIngressServer({
+    upstream: `http://127.0.0.1:${upstreamPort}`,
+    tls: { key: GATEWAY_KEY_PEM, cert: GATEWAY_CERT_PEM },
+  });
+  const ingressPort = await listen(ingress);
+  t.after(async () => {
+    await close(ingress);
+    await close(upstream);
+  });
+
+  const response = await httpsRawRequest(ingressPort, "/api/v1/heartbeat", {
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(response.status, 201);
+  assert.deepEqual(JSON.parse(response.body), { accepted: true });
+  assert.throws(
+    () => createMachineIngressServer({ upstream: `https://127.0.0.1:${upstreamPort}` }),
+    /upstream must use http/,
+  );
+  assert.throws(
+    () => createMachineIngressServer({ upstream: `http://127.0.0.1:${upstreamPort}`, tls: { key: GATEWAY_KEY_PEM } }),
+    /requires key and cert/,
+  );
+});
+
 test("private machine ingress fails closed when the Hub upstream is unavailable", async (t) => {
   const upstream = createServer(() => {});
   const upstreamPort = await listen(upstream);
@@ -121,10 +177,14 @@ test("private machine ingress fails closed when the Hub upstream is unavailable"
   assert.equal(JSON.parse(response.body).error.code, "machine-upstream-error");
 });
 
-test("drill compose keeps machine ingress private and DSH services non-root", async () => {
+test("drill compose keeps verified machine ingress private and DSH services non-root", async () => {
   const compose = await readFile(new URL("../docker-registry/drill.compose.yaml", import.meta.url), "utf8");
   assert.match(compose, /machine-ingress:\n[\s\S]*?network_mode: "service:registry-hub"/);
+  assert.match(compose, /machine-ingress:[\s\S]*?DSH_ORBIT_MACHINE_INGRESS_TLS_KEY: \/data\/orbit\/tls\/tls\.key/);
+  assert.match(compose, /machine-ingress:[\s\S]*?DSH_ORBIT_MACHINE_INGRESS_TLS_CERT: \/data\/orbit\/tls\/tls\.crt/);
+  assert.match(compose, /machine-ingress:[\s\S]*?\.\.\/data\/orbit-drill:\/data\/orbit:ro/);
   assert.doesNotMatch(compose, /5446:\s*5446/);
+  assert.match(compose, /DSH_ORBIT_NODE_CA_CERT: \/etc\/caddy\/tls\/ca\.crt/);
   assert.match(compose, /dsh-a:\n[\s\S]*?user: "10001:10001"/);
   assert.match(compose, /dsh-b:\n[\s\S]*?user: "10001:10001"/);
   assert.match(compose, /dsh-a-init:[\s\S]*?user: "0"/);

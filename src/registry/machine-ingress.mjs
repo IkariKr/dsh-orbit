@@ -1,4 +1,5 @@
 import { createServer, request as upstreamRequest } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 
 export const MACHINE_INGRESS_PATHS = Object.freeze([
   "/api/v1/enroll",
@@ -14,13 +15,18 @@ export function createMachineIngressServer({
   listenPort = 5446,
   listenHost = "0.0.0.0",
   upstream = "http://127.0.0.1:5445",
+  tls = null,
 } = {}) {
   const upstreamUrl = new URL(upstream);
   if (upstreamUrl.protocol !== "http:") {
     throw new Error("machine ingress upstream must use http");
   }
 
-  const server = createServer((request, response) => {
+  if (tls !== null && (typeof tls !== "object" || typeof tls.key !== "string" || typeof tls.cert !== "string")) {
+    throw new Error("machine ingress TLS requires key and cert PEM values");
+  }
+
+  const requestHandler = (request, response) => {
     // Match the raw request-target exactly. WHATWG URL parsing normalizes
     // dot segments, which would turn e.g. /api/v1/heartbeat/../enroll into
     // an allowed route and violate RFC-0006's no-path-canonicalization rule.
@@ -55,7 +61,8 @@ export function createMachineIngressServer({
       response.end(JSON.stringify({ error: { code: "machine-upstream-error", message: "private Hub upstream unavailable" } }));
     });
     request.pipe(proxy);
-  });
+  };
 
+  const server = tls ? createHttpsServer(tls, requestHandler) : createServer(requestHandler);
   return server;
 }

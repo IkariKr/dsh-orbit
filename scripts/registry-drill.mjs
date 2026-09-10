@@ -41,7 +41,8 @@ const ROUTE_DOMAIN = `${ROUTE_DOMAIN_HOST}:8443`;
 const ROUTE_GATEWAY_TOKEN = "drill-proxy-secret";
 // Nodes reach the Hub through the PRIVATE machine ingress on the
 // compose bridge (the Hub process itself stays loopback-only).
-const NODE_HUB_URL = "http://registry-hub:5446/";
+const NODE_HUB_URL = "https://registry-hub:5446/";
+const NODE_HUB_CA_PATH = "/etc/caddy/tls/ca.crt";
 const GATEWAY_URL = "https://127.0.0.1:8443";
 const ROUTE_GATEWAY_URL = GATEWAY_URL;
 const AUTH = `Basic ${Buffer.from("operator:drill-password").toString("base64")}`;
@@ -161,6 +162,16 @@ function certificateUsable(path, caPath = null) {
   return true;
 }
 
+function certificateHasDnsSan(path, hostname) {
+  if (!existsSync(path)) return false;
+  const openssl = resolveOpenSsl();
+  const result = spawnSync(openssl, ["x509", "-in", path, "-noout", "-ext", "subjectAltName"], {
+    cwd: REPO,
+    encoding: "utf8",
+  });
+  return result.status === 0 && result.stdout.includes(`DNS:${hostname}`);
+}
+
 function ensureDrillCertificate() {
   const openssl = resolveOpenSsl();
   mkdirSync(join(REPO, "data", "orbit-drill", "tls"), { recursive: true });
@@ -187,12 +198,14 @@ function ensureDrillCertificate() {
   const leafReady =
     existsSync(DRILL_CERT_KEY_PATH) &&
     existsSync(DRILL_EXT_PATH) &&
+    readFileSync(DRILL_EXT_PATH, "utf8").includes("DNS:registry-hub") &&
     readFileSync(DRILL_EXT_PATH, "utf8").includes(ROUTE_DOMAIN_HOST) &&
-    certificateUsable(DRILL_CERT_PATH, DRILL_CA_PATH);
+    certificateUsable(DRILL_CERT_PATH, DRILL_CA_PATH) &&
+    certificateHasDnsSan(DRILL_CERT_PATH, "registry-hub");
   if (!leafReady) {
     writeFileSync(
       DRILL_EXT_PATH,
-      `subjectAltName=IP:127.0.0.1,DNS:${ROUTE_DOMAIN_HOST},DNS:*.${ROUTE_DOMAIN_HOST},DNS:dsh-a,DNS:dsh-b,DNS:dsh-a.test,DNS:dsh-b.test\n`,
+      `subjectAltName=IP:127.0.0.1,DNS:registry-hub,DNS:${ROUTE_DOMAIN_HOST},DNS:*.${ROUTE_DOMAIN_HOST},DNS:dsh-a,DNS:dsh-b,DNS:dsh-a.test,DNS:dsh-b.test\n`,
     );
     file(openssl, [
       "req",
@@ -236,7 +249,7 @@ function ensureDrillCertificate() {
     caPath: DRILL_CA_PATH,
     caFingerprint: file(openssl, ["x509", "-in", DRILL_CA_PATH, "-noout", "-fingerprint", "-sha256"]),
     leafFingerprint: file(openssl, ["x509", "-in", DRILL_CERT_PATH, "-noout", "-fingerprint", "-sha256"]),
-    sans: ["127.0.0.1", ROUTE_DOMAIN_HOST, `*.${ROUTE_DOMAIN_HOST}`, "dsh-a", "dsh-b", "dsh-a.test", "dsh-b.test"],
+    sans: ["127.0.0.1", "registry-hub", ROUTE_DOMAIN_HOST, `*.${ROUTE_DOMAIN_HOST}`, "dsh-a", "dsh-b", "dsh-a.test", "dsh-b.test"],
   };
   mkdirSync(dirname(BROWSER_BINDINGS_PATH), { recursive: true });
   writeFileSync(
@@ -680,6 +693,7 @@ const waitFor = async (label, fn, { attempts = 40, intervalMs = 3000 } = {}) => 
 const nodeEnv = (dataHome, name = null) => ({
   DSH_ORBIT_NODE_STATE: `${dataHome}/orbit-node.json`,
   DSH_ORBIT_HUB_URL: NODE_HUB_URL,
+  DSH_ORBIT_NODE_CA_CERT: NODE_HUB_CA_PATH,
   DSH_ORBIT_NODE_ORBIT_VERSION: "0.4.0-rc.1",
   DSH_ORBIT_NODE_ORBIT_REVISION: REVISION,
   DSH_ORBIT_NODE_DSH_VERSION: "0.1.1-rc.2",

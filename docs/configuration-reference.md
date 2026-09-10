@@ -46,7 +46,7 @@ surface and must not be routed through the browser gateway. See
 | `DSH_ORBIT_NODE_ORBIT_REVISION` | no | unset | Orbit revision reported to the Hub. |
 | `DSH_ORBIT_NODE_DSH_VERSION` | no | empty | DSH version reported to the Hub. |
 | `DSH_ORBIT_NODE_DSH_PROFILE` | no | unset | Compatibility profile reported to the Hub. |
-| `DSH_ORBIT_NODE_CA_CERT` | no | unset | Additional private-CA PEM or PEM file for HTTPS `DSH_ORBIT_HUB_URL`. It extends normal runtime trust; redirects and hostname/SAN failures remain denied. |
+| `DSH_ORBIT_NODE_CA_CERT` | no | unset | Additional private-CA PEM or PEM file for HTTPS `DSH_ORBIT_HUB_URL`. It extends normal runtime trust; redirects and hostname/SAN failures remain denied. A private DNS machine-ingress authority such as `registry-hub` must use verified HTTPS; plaintext DNS is not trusted. |
 | `DSH_ORBIT_NODE_ROUTE_INGRESS_DISABLED` | no | `0` | Set to `1` to suppress the Stage 2 route ingress. A routable v0.4 Node normally leaves it enabled. |
 | `DSH_ORBIT_NODE_ROUTE_INGRESS_PORT` | no | `0` | Route-ingress listen port. `0` requests an ephemeral port for development/tests; production route targets should use an explicit stable port. |
 | `DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN` | no | `127.0.0.1` | Route-ingress listen address. Non-loopback production exposure must be protected by verified TLS according to RFC-0010. |
@@ -71,6 +71,11 @@ runbook at [`docs/sop/v0.3-node-enrollment-sop.md`](sop/v0.3-node-enrollment-sop
 - Preserve browser `Cookie`, `Origin`, and `Sec-Fetch-Site` headers.
 - Do not accept client-supplied assertion or principal headers.
 - Keep the Hub loopback-only and keep machine ingress private.
+- The private machine-ingress listener must use verified HTTPS when addressed by
+  a non-loopback authority such as `registry-hub`; configure its key and
+  certificate through `DSH_ORBIT_MACHINE_INGRESS_TLS_KEY` and
+  `DSH_ORBIT_MACHINE_INGRESS_TLS_CERT`, and provide the issuing CA to Nodes
+  through `DSH_ORBIT_NODE_CA_CERT`.
 - Keep trusted certificate validation enabled.
 - For Stage 3 public node routing (`*.routeDomain`), terminate wildcard TLS at the outer gateway, preserve the complete canonical `Host` authority including an explicitly configured port, strip outer gateway credentials, and deny `/api/v1/*` machine surface.
 - Configure `DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY` for the browser management authority; Orbit validates it independently from the Selector/Node route namespace and never derives it from forwarded headers.

@@ -20,6 +20,11 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /resolveOpenSsl\(\)/);
   assert.match(source, /DSH_ORBIT_OPENSSL_BIN/);
   assert.match(source, /ROUTE_DOMAIN_HOST/);
+  assert.match(source, /DNS:registry-hub/);
+  assert.match(source, /certificateHasDnsSan\(DRILL_CERT_PATH, "registry-hub"\)/);
+  assert.match(source, /NODE_HUB_URL = "https:\/\/registry-hub:5446\//);
+  assert.match(source, /NODE_HUB_CA_PATH = "\/etc\/caddy\/tls\/ca\.crt"/);
+  assert.match(source, /DSH_ORBIT_NODE_CA_CERT: NODE_HUB_CA_PATH/);
   assert.match(source, /ROUTE_DOMAIN =/);
   assert.match(source, /checkpoint\.leafFingerprint/);
   assert.match(source, /runner-owned-firefox-selenium/);
@@ -55,6 +60,7 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /runningImageEvidence\(/);
   assert.match(source, /aging reset healed A without heartbeat/);
   assert.doesNotMatch(source, /rejectUnauthorized:\s*false/);
+  assert.doesNotMatch(source, /http:\/\/registry-hub:5446/);
   assert.doesNotMatch(source, /accept_insecure_certs\s*=\s*True/);
   assert.doesNotMatch(source, /NODE_TLS_REJECT_UNAUTHORIZED/);
   assert.doesNotMatch(source, /--ignore-certificate-errors/);

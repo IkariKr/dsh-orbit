@@ -1,12 +1,13 @@
 # Mounted deployment drill (Gate B live evidence). Runs the REAL
 # topology on Docker Desktop:
 #   browser --TLS--> caddy (hub netns) --127.0.0.1:5445--> hub
-#   dsh-a / dsh-b (bridge, own netns) --private machine ingress--> hub
+#   dsh-a / dsh-b (bridge, own netns) --verified HTTPS private machine ingress--> hub
 #
 # The Hub process binds 127.0.0.1:5445 exclusively (frozen listener
-# policy intact). The machine-ingress sidecar lives in the Hub's
-# network namespace, listens on the compose bridge (5446) and proxies
-# to the loopback listener — the documented private machine boundary.
+# policy intact). The machine-ingress sidecar lives in the Hub's network
+# namespace, listens over verified HTTPS on the compose bridge (5446), and
+# proxies over loopback HTTP to the Hub listener — the documented private
+# machine boundary.
 
 services:
   registry-hub:
@@ -48,6 +49,11 @@ services:
     depends_on:
       - registry-hub
     read_only: true
+    environment:
+      DSH_ORBIT_MACHINE_INGRESS_TLS_KEY: /data/orbit/tls/tls.key
+      DSH_ORBIT_MACHINE_INGRESS_TLS_CERT: /data/orbit/tls/tls.crt
+    volumes:
+      - ../data/orbit-drill:/data/orbit:ro
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     command:
@@ -125,6 +131,7 @@ services:
       DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0"
       DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test:8443
       DSH_ORBIT_NODE_DSH_TARGET: http://127.0.0.1:3081
+      DSH_ORBIT_NODE_CA_CERT: /etc/caddy/tls/ca.crt
       DSH_ORBIT_NODE_ROUTE_TLS_KEY: /etc/caddy/tls/tls.key
       DSH_ORBIT_NODE_ROUTE_TLS_CERT: /etc/caddy/tls/tls.crt
       DSH_PROFILE_ROOT: /data/dsh-a/profiles/web
@@ -199,6 +206,7 @@ services:
       DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0"
       DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test:8443
       DSH_ORBIT_NODE_DSH_TARGET: http://127.0.0.1:3081
+      DSH_ORBIT_NODE_CA_CERT: /etc/caddy/tls/ca.crt
       DSH_ORBIT_NODE_ROUTE_TLS_KEY: /etc/caddy/tls/tls.key
       DSH_ORBIT_NODE_ROUTE_TLS_CERT: /etc/caddy/tls/tls.crt
       DSH_PROFILE_ROOT: /data/dsh-b/profiles/web

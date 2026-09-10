@@ -79,6 +79,7 @@ test("Registry Compose requires an explicit release image tag", async () => {
   const compose = await text("docker-registry/compose.example.yaml");
   assert.match(compose, /DSH_ORBIT_HUB_ROUTE_DOMAIN:\s*dsh\.example\.local/);
   assert.match(compose, /DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY:\s*registration\.example\.invalid/);
+  assert.match(compose, /DSH_ORBIT_MACHINE_INGRESS_TLS_KEY|machine-ingress/);
   assert.match(
     compose,
     /healthcheck:[\s\S]*headers:\{host:process\.env\.DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY\}/,

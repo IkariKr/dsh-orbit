@@ -756,6 +756,8 @@ test("P1-2 & P3-1: Heartbeat redirect fails closed and loopback trust is consist
   assert.equal(isTrustedTransport("http://[::1]:5445"), true);
   assert.equal(isTrustedTransport("http://localhost:5445"), false);
   assert.equal(isTrustedTransport("http://nas.example.com:5445"), false);
+  assert.equal(isTrustedTransport("http://registry-hub:5446"), false);
+  assert.equal(isTrustedTransport("https://registry-hub:5446"), true);
   assert.equal(isTrustedTransport("https://nas.example.com:5445"), true);
 
   // Redirect test

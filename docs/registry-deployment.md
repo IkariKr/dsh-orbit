@@ -15,10 +15,10 @@ Operator browser --HTTPS :8443--> Caddy
                                       ├── browser paths -> Hub 127.0.0.1:5445
                                       └── /api/v1/* -> 403 (not proxied)
 
-DSH Node A --bridge--> registry-hub:5446 machine-ingress
-DSH Node B --bridge--> registry-hub:5446 machine-ingress
+DSH Node A --bridge--> https://registry-hub:5446 machine-ingress (private HTTPS)
+DSH Node B --bridge--> https://registry-hub:5446 machine-ingress (private HTTPS)
                                       │ same Hub network namespace
-                                      └──> Hub 127.0.0.1:5445
+                                      └──TLS ingress -> Hub 127.0.0.1:5445 (HTTP)
 ```
 
 - The Hub listens on loopback only; any non-loopback bind refuses startup
@@ -34,8 +34,10 @@ DSH Node B --bridge--> registry-hub:5446 machine-ingress
   pass through for RFC-0007 checks.
 - The gateway refuses `/api/v1/*` with 403. Node traffic does not cross the
   browser gateway or a public edge.
-- The `machine-ingress` sidecar listens privately on port 5446 in the shared
-  Hub namespace and forwards only to `127.0.0.1:5445`. It accepts only the
+- The `machine-ingress` sidecar listens privately over verified HTTPS on port
+  5446 in the shared Hub namespace and forwards only over loopback HTTP to
+  `127.0.0.1:5445`. Its certificate must cover `registry-hub`, and every Node
+  must trust the issuing CA through `DSH_ORBIT_NODE_CA_CERT`. It accepts only the
   fixed `/api/v1/enroll`, `/api/v1/heartbeat`, `/api/v1/report-upload`,
   `/api/v1/credential-rotate`, and `/api/v1/reenroll` routes, and rejects
   query strings before any upstream request. DSH A and DSH B use independent
