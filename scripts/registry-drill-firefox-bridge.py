@@ -69,16 +69,18 @@ class ConnectHandler(socketserver.BaseRequestHandler):
             self.request.close()
 
 
-def certutil_run(arguments: list[str]) -> subprocess.CompletedProcess[str]:
+def certutil_run(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     certutil = shutil.which("certutil.exe")
     if not certutil:
         raise RuntimeError("Firefox trust setup unavailable: certutil.exe was not found")
     try:
+        # certutil emits localized output in the host code page. Keep the
+        # capture binary so decoding cannot block or fail before Firefox starts.
         return subprocess.run(
             [certutil, *arguments],
             capture_output=True,
-            text=True,
+            text=False,
             timeout=CERTUTIL_TIMEOUT_SECONDS,
             creationflags=creationflags,
         )
@@ -129,7 +131,8 @@ def install_windows_root(ca_path: Path) -> tuple[str, bool]:
         return thumbprint, False
     installed = certutil_run(["-f", "-user", "-addstore", "Root", str(ca_path)])
     if installed.returncode != 0:
-        detail = (installed.stderr or installed.stdout or "certutil addstore failed").strip().splitlines()[-1][:240]
+        raw_detail = installed.stderr or installed.stdout or b"certutil addstore failed"
+        detail = raw_detail.decode(errors="replace").strip().splitlines()[-1][:240]
         raise RuntimeError(f"certutil addstore failed ({installed.returncode}): {detail}")
     return thumbprint, True
 
