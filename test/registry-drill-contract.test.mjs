@@ -67,9 +67,16 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /security\.enterprise_roots\.enabled/);
   assert.match(source, /runner-owned-firefox-selenium/);
   assert.match(source, /data-plaintext-once/);
-  assert.match(source, /Firefox rejects page fetches while the document URL retains userinfo/);
+  assert.match(source, /application document never runs[\s\S]*contains userinfo/);
   assert.match(source, /driver\.get\(gateway \+ "\/"\)/);
-  assert.match(source, /warm_url\.replace\("https:\/\/", "https:\/\/operator:drill-password@", 1\)/);
+  assert.match(source, /authority_warmup\.replace\("https:\/\/", "https:\/\/operator:drill-password@", 1\)/);
+  assert.match(source, /gateway_warmup = gateway\.rstrip\("\/"\) \+ "\/styles\.css"/);
+  assert.match(source, /authority_warmup = warm_url\.rstrip\("\/"\) \+ "\/styles\.css"/);
+  assert.ok(
+    source.indexOf("write_json(Path(args.bootstrap_path), bootstrap)") <
+      source.indexOf("for warm_url in [selector_url, open_urls[\"a\"], open_urls[\"b\"]]"),
+    "Selector/Node authority warmup must occur after management bootstrap",
+  );
   assert.match(source, /if stop_path\.exists\(\):/);
   assert.match(source, /CERTUTIL_TIMEOUT_SECONDS/);
   assert.match(source, /certutil timed out/);

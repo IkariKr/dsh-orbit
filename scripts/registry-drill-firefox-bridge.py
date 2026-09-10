@@ -235,24 +235,20 @@ def run(args: argparse.Namespace) -> int:
         wait = WebDriverWait(driver, WAIT_SECONDS, poll_frequency=POLL_SECONDS)
 
         # URL credentials exercise the real browser Basic Auth path without
-        # logging or storing the password in any checkpoint.
+        # logging or storing the password in any checkpoint. Warm a static
+        # resource first so an application document never runs while its URL
+        # still contains userinfo (Firefox rejects fetches in that state).
         gateway = bindings["gatewayUrl"]
         log("navigating-gateway-authenticated")
-        driver.get(gateway.replace("https://", "https://operator:drill-password@", 1) + "/")
-        # Firefox rejects page fetches while the document URL retains userinfo.
-        # Navigate to the same origin without userinfo after the browser has
-        # cached the real Basic Auth challenge response.
+        gateway_warmup = gateway.rstrip("/") + "/styles.css"
+        driver.get(gateway_warmup.replace("https://", "https://operator:drill-password@", 1))
+        # Navigate to the same origin without userinfo after Firefox has
+        # cached the real Basic Auth challenge response for this host.
         driver.get(gateway + "/")
         log(f"gateway-loaded:title={driver.title!r}:url={driver.current_url!r}")
-        # Pre-warm the same authenticated browser challenge for the selector
-        # apex and both dynamic route authorities before Open navigation. Each
-        # authority gets the real Basic Auth challenge before its clean URL is
-        # loaded, because Firefox keeps authentication cache entries per host.
-        for warm_url in [bindings.get("selectorUrl"), *((bindings.get("openUrls") or {}).values())]:
-            if isinstance(warm_url, str) and warm_url:
-                driver.get(warm_url.replace("https://", "https://operator:drill-password@", 1))
-                driver.get(warm_url)
-                wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
+        # Keep the management document active until its session and one-time
+        # token checkpoints are complete. Selector and Node authorities are
+        # authenticated later, after the browser receives their run bindings.
         body_text = driver.find_element(By.TAG_NAME, "body").text.strip().replace("\\n", " ")[:160]
         log(f"gateway-body-prefix:{body_text!r}")
         session_status = wait_for(wait, EC.visibility_of_element_located((By.ID, "session-status")))
@@ -318,9 +314,12 @@ def run(args: argparse.Namespace) -> int:
         # The selector Open and cookie checks must be performed by this real
         # Firefox profile, not inferred from the selector JSON or response headers.
         # Warm the Basic Auth challenge independently for the selector and both
-        # dynamic authorities before clicking their actual Open anchors.
+        # dynamic authorities before clicking their actual Open anchors. Use a
+        # static resource for the challenge so no app script runs under URL
+        # userinfo, then load each clean authority URL.
         for warm_url in [selector_url, open_urls["a"], open_urls["b"]]:
-            driver.get(warm_url.replace("https://", "https://operator:drill-password@", 1))
+            authority_warmup = warm_url.rstrip("/") + "/styles.css"
+            driver.get(authority_warmup.replace("https://", "https://operator:drill-password@", 1))
             driver.get(warm_url)
         driver.get(selector_url)
         wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
