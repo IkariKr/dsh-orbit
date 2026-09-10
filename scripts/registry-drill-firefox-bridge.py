@@ -245,9 +245,12 @@ def run(args: argparse.Namespace) -> int:
         driver.get(gateway + "/")
         log(f"gateway-loaded:title={driver.title!r}:url={driver.current_url!r}")
         # Pre-warm the same authenticated browser challenge for the selector
-        # apex and both dynamic route authorities before Open navigation.
+        # apex and both dynamic route authorities before Open navigation. Each
+        # authority gets the real Basic Auth challenge before its clean URL is
+        # loaded, because Firefox keeps authentication cache entries per host.
         for warm_url in [bindings.get("selectorUrl"), *((bindings.get("openUrls") or {}).values())]:
             if isinstance(warm_url, str) and warm_url:
+                driver.get(warm_url.replace("https://", "https://operator:drill-password@", 1))
                 driver.get(warm_url)
                 wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
         body_text = driver.find_element(By.TAG_NAME, "body").text.strip().replace("\\n", " ")[:160]

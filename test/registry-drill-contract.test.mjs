@@ -69,6 +69,7 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /data-plaintext-once/);
   assert.match(source, /Firefox rejects page fetches while the document URL retains userinfo/);
   assert.match(source, /driver\.get\(gateway \+ "\/"\)/);
+  assert.match(source, /warm_url\.replace\("https:\/\/", "https:\/\/operator:drill-password@", 1\)/);
   assert.match(source, /if stop_path\.exists\(\):/);
   assert.match(source, /CERTUTIL_TIMEOUT_SECONDS/);
   assert.match(source, /certutil timed out/);
