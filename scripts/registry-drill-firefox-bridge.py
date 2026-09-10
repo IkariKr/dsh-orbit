@@ -318,7 +318,12 @@ def run(args: argparse.Namespace) -> int:
         visible_ids = {element.text.strip() for element in node_elements}
         if not set(node_ids).issubset(visible_ids):
             raise RuntimeError("current-run node IDs were not independently observed in the Nodes list")
-        driver.find_element(By.XPATH, f"//*[contains(@class, 'node-id') and normalize-space()='{node_ids[0]}']").click()
+        node_target = next((element for element in node_elements if element.text.strip() == node_ids[0]), None)
+        if node_target is None:
+            raise RuntimeError("current-run Node A detail target was not found in the observed Nodes list")
+        log("node-detail-click-start")
+        driver.execute_script("arguments[0].click()", node_target)
+        log("node-detail-clicked")
         detail = wait_for(wait, EC.visibility_of_element_located((By.ID, "node-detail-view")))
         detail_heading = wait_for(wait, EC.visibility_of_element_located((By.CSS_SELECTOR, "#node-detail-view h2")))
         if detail_heading.text.strip() != node_ids[0]:
