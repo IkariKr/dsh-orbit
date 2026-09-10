@@ -359,24 +359,28 @@ def run(args: argparse.Namespace) -> int:
         log("node-detail-click-start")
         driver.execute_script("arguments[0].click()", node_target)
         log("node-detail-clicked")
-        def detail_ready(_driver):
-            detail_nodes = _driver.find_elements(By.ID, "node-detail-view")
-            headings = _driver.find_elements(By.CSS_SELECTOR, "#node-detail-view h2")
-            if len(detail_nodes) != 1:
-                return False
-            detail_node = detail_nodes[0]
-            state = detail_node.get_attribute("data-detail-state")
-            if state == "error":
-                message = detail_node.text.strip().replace("\\n", " ")[:240]
-                raise RuntimeError(f"node detail request failed for current-run node: {message!r}")
-            if len(headings) != 1:
-                return False
-            return state == "ready" and detail_node.get_attribute("hidden") is None and headings[0].text.strip() == node_ids[0]
-
-        detail_ready_wait = WebDriverWait(driver, 30, poll_frequency=0.5)
-        if not detail_ready_wait.until(detail_ready):
-            body = driver.find_element(By.TAG_NAME, "body").text.strip().replace("\\n", " ")[:240]
-            raise RuntimeError(f"node detail did not render for current-run node: {body!r}")
+        detail_deadline = time.monotonic() + 30
+        detail_state = None
+        while time.monotonic() < detail_deadline:
+            try:
+                detail_nodes = driver.find_elements(By.ID, "node-detail-view")
+                if len(detail_nodes) == 1:
+                    detail_node = detail_nodes[0]
+                    detail_state = detail_node.get_attribute("data-detail-state")
+                    log(f"node-detail-state:{detail_state or 'unset'}")
+                    if detail_state == "error":
+                        message = detail_node.text.strip().replace("\\n", " ")[:240]
+                        raise RuntimeError(f"node detail request failed for current-run node: {message!r}")
+                    if detail_state == "ready":
+                        headings = driver.find_elements(By.CSS_SELECTOR, "#node-detail-view h2")
+                        if len(headings) == 1 and detail_node.get_attribute("hidden") is None and headings[0].text.strip() == node_ids[0]:
+                            break
+            except WebDriverException as error:
+                log(f"node-detail-observation-error:{type(error).__name__}")
+                raise RuntimeError(f"node detail browser observation failed: {type(error).__name__}") from error
+            time.sleep(0.5)
+        else:
+            raise RuntimeError(f"node detail did not render for current-run node: state={detail_state or 'unset'}")
         detail = driver.find_element(By.ID, "node-detail-view")
         if "Route Target" not in detail.text:
             raise RuntimeError("node detail did not expose Route Target")
