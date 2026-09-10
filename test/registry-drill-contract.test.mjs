@@ -96,6 +96,8 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /management-nodes-reloaded/);
   assert.match(source, /wait_for_node_ids\(driver, node_ids, stop_path, log=log\)/);
   assert.match(source, /nodes-observed:count=/);
+  assert.match(source, /detail\.get_attribute\("hidden"\) is None/);
+  assert.match(source, /node detail did not render for current-run node/);
   assert.match(source, /node-detail-click-start/);
   assert.match(source, /driver\.execute_script\("arguments\[0\]\.click\(\)", node_target\)/);
   assert.match(source, /selectorOpenAVerified/);
