@@ -3,6 +3,7 @@
 // that build and sign ORBIT-MACHINE-V1 / ORBIT-REENROLL-V1 requests.
 
 import net from "node:net";
+import { request as httpRequest } from "node:http";
 import { openRegistryDatabase } from "../../src/registry/sqlite.mjs";
 import { Registry } from "../../src/registry/registry.mjs";
 import { createHubServer } from "../../src/registry/server.mjs";
@@ -51,23 +52,32 @@ export function signedMachineRequest(baseUrl, { path, nodeId, keyId, keyHex, bod
     nodeId,
   });
   const sig = signature ?? signSigningString(keyHex, signing);
-  return fetch(baseUrl + path, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-orbit-node": nodeId,
-      "x-orbit-timestamp": ts,
-      "x-orbit-nonce": freshNonce,
-      "x-orbit-key": keyId,
-      "x-orbit-signature": sig,
-      ...extraHeaders,
-    },
-    body: rawBody,
-  }).then(async (response) => ({
-    status: response.status,
-    body: await response.json().catch(() => ({})),
-    response,
-  }));
+  const target = new URL(baseUrl + path);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(target, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": rawBody.length,
+        "x-orbit-node": nodeId,
+        "x-orbit-timestamp": ts,
+        "x-orbit-nonce": freshNonce,
+        "x-orbit-key": keyId,
+        "x-orbit-signature": sig,
+        host: "registry-hub:5446",
+        ...extraHeaders,
+      },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve({ status: response.statusCode, body: JSON.parse(text || "{}"), response });
+      });
+    });
+    request.on("error", reject);
+    request.end(rawBody);
+  });
 }
 
 export function signedReenrollRequest(baseUrl, { path = "/api/v1/reenroll", nodeId, keyId, keyHex, body = {}, nowSeconds, nonce, timestamp, signature }) {
@@ -85,22 +95,42 @@ export function signedReenrollRequest(baseUrl, { path = "/api/v1/reenroll", node
     nodeId,
   });
   const sig = signature ?? signSigningString(keyHex, signing);
-  return fetch(baseUrl + path, {
-    method: "POST",
+  return privateMachineRequest(baseUrl, {
+    path,
+    body: rawBody,
     headers: {
-      "content-type": "application/json",
       "x-orbit-node": nodeId,
       "x-orbit-timestamp": ts,
       "x-orbit-nonce": freshNonce,
       "x-orbit-key": keyId,
       "x-orbit-signature": sig,
     },
-    body: rawBody,
-  }).then(async (response) => ({
-    status: response.status,
-    body: await response.json().catch(() => ({})),
-    response,
-  }));
+  });
+}
+
+export function privateMachineRequest(baseUrl, { path, body = "{}", headers = {} }) {
+  const rawBody = Buffer.from(typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body));
+  const target = new URL(baseUrl + path);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(target, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": rawBody.length,
+        host: "registry-hub:5446",
+        ...headers,
+      },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve({ status: response.statusCode, body: JSON.parse(text || "{}"), response });
+      });
+    });
+    request.on("error", reject);
+    request.end(rawBody);
+  });
 }
 
 // Enrolls a fresh node through the full HTTP path and returns everything
@@ -109,12 +139,11 @@ export async function enrollNode(baseUrl, registry, { purpose = "enroll", boundN
   const plain = registry.mintEnrollmentToken({ actor: "operator", purpose, boundNodeId });
   const keys = generateNodeKeyPair();
   const requestId = randomHex(16);
-  const enrollResponse = await fetch(baseUrl + "/api/v1/enroll", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token: plain.token, enrollmentRequestId: requestId, publicKey: keys.publicKeyHex }),
+  const enrollResponse = await privateMachineRequest(baseUrl, {
+    path: "/api/v1/enroll",
+    body: { token: plain.token, enrollmentRequestId: requestId, publicKey: keys.publicKeyHex },
   });
-  const result = await enrollResponse.json();
+  const result = enrollResponse.body;
   if (enrollResponse.status !== 200) {
     throw new Error(`enroll failed: ${enrollResponse.status} ${JSON.stringify(result)}`);
   }

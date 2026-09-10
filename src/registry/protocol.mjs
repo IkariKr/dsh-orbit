@@ -157,6 +157,20 @@ export function validateManagementAuthority(value, routeDomain) {
   return authority;
 }
 
+export function parseOriginAuthority(value, label = "Origin") {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${label} is required`);
+  }
+  const match = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)$/.exec(value);
+  if (!match || match[2] === "") {
+    throw new Error(`${label} must be an origin with a scheme and authority only`);
+  }
+  return {
+    scheme: match[1].toLowerCase(),
+    authority: normalizeAuthority(match[2], `${label} authority`),
+  };
+}
+
 export function computeRouteAuthority(nodeId, routeDomain = DEFAULT_ROUTE_DOMAIN) {
   if (typeof nodeId !== "string" || !NODE_ID_PATTERN.test(nodeId)) {
     throw new Error(`invalid nodeId for route authority: ${JSON.stringify(nodeId)}`);

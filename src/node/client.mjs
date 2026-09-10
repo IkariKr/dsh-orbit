@@ -9,6 +9,8 @@
 
 import http from "node:http";
 import https from "node:https";
+import tls from "node:tls";
+import net from "node:net";
 import { HeartbeatBackoff } from "./backoff.mjs";
 import { deriveKeyId, generateNodeKeyPair, randomHex, sha256Hex, signSigningString } from "../registry/crypto.mjs";
 import { buildSigningString, MACHINE_V1_LABEL, REENROLL_V1_LABEL } from "../registry/protocol.mjs";
@@ -28,6 +30,7 @@ const REPORT_PATH = "/api/v1/report-upload";
 const ROTATE_PATH = "/api/v1/credential-rotate";
 const REENROLL_PATH = "/api/v1/reenroll";
 const ENROLL_PATH = "/api/v1/enroll";
+const PRIVATE_MACHINE_AUTHORITY = "registry-hub:5446";
 
 export const HEARTBEAT_CADENCE_SECONDS_MIN = 30;
 export const HEARTBEAT_CADENCE_SECONDS_MAX = 300;
@@ -76,8 +79,14 @@ export function defaultNodeMachineFetch(
       headers,
       timeout: timeoutMs,
     };
-    if (isHttps && caCertificates) {
-      reqOptions.ca = extendDefaultCaCertificates(caCertificates);
+    if (isHttps) {
+      if (net.isIP(url.hostname)) {
+        reqOptions.servername = "";
+        reqOptions.checkServerIdentity = (servername, cert) => tls.checkServerIdentity(url.hostname, cert);
+      }
+      if (caCertificates) {
+        reqOptions.ca = extendDefaultCaCertificates(caCertificates);
+      }
     }
     const req = client.request(url, reqOptions, (res) => {
       const chunks = [];
@@ -302,7 +311,7 @@ export class NodeClient {
     try {
       response = await this.callFetch(targetUrl, {
         method: "POST",
-        headers: { "content-type": "application/json", ...headers },
+        headers: { "content-type": "application/json", host: PRIVATE_MACHINE_AUTHORITY, ...headers },
         body: Buffer.from(JSON.stringify(body)),
       });
     } catch (error) {

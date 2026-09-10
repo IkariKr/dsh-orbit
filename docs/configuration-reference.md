@@ -38,7 +38,7 @@ surface and must not be routed through the browser gateway. See
 | Variable | Required | Default | Meaning and constraints |
 | --- | --- | --- | --- |
 | `DSH_ORBIT_NODE_STATE` | no | `./node-state.json` | Atomic local state file; POSIX mode `0600`. |
-| `DSH_ORBIT_HUB_URL` | yes | none | Canonical Hub URL. Once enrolled, it must match the persisted binding. |
+| `DSH_ORBIT_HUB_URL` | yes | none | Canonical private machine-ingress URL used for RFC-0006 transport. Once enrolled, it must match the persisted binding; machine requests retain the private `registry-hub:5446` Host authority and never use the browser management authority. |
 | `DSH_ORBIT_ENROLL_TOKEN` | for `enroll` | none | One-time plaintext enrollment token; never persisted. |
 | `DSH_ORBIT_REENROLL_TOKEN` | for `reenroll` | none | Tombstone-bound operator token; recovery is explicit, never automatic. |
 | `DSH_ORBIT_NODE_HEARTBEAT_SECONDS` | no | `60` | Heartbeat cadence, bounded to 30–300 seconds. |

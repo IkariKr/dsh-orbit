@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { randomHex } from "../src/registry/crypto.mjs";
-import { createTestRegistry, createTestServer, defaultRuntimeIdentity, enrollNode, signedMachineRequest, validReport } from "./helpers/registry-fixture.mjs";
+import { createTestRegistry, createTestServer, defaultRuntimeIdentity, enrollNode, privateMachineRequest, signedMachineRequest, validReport } from "./helpers/registry-fixture.mjs";
 
 const ASSERTION = "gateway-held-assertion-secret";
 const GATEWAY_HEADER = "x-dsh-authenticated-proxy";
@@ -193,10 +193,9 @@ test("enrollment token minted through the API works end-to-end", async (t) => {
   });
   const minted = await create.json();
   const keys = await import("../src/registry/crypto.mjs").then((mod) => mod.generateNodeKeyPair());
-  const enroll = await fetch(server.baseUrl + "/api/v1/enroll", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token: minted.token, enrollmentRequestId: randomHex(16), publicKey: keys.publicKeyHex }),
+  const enroll = await privateMachineRequest(server.baseUrl, {
+    path: "/api/v1/enroll",
+    body: { token: minted.token, enrollmentRequestId: randomHex(16), publicKey: keys.publicKeyHex },
   });
   assert.equal(enroll.status, 200);
 });

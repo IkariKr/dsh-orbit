@@ -36,9 +36,10 @@ function enrolledStore({ hubBaseUrl = "http://127.0.0.1:5445/" } = {}) {
 
 function fakeFetch(...responses) {
   let index = 0;
-  return async () => {
+  return async (_url, options = {}) => {
     const configured = responses[Math.min(index, responses.length - 1)];
     index += 1;
+    assert.equal(options.headers.host, "registry-hub:5446");
     return { status: configured.status, json: async () => configured.body ?? {} };
   };
 }

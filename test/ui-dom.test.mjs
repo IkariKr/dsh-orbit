@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
-import { createTestServer } from "./helpers/registry-fixture.mjs";
+import { createTestServer, privateMachineRequest } from "./helpers/registry-fixture.mjs";
 import { createRegistryUi } from "../ui/app.mjs";
 
 const ASSERTION = "gateway-held-assertion-secret";
@@ -119,13 +119,12 @@ async function withHub(t) {
 
 async function enrollRawNode(baseUrl, registry) {
   const plain = registry.mintEnrollmentToken({ actor: "operator", purpose: "enroll" });
-  const response = await fetch(`${baseUrl}/api/v1/enroll`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token: plain.token, enrollmentRequestId: "aa".repeat(16), publicKey: "01".repeat(32) }),
+  const response = await privateMachineRequest(baseUrl, {
+    path: "/api/v1/enroll",
+    body: { token: plain.token, enrollmentRequestId: "aa".repeat(16), publicKey: "01".repeat(32) },
   });
   assert.equal(response.status, 200);
-  return (await response.json()).nodeId;
+  return response.body.nodeId;
 }
 
 async function click(element) {

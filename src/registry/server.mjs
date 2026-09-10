@@ -7,7 +7,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
-import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS, normalizeAuthority, validateManagementAuthority } from "./protocol.mjs";
+import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS, normalizeAuthority, parseOriginAuthority, validateManagementAuthority } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
 import { validateWebSocketConfig } from "./config.mjs";
 import {
@@ -208,6 +208,15 @@ export function createHubServer({ registry, options = {} }) {
       : { type: canonicalManagementAuthority && rawHost === canonicalManagementAuthority ? "management" : "unrelated", authority: rawHost ?? null };
 
     if (hostClass.type === "node-route") {
+      let nodeRouteUrl;
+      try {
+        nodeRouteUrl = new URL(request.url ?? "/", "http://registry.local");
+      } catch {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed request URL" } });
+      }
+      if (MACHINE_ROUTES.has(nodeRouteUrl.pathname)) {
+        return sendJson(response, 404, { error: { code: "machine-ingress-private", message: "the machine surface is private" } });
+      }
       // Validate origin-form request-target
       if (!isValidOriginFormTarget(request.url)) {
         response.writeHead(400, { "content-type": "application/json" });
@@ -274,6 +283,10 @@ export function createHubServer({ registry, options = {} }) {
         return sendJson(response, 400, { error: { code: "query-not-allowed", message: "query strings are not part of the registry protocol" } });
       }
       const path = url.pathname;
+
+      if (MACHINE_ROUTES.has(path)) {
+        return sendJson(response, 404, { error: { code: "machine-ingress-private", message: "the machine surface is private" } });
+      }
 
       // Selector-owned static assets
       if (request.method === "GET" && SELECTOR_UI_ASSETS.has(path)) {
@@ -350,7 +363,7 @@ export function createHubServer({ registry, options = {} }) {
         request.headers.origin ||
         request.headers["sec-fetch-site"],
       );
-      if (hostClass.type === "selector-apex" || hostClass.type === "node-route" || hostClass.type === "invalid-route-domain" || browserHeadersPresent) {
+      if (hostClass.type === "management" || hostClass.type === "selector-apex" || hostClass.type === "node-route" || hostClass.type === "invalid-route-domain" || browserHeadersPresent) {
         return sendJson(response, 404, { error: { code: "machine-ingress-private", message: "the machine surface is private" } });
       }
       handleMachineRequest(request, response, path).catch((error) => sendError(response, error));
@@ -506,27 +519,23 @@ export function createHubServer({ registry, options = {} }) {
   function checkOriginAndFetchSite(request) {
     const origin = request.headers.origin;
     if (typeof origin === "string" && origin !== "") {
-      let originUrl;
+      let parsedOrigin;
       try {
-        originUrl = new URL(origin);
+        parsedOrigin = parseOriginAuthority(origin);
       } catch {
         throw new DeniedError(403, "origin-denied", "malformed Origin header");
       }
       // Host AND scheme must match the trusted external scheme
-      // (RFC-0007; P1-09). X-Forwarded-Proto is never trusted.
+      // (RFC-0007; P1-09). X-Forwarded-Proto is never trusted. Parse the
+      // raw Origin before any WHATWG URL canonicalization so default-port,
+      // IDNA, Unicode, and other unsupported equivalences fail closed.
       let requestAuthority;
       try {
         requestAuthority = normalizeAuthority(request.headers.host, "request authority");
       } catch {
         throw new DeniedError(403, "origin-denied", "request authority is malformed");
       }
-      let originAuthority;
-      try {
-        originAuthority = normalizeAuthority(originUrl.host, "Origin authority");
-      } catch {
-        throw new DeniedError(403, "origin-denied", "Origin authority is malformed");
-      }
-      if (originUrl.protocol !== `${trustedExternalScheme}:` || originAuthority !== requestAuthority) {
+      if (parsedOrigin.scheme !== trustedExternalScheme || parsedOrigin.authority !== requestAuthority) {
         throw new DeniedError(403, "origin-denied", "Origin does not match the trusted scheme and host");
       }
     }
@@ -726,6 +735,21 @@ export function createHubServer({ registry, options = {} }) {
       : { type: canonicalManagementAuthority && rawHost === canonicalManagementAuthority ? "management" : "unrelated", authority: rawHost ?? null };
 
     if (hostClass.type === "node-route") {
+      let nodeRouteUrl;
+      try {
+        nodeRouteUrl = new URL(request.url ?? "/", "http://registry.local");
+      } catch {
+        sendSocketHttpError(socket, 400, "Bad Request", {}, {
+          error: { code: "bad-request", message: "malformed request URL" },
+        });
+        return;
+      }
+      if (MACHINE_ROUTES.has(nodeRouteUrl.pathname)) {
+        sendSocketHttpError(socket, 404, "Not Found", {}, {
+          error: { code: "machine-ingress-private", message: "the machine surface is private" },
+        });
+        return;
+      }
       // Validate origin-form request-target
       if (!isValidOriginFormTarget(request.url)) {
         sendSocketHttpError(socket, 400, "Bad Request", {}, {
