@@ -100,7 +100,10 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /FirefoxRemoteConnection/);
   assert.match(source, /ClientConfig\([\s\S]*timeout=WEBDRIVER_COMMAND_TIMEOUT_SECONDS/);
   assert.match(source, /driver = webdriver\.Remote\(/);
-  assert.match(source, /service\.stop\(\)/);
+  assert.match(source, /def stop_owned_process\(process, label: str\)/);
+  assert.match(source, /quit_thread\.join\(timeout=5\)/);
+  assert.match(source, /driver-quit-timeout; forcing owned geckodriver shutdown/);
+  assert.match(source, /stop_owned_process\(getattr\(service, "process", None\), "geckodriver"\)/);
   assert.match(source, /detail_ready_wait = WebDriverWait\(driver, 30, poll_frequency=0\.5\)/);
   assert.match(source, /detail_nodes = _driver\.find_elements\(By\.ID, "node-detail-view"\)/);
   assert.match(source, /data-detail-state/);

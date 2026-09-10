@@ -156,6 +156,20 @@ def wait_for(wait: WebDriverWait, condition):
     return wait.until(condition)
 
 
+def stop_owned_process(process, label: str) -> None:
+    if process is None or process.poll() is not None:
+        return
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            print(f"browser bridge: unable to stop {label}", file=sys.stderr, flush=True)
+
+
 def verify_cookie_jar_isolation(cookies_a: list[dict], cookies_b: list[dict], cookies_selector: list[dict], host_a: str, host_b: str) -> bool:
     def drill_cookie(cookies: list[dict], expected_value: str, expected_host: str) -> None:
         entries = [cookie for cookie in cookies if cookie.get("name") == "drill_node"]
@@ -442,15 +456,23 @@ def run(args: argparse.Namespace) -> int:
             proxy_server.shutdown()
             proxy_server.server_close()
         if driver is not None:
-            try:
-                driver.quit()
-            except WebDriverException:
-                pass
+            quit_error = []
+
+            def quit_driver() -> None:
+                try:
+                    driver.quit()
+                except WebDriverException as error:
+                    quit_error.append(error)
+
+            quit_thread = threading.Thread(target=quit_driver, daemon=True)
+            quit_thread.start()
+            quit_thread.join(timeout=5)
+            if quit_thread.is_alive():
+                log("driver-quit-timeout; forcing owned geckodriver shutdown")
+            elif quit_error:
+                log(f"driver-quit-error:{type(quit_error[0]).__name__}")
         if service is not None:
-            try:
-                service.stop()
-            except Exception:
-                pass
+            stop_owned_process(getattr(service, "process", None), "geckodriver")
         remove_windows_root(thumbprint, owned_root)
         shutil.rmtree(profile_dir, ignore_errors=True)
 
