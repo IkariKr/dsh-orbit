@@ -73,25 +73,47 @@ class ConnectHandler(socketserver.BaseRequestHandler):
 
 
 def certutil_run(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     certutil = shutil.which("certutil.exe")
     if not certutil:
         raise RuntimeError("Firefox trust setup unavailable: certutil.exe was not found")
+    command = [certutil, *arguments]
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=creationflags,
+    )
     try:
-        # certutil emits localized output and may wait on an inherited
-        # console/store handle. Detach all standard streams so the bounded
-        # trust setup cannot block before Firefox starts.
-        return subprocess.run(
-            [certutil, *arguments],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            text=False,
-            timeout=CERTUTIL_TIMEOUT_SECONDS,
-            creationflags=creationflags,
-        )
+        returncode = process.wait(timeout=CERTUTIL_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as error:
+        # Popen.wait(timeout=...) avoids subprocess.run's post-timeout
+        # communicate() path, which can itself block when certutil has opened
+        # a certificate UI/store handle. Kill the owned process and its tree,
+        # then fail closed without waiting for inherited UI children.
+        try:
+            process.kill()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            if os.name == "nt":
+                try:
+                    subprocess.run(
+                        ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=5,
+                        check=False,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
         raise RuntimeError(f"certutil timed out after {CERTUTIL_TIMEOUT_SECONDS}s: {' '.join(arguments[:4])}") from error
+    return subprocess.CompletedProcess(command, returncode)
 
 
 def utc_now() -> str:
