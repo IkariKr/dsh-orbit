@@ -324,15 +324,19 @@ def run(args: argparse.Namespace) -> int:
         log("node-detail-click-start")
         driver.execute_script("arguments[0].click()", node_target)
         log("node-detail-clicked")
-        detail = wait_for(wait, EC.presence_of_element_located((By.ID, "node-detail-view")))
-        detail_heading = wait_for(wait, EC.presence_of_element_located((By.CSS_SELECTOR, "#node-detail-view h2")))
-        detail_ready = wait_for(
-            wait,
-            lambda _driver: detail.get_attribute("hidden") is None and detail_heading.text.strip() == node_ids[0],
-        )
-        if not detail_ready:
+        def detail_ready(_driver):
+            detail_nodes = _driver.find_elements(By.ID, "node-detail-view")
+            headings = _driver.find_elements(By.CSS_SELECTOR, "#node-detail-view h2")
+            if len(detail_nodes) != 1 or len(headings) != 1:
+                return False
+            detail_node = detail_nodes[0]
+            return detail_node.get_attribute("hidden") is None and headings[0].text.strip() == node_ids[0]
+
+        detail_ready_wait = WebDriverWait(driver, 30, poll_frequency=0.5)
+        if not detail_ready_wait.until(detail_ready):
             body = driver.find_element(By.TAG_NAME, "body").text.strip().replace("\\n", " ")[:240]
             raise RuntimeError(f"node detail did not render for current-run node: {body!r}")
+        detail = driver.find_element(By.ID, "node-detail-view")
         if "Route Target" not in detail.text:
             raise RuntimeError("node detail did not expose Route Target")
 
