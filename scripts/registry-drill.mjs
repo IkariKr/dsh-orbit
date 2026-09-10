@@ -650,7 +650,7 @@ function gatewayFetch(path, { method = "GET", headers = {}, body, cookie = null,
 // policy): the driver probes it from INSIDE the hub container.
 function hubGetHealth() {
   try {
-    exec("registry-hub", ["sh", "-c", "node -e \"const {get}=require('node:http');get('http://127.0.0.1:5445/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]);
+    exec("registry-hub", ["sh", "-c", "node -e \"const {get}=require('node:http');get({hostname:'127.0.0.1',port:5445,path:'/',headers:{host:'127.0.0.1:8443'}},r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]);
     return Promise.resolve(200);
   } catch {
     return Promise.resolve(0);

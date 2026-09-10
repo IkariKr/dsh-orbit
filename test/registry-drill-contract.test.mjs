@@ -42,6 +42,8 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /browser lifecycle checkpoint did not verify Selector Open A\/B navigation/);
   assert.match(source, /routeTargetsConfiguredAB/);
   assert.match(source, /hubRestartRecovery/);
+  assert.match(source, /headers:\{host:'127\.0\.0\.1:8443'\}/);
+  assert.doesNotMatch(source, /get\('http:\/\/127\.0\.0\.1:5445\//);
   assert.match(source, /dshLossAndRecovery/);
   assert.match(source, /bookmarkFailClosed/);
   assert.match(source, /sameNodeIdReenroll/);
