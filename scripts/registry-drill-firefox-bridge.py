@@ -302,8 +302,13 @@ def run(args: argparse.Namespace) -> int:
         if not isinstance(open_urls, dict) or not isinstance(open_urls.get("a"), str) or not isinstance(open_urls.get("b"), str) or not isinstance(selector_url, str):
             raise RuntimeError("node binding must contain selectorUrl and openUrls for both nodes")
 
-        driver.find_element(By.ID, "nav-nodes").click()
-        wait_for(wait, EC.visibility_of_element_located((By.ID, "nodes-view")))
+        # Reload the clean management document instead of relying on a SPA
+        # tab transition after token minting. The document bootstraps a fresh
+        # authenticated session and loads the Nodes view deterministically.
+        driver.get(gateway + "/")
+        session_status = wait_for(wait, EC.visibility_of_element_located((By.ID, "session-status")))
+        wait.until(lambda _driver: session_status.text.strip().startswith("operator:"))
+        log("management-nodes-reloaded")
         if not wait_for_node_ids(driver, node_ids, stop_path, log=log):
             return 0
         node_elements = driver.find_elements(By.CSS_SELECTOR, ".node-id")
