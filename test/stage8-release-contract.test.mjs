@@ -79,6 +79,16 @@ test("Registry Compose requires an explicit release image tag", async () => {
   const compose = await text("docker-registry/compose.example.yaml");
   assert.match(compose, /DSH_ORBIT_HUB_ROUTE_DOMAIN:\s*dsh\.example\.local/);
   assert.match(compose, /DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY:\s*registration\.example\.invalid/);
+  assert.match(
+    compose,
+    /healthcheck:[\s\S]*headers:\{host:process\.env\.DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY\}/,
+    "Compose healthcheck must send the configured management authority as Host",
+  );
+  assert.doesNotMatch(
+    compose,
+    /healthcheck:[\s\S]*get\(['"]http:\/\/127\.0\.0\.1:5445\//,
+    "Compose healthcheck must not use the loopback authority",
+  );
 
   const caddy = await text("docker-registry/Caddyfile.example");
   assert.match(caddy, /header_up Host \{http\.request\.hostport\}/);

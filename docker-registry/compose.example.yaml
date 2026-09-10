@@ -46,7 +46,7 @@ services:
     pids_limit: 128
     stop_grace_period: 15s
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('node:http').get('http://127.0.0.1:5445/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"require('node:http').get({hostname:'127.0.0.1', port:5445, path:'/', headers:{host:process.env.DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY}}, (r) => { r.resume(); process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 3
