@@ -126,9 +126,9 @@ def certificate_thumbprint(ca_path: Path) -> str:
 def install_windows_root(ca_path: Path) -> tuple[str, bool]:
     """Install only this drill CA into CurrentUser Root and report ownership."""
     thumbprint = certificate_thumbprint(ca_path)
-    lookup = certutil_run(["-user", "-store", "Root", thumbprint])
-    if lookup.returncode == 0:
-        return thumbprint, False
+    # Do not probe the entire user Root store: on some Windows profiles a
+    # thumbprint lookup can block behind the certificate UI/store lock. The
+    # forced import is idempotent for this per-run CA and remains bounded.
     installed = certutil_run(["-f", "-user", "-addstore", "Root", str(ca_path)])
     if installed.returncode != 0:
         raw_detail = installed.stderr or installed.stdout or b"certutil addstore failed"
