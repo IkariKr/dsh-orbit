@@ -234,26 +234,68 @@ def wait_for_node_ids(driver, expected: list[str], stop_path: Path, log=None) ->
     raise RuntimeError("current-run node IDs did not appear in the Nodes list before timeout")
 
 
-def wait_for_selector_cards(driver, stop_path: Path, expected: int = 2, log=None) -> bool:
+def selector_surface_snapshot(driver) -> dict:
+    return driver.execute_script(
+        """
+        const cards = [...document.querySelectorAll('.selector-card')];
+        const links = [...document.querySelectorAll('a.open-button')]
+          .map((link) => link.getAttribute('href') || '');
+        const errors = [...document.querySelectorAll('.banner.error[role=alert], .banner.auth-error[role=alert]')]
+          .map((node) => node.textContent.trim())
+          .filter(Boolean);
+        return {
+          cards: cards.length,
+          links,
+          errors,
+          readyState: document.readyState,
+        };
+        """,
+    )
+
+
+def wait_for_selector_cards(driver, stop_path: Path, expected: int = 2, log=None) -> dict | bool:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if stop_path.exists():
             return False
         try:
-            cards = driver.find_elements(By.CSS_SELECTOR, ".selector-card")
+            snapshot = selector_surface_snapshot(driver)
             if log is not None:
-                log(f"selector-cards-observed:count={len(cards)}")
-            if len(cards) >= expected:
-                return True
-            error_nodes = driver.find_elements(By.CSS_SELECTOR, ".banner.error[role=alert], .banner.auth-error[role=alert]")
-            if error_nodes:
-                message = error_nodes[0].text.strip().replace("\\n", " ")[:240]
+                log(
+                    f"selector-surface-observed:cards={snapshot.get('cards', 0)}:"
+                    f"links={len(snapshot.get('links', []))}:ready={snapshot.get('readyState', '')}"
+                )
+            if snapshot.get("errors"):
+                message = snapshot["errors"][0][:240]
                 raise RuntimeError(f"selector endpoint request failed: {message!r}")
+            if snapshot.get("cards", 0) >= expected:
+                return snapshot
         except WebDriverException as error:
             if log is not None:
                 log(f"selector-observation-error:{type(error).__name__}")
         time.sleep(0.5)
     raise RuntimeError(f"selector did not render {expected} endpoint cards before timeout")
+
+
+def click_selector_link(driver, target_url: str, label: str, log=None) -> None:
+    if log is not None:
+        log(f"selector-click-start:{label}")
+    result = driver.execute_script(
+        """
+        const target = arguments[0];
+        const link = [...document.querySelectorAll('a.open-button')]
+          .find((candidate) => candidate.getAttribute('href') === target);
+        if (!link) return { found: false, hrefs: [...document.querySelectorAll('a.open-button')]
+          .map((candidate) => candidate.getAttribute('href') || '') };
+        link.click();
+        return { found: true, href: link.getAttribute('href') };
+        """,
+        target_url,
+    )
+    if not result.get("found"):
+        raise RuntimeError(f"selector {label} link did not match current-run binding")
+    if log is not None:
+        log(f"selector-click-done:{label}")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -459,14 +501,13 @@ def run(args: argparse.Namespace) -> int:
         driver.get(selector_url)
         log("selector-load-complete")
         wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
-        if not wait_for_selector_cards(driver, stop_path, expected=2, log=log):
+        selector_snapshot = wait_for_selector_cards(driver, stop_path, expected=2, log=log)
+        if selector_snapshot is False:
             return 0
-        cards = driver.find_elements(By.CSS_SELECTOR, ".selector-card")
-        open_links = driver.find_elements(By.CSS_SELECTOR, "a.open-button")
-        hrefs = {link.get_attribute("href") for link in open_links}
+        hrefs = set(selector_snapshot.get("links", []))
         if open_urls["a"] not in hrefs or open_urls["b"] not in hrefs:
             raise RuntimeError("selector Open hrefs did not match current-run bindings")
-        driver.execute_script("arguments[0].click()", next(link for link in open_links if link.get_attribute("href") == open_urls["a"]))
+        click_selector_link(driver, open_urls["a"], "open-a", log=log)
         wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
         if not driver.current_url.startswith(open_urls["a"]):
             raise RuntimeError("browser Open A did not navigate to the bound authority")
@@ -475,10 +516,10 @@ def run(args: argparse.Namespace) -> int:
         selector_open_a = True
         driver.get(selector_url)
         wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
-        if not wait_for_selector_cards(driver, stop_path, expected=2, log=log):
+        selector_snapshot = wait_for_selector_cards(driver, stop_path, expected=2, log=log)
+        if selector_snapshot is False:
             return 0
-        open_links = driver.find_elements(By.CSS_SELECTOR, "a.open-button")
-        driver.execute_script("arguments[0].click()", next(link for link in open_links if link.get_attribute("href") == open_urls["b"]))
+        click_selector_link(driver, open_urls["b"], "open-b", log=log)
         wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
         if not driver.current_url.startswith(open_urls["b"]):
             raise RuntimeError("browser Open B did not navigate to the bound authority")
