@@ -60,6 +60,8 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /freshHubRouteIdentity/);
   assert.match(source, /assertMatrixComplete\(\)/);
   assert.match(source, /docker restart \$\{hubContainer\}/);
+  assert.match(source, /docker restart \$\{caddyContainer\}/);
+  assert.match(source, /Caddy shares the Hub container's network namespace/);
   assert.match(source, /suspendDsh/);
   assert.match(source, /routeWebSocket\(/);
   assert.match(source, /runningImageEvidence\(/);

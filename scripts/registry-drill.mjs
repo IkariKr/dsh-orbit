@@ -1225,6 +1225,10 @@ async function main() {
   // --- 4b. actual Hub process/container restart with persistent registry ---
   sh(`docker restart ${hubContainer}`);
   await waitFor("Hub process restart", async () => (await hubGetHealth()) === 200, { attempts: 40, intervalMs: 1000 });
+  // Caddy shares the Hub container's network namespace. Rebind the owned
+  // gateway process after the Hub container restart so its listener and
+  // loopback upstream are both reconstructed before browser recovery.
+  sh(`docker restart ${caddyContainer}`);
   await waitFor("gateway after Hub restart", async () => (await gatewayFetch("/").catch(() => null))?.status === 200, { attempts: 40, intervalMs: 1000 });
   const postHubSession = await gatewayFetch("/hub/session", { method: "POST" });
   const postHubSessionBody = await postHubSession.json();
