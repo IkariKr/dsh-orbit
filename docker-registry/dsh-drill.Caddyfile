@@ -20,7 +20,6 @@
         header_up Origin https://{$DSH_PUBLIC_HOST}
         header_up X-Forwarded-Proto https
         header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}
-        header_down X-Drill-Node {$DSH_DRILL_NODE}
         header_down Set-Cookie "drill_node={$DSH_DRILL_NODE}; Domain=.dsh-orbit.test; Path=/; HttpOnly"
     }
 }

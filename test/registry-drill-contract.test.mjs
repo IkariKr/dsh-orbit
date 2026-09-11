@@ -162,7 +162,7 @@ test("mounted DSH adapter preserves route and DSH trust boundaries", async () =>
   assert.ok(adapter.includes("header_up X-Forwarded-Proto https"));
   assert.ok(adapter.includes("header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}"));
   assert.doesNotMatch(adapter, /header_up X-Forwarded-Proto http(?:\s|$)/);
-  assert.ok(adapter.includes("header_down X-Drill-Node {$DSH_DRILL_NODE}"));
+  assert.doesNotMatch(adapter, /header_down X-Drill-Node/);
   assert.ok(adapter.includes("header_down Set-Cookie \"drill_node={$DSH_DRILL_NODE}; Domain=.dsh-orbit.test"));
 });
 
