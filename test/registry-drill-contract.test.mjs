@@ -44,6 +44,10 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /requiredMatrix/);
   assert.match(source, /browserCheckpoint\.selectorOpenAVerified/);
   assert.match(source, /browserCheckpoint\.cookieIsolationVerified/);
+  assert.match(source, /\\bdsh-b\(\?:\\\.test\)\?\\b/);
+  assert.match(source, /\\bdsh-a\(\?:\\\.test\)\?\\b/);
+  assert.doesNotMatch(source, /routeRootTextA\.includes\("dsh-b"\)/);
+  assert.doesNotMatch(source, /routeRootTextB\.includes\("dsh-a"\)/);
   assert.match(source, /browser lifecycle checkpoint did not verify Selector Open A\/B navigation/);
   assert.match(source, /routeTargetsConfiguredAB/);
   assert.match(source, /hubRestartRecovery/);

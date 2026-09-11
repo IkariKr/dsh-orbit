@@ -1163,7 +1163,7 @@ async function main() {
   const routeRootTextB = routeRootB.text();
   if (routeRootA.status !== 200 || routeRootB.status !== 200 ||
       routeRootA.headers["x-drill-node"] !== "A" || routeRootB.headers["x-drill-node"] !== "B" ||
-      routeRootTextA.includes("dsh-b") || routeRootTextB.includes("dsh-a")) {
+      /\bdsh-b(?:\.test)?\b/i.test(routeRootTextA) || /\bdsh-a(?:\.test)?\b/i.test(routeRootTextB)) {
     throw new Error(`mounted route root isolation failed: A=${routeRootA.status}/${routeRootA.headers["x-drill-node"]} B=${routeRootB.status}/${routeRootB.headers["x-drill-node"]}`);
   }
   markMatrix("httpRootA", "httpRootB", "nodeContextIsolation");
