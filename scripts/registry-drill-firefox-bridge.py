@@ -552,6 +552,7 @@ def run(args: argparse.Namespace) -> int:
         hrefs = set(selector_snapshot.get("links", []))
         if open_urls["a"] not in hrefs or open_urls["b"] not in hrefs:
             raise RuntimeError("selector Open hrefs did not match current-run bindings")
+        click_selector_link(driver, open_urls["a"], "open-a", log=log)
         route_a = wait_for_route_page(
             driver,
             open_urls["a"],
@@ -568,6 +569,7 @@ def run(args: argparse.Namespace) -> int:
         selector_snapshot = wait_for_selector_cards(driver, stop_path, expected=2, log=log)
         if selector_snapshot is False:
             return 0
+        click_selector_link(driver, open_urls["b"], "open-b", log=log)
         route_b = wait_for_route_page(
             driver,
             open_urls["b"],
