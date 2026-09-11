@@ -116,6 +116,7 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /driver\.execute_script\("arguments\[0\]\.click\(\)", node_target\)/);
   assert.match(source, /authority-warmup-start:\{label\}/);
   assert.match(source, /authority-warmup-loaded:\{label\}/);
+  assert.match(source, /HTTP\/1\.1 200 Connection Established\\r\\n\\r\\n/);
   assert.match(source, /authority-loaded:\{label\}/);
   assert.match(source, /selector-load-start/);
   assert.match(source, /selector-load-complete/);

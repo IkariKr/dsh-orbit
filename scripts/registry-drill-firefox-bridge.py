@@ -56,7 +56,7 @@ class ConnectHandler(socketserver.BaseRequestHandler):
         port = int(port_text or "443")
         upstream = socket.create_connection(("127.0.0.1", 8443), timeout=15)
         try:
-            self.request.sendall(b"HTTP/1.1 200 Connection Established\\r\\n\\r\\n")
+            self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             sockets = [self.request, upstream]
             while True:
                 readable, _, _ = select.select(sockets, [], [], 30)
