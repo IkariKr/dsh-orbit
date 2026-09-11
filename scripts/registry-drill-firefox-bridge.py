@@ -234,6 +234,28 @@ def wait_for_node_ids(driver, expected: list[str], stop_path: Path, log=None) ->
     raise RuntimeError("current-run node IDs did not appear in the Nodes list before timeout")
 
 
+def wait_for_selector_cards(driver, stop_path: Path, expected: int = 2, log=None) -> bool:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if stop_path.exists():
+            return False
+        try:
+            cards = driver.find_elements(By.CSS_SELECTOR, ".selector-card")
+            if log is not None:
+                log(f"selector-cards-observed:count={len(cards)}")
+            if len(cards) >= expected:
+                return True
+            error_nodes = driver.find_elements(By.CSS_SELECTOR, ".banner.error[role=alert], .banner.auth-error[role=alert]")
+            if error_nodes:
+                message = error_nodes[0].text.strip().replace("\\n", " ")[:240]
+                raise RuntimeError(f"selector endpoint request failed: {message!r}")
+        except WebDriverException as error:
+            if log is not None:
+                log(f"selector-observation-error:{type(error).__name__}")
+        time.sleep(0.5)
+    raise RuntimeError(f"selector did not render {expected} endpoint cards before timeout")
+
+
 def run(args: argparse.Namespace) -> int:
     log_path = Path(args.log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -437,9 +459,9 @@ def run(args: argparse.Namespace) -> int:
         driver.get(selector_url)
         log("selector-load-complete")
         wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
+        if not wait_for_selector_cards(driver, stop_path, expected=2, log=log):
+            return 0
         cards = driver.find_elements(By.CSS_SELECTOR, ".selector-card")
-        if len(cards) < 2:
-            raise RuntimeError("selector did not render two endpoint cards")
         open_links = driver.find_elements(By.CSS_SELECTOR, "a.open-button")
         hrefs = {link.get_attribute("href") for link in open_links}
         if open_urls["a"] not in hrefs or open_urls["b"] not in hrefs:
@@ -453,6 +475,8 @@ def run(args: argparse.Namespace) -> int:
         selector_open_a = True
         driver.get(selector_url)
         wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
+        if not wait_for_selector_cards(driver, stop_path, expected=2, log=log):
+            return 0
         open_links = driver.find_elements(By.CSS_SELECTOR, "a.open-button")
         driver.execute_script("arguments[0].click()", next(link for link in open_links if link.get_attribute("href") == open_urls["b"]))
         wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))

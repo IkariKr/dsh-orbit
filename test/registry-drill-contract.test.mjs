@@ -120,6 +120,9 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /authority-loaded:\{label\}/);
   assert.match(source, /selector-load-start/);
   assert.match(source, /selector-load-complete/);
+  assert.match(source, /def wait_for_selector_cards\(driver, stop_path/);
+  assert.match(source, /selector-cards-observed:count=/);
+  assert.match(source, /selector endpoint request failed/);
   assert.match(source, /selectorOpenAVerified/);
   assert.match(source, /selectorOpenBVerified/);
   assert.match(source, /cookieIsolationVerified/);
