@@ -1393,6 +1393,12 @@ async function main() {
   const afterReenrollNode = await nodeApi(aNodeId);
   const newHubRouteKeyId = afterReenrollNode.hubRouteKeys?.find((key) => key.state === "active")?.keyId ?? null;
   if (!newHubRouteKeyId || newHubRouteKeyId === oldHubRouteKeyId) throw new Error("reenroll did not create a fresh Hub route identity");
+  await waitFor("A route eligible after reenroll", async () => {
+    const node = await nodeApi(aNodeId);
+    return node.state === "active" && node.routeTarget?.origin === routeTargetA &&
+      node.health?.reachable === "ok" && node.hubRouteKeys?.some((key) => key.state === "active") &&
+      node.health?.capabilities?.some((capability) => capability.name === "web.routes");
+  }, { attempts: 40, intervalMs: 1000 });
   markMatrix("sameNodeIdReenroll", "freshHubRouteIdentity");
   const restoredBookmark = await routeFetch("/", authorityA, { headers: { accept: "text/html" } });
   if (restoredBookmark.status !== 200) throw new Error(`reenrolled bookmark did not recover: ${restoredBookmark.status}`);
