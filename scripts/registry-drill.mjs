@@ -177,6 +177,10 @@ function ensureDrillCertificate() {
   mkdirSync(join(REPO, "data", "orbit-drill", "tls"), { recursive: true });
   const caReady = existsSync(DRILL_CA_KEY_PATH) && certificateUsable(DRILL_CA_PATH);
   if (!caReady) {
+    // The browser bridge installs this CA into the Windows user Root store.
+    // Trusting a brand-new anchor raises a confirmation dialog while
+    // re-trusting the same CA stays silent, so the anchor is long-lived and
+    // rotated rarely instead of expiring on every short cycle.
     file(openssl, [
       "req",
       "-x509",
@@ -184,7 +188,7 @@ function ensureDrillCertificate() {
       "rsa:2048",
       "-sha256",
       "-days",
-      "2",
+      "365",
       "-nodes",
       "-keyout",
       DRILL_CA_KEY_PATH,

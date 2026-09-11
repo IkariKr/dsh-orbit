@@ -39,6 +39,7 @@ WAIT_SECONDS = 1800
 POLL_SECONDS = 1.0
 CERTUTIL_TIMEOUT_SECONDS = 20
 WEBDRIVER_COMMAND_TIMEOUT_SECONDS = 20
+REMOVE_DRILL_CA_ENV = "DSH_ORBIT_REMOVE_DRILL_CA"
 
 
 class LocalConnectProxy(socketserver.ThreadingTCPServer):
@@ -112,7 +113,10 @@ def certutil_run(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
                     )
                 except (OSError, subprocess.TimeoutExpired):
                     pass
-        raise RuntimeError(f"certutil timed out after {CERTUTIL_TIMEOUT_SECONDS}s: {' '.join(arguments[:4])}") from error
+        raise RuntimeError(
+            f"certutil timed out after {CERTUTIL_TIMEOUT_SECONDS}s: {' '.join(arguments[:4])} "
+            "(an unanswered Windows root-store confirmation dialog blocks certutil)"
+        ) from error
     return subprocess.CompletedProcess(command, returncode)
 
 
@@ -151,8 +155,18 @@ def certificate_thumbprint(ca_path: Path) -> str:
     return result.stdout.strip().split("=", 1)[-1].replace(":", "").upper()
 
 
-def install_windows_root(ca_path: Path) -> tuple[str, bool]:
-    """Install only this drill CA into CurrentUser Root and report ownership."""
+def drill_ca_cleanup_requested() -> bool:
+    """True only when the operator explicitly asks to un-trust the drill CA."""
+    return os.environ.get(REMOVE_DRILL_CA_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def install_windows_root(ca_path: Path) -> str:
+    """Install only this drill CA into CurrentUser Root and report its thumbprint.
+
+    crypt32 raises its confirmation dialog for a brand-new trust anchor but not
+    for re-adding an identical certificate that is already trusted, so repeated
+    runs against the same drill CA stay prompt-free.
+    """
     thumbprint = certificate_thumbprint(ca_path)
     # Do not probe the entire user Root store: on some Windows profiles a
     # thumbprint lookup can block behind the certificate UI/store lock. The
@@ -162,12 +176,17 @@ def install_windows_root(ca_path: Path) -> tuple[str, bool]:
         raw_detail = installed.stderr or installed.stdout or b"certutil addstore failed"
         detail = raw_detail.decode(errors="replace").strip().splitlines()[-1][:240]
         raise RuntimeError(f"certutil addstore failed ({installed.returncode}): {detail}")
-    return thumbprint, True
+    return thumbprint
 
 
-def remove_windows_root(thumbprint: str, owned: bool) -> None:
-    if not owned:
-        return
+def remove_windows_root(thumbprint: str) -> None:
+    """Un-trust the drill CA.
+
+    Deleting a trusted root always raises the crypt32 "Root Certificate Store"
+    confirmation dialog. An unattended process therefore blocks on it until the
+    certutil timeout, which strands the anchor in the user Root store, so this
+    is only reached on explicit operator request.
+    """
     try:
         certutil_run(["-user", "-delstore", "Root", thumbprint])
     except RuntimeError:
@@ -362,8 +381,8 @@ def run(args: argparse.Namespace) -> int:
 
     ca_path = Path(args.ca_path)
     log(f"installing-ca:{ca_path.name}")
-    thumbprint, owned_root = install_windows_root(ca_path)
-    log(f"ca-trusted:{thumbprint}:{'owned' if owned_root else 'preexisting'}")
+    thumbprint = install_windows_root(ca_path)
+    log(f"ca-trusted:{thumbprint}")
     profile_dir = Path(tempfile.mkdtemp(prefix="dsh-orbit-firefox-"))
     gecko_log = log_path.with_name("geckodriver.log")
     driver = None
@@ -637,7 +656,14 @@ def run(args: argparse.Namespace) -> int:
                 log(f"driver-quit-error:{type(quit_error[0]).__name__}")
         if service is not None:
             stop_owned_process(getattr(service, "process", None), "geckodriver")
-        remove_windows_root(thumbprint, owned_root)
+        if drill_ca_cleanup_requested():
+            remove_windows_root(thumbprint)
+            log(f"windows-root-ca-removed:{thumbprint}")
+        else:
+            # Deleting the anchor is the one step that always raises a modal
+            # confirmation, and an unanswered dialog strands the CA in the user
+            # Root store. Retain it and let the operator un-trust explicitly.
+            log(f"windows-root-ca-retained:{thumbprint} (set {REMOVE_DRILL_CA_ENV}=1 to remove)")
         shutil.rmtree(profile_dir, ignore_errors=True)
 
 
