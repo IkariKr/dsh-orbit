@@ -140,6 +140,38 @@ The gateway architecture requires:
 4. **Opaque DSH Route Namespace**: The wildcard node authority forwards all ordinary HTTP request paths opaquely to the downstream node's DSH adapter without blanket path interference. Orbit's private machine surface (`/api/v1/*`) remains restricted to the loopback listener and private registration/selector authority.
 5. **Fail-closed Routing and Isolation**: Requests targeting an unroutable node fail closed with generic HTTP 503 (`Selected node is unavailable`). Upstream `Set-Cookie` headers have any `Domain=` attribute stripped to ensure strict host-only cookie isolation to the specific public node authority.
 
+## Browser trust anchor on Windows
+
+The mounted drill's runner-owned Firefox trusts the drill CA through the Windows
+user Root store (`security.enterprise_roots.enabled`) while
+`accept_insecure_certs = False`; the browser still performs real chain
+validation and no TLS bypass is used.
+
+Windows raises a modal confirmation whenever a process writes a **new** trust
+anchor or deletes an existing one:
+
+- Trusting the same CA again is silent, so repeated runs against one drill CA
+  never prompt.
+- The drill CA is therefore long-lived and rotates rarely, while the leaf
+  certificate keeps its short life and is regenerated silently.
+- Deleting the anchor always prompts, so the bridge retains it by default and
+  reports `windows-root-ca-retained`. Set `DSH_ORBIT_REMOVE_DRILL_CA=1` to
+  un-trust at the end of a run; that path is expected to prompt.
+
+An unattended run never has to answer those dialogs. If one is left unanswered
+the bridge fails closed with a `certutil timed out` error that names the
+dialog.
+
+Residual anchors from earlier interrupted runs can be reviewed and removed by
+hand, one prompt per removal:
+
+```powershell
+Get-ChildItem Cert:\CurrentUser\Root |
+  Where-Object { $_.Subject -eq 'CN=dsh-orbit-drill-ca' } |
+  Select-Object Thumbprint, NotAfter
+certutil -user -delstore Root <thumbprint>
+```
+
 ## Stage 8 stop point
 
 The release candidate adds no feature work and has not been tagged, published,

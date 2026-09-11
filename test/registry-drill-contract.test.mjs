@@ -23,6 +23,11 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /ROUTE_DOMAIN_HOST/);
   assert.match(source, /DNS:registry-hub/);
   assert.match(source, /certificateHasDnsSan\(DRILL_CERT_PATH, "registry-hub"\)/);
+  // Only the browser trust anchor is long-lived; the leaf stays short-lived.
+  // A fresh anchor raises a Windows root-store confirmation dialog, so the CA
+  // rotates rarely while the silently regenerated leaf keeps its short life.
+  assert.match(source, /"-x509",[\s\S]{0,200}?"-days",\s*"365"/);
+  assert.match(source, /"x509",[\s\S]{0,400}?"-days",\s*"2"/);
   assert.match(source, /NODE_HUB_URL = "https:\/\/registry-hub:5446\//);
   assert.match(source, /NODE_HUB_CA_PATH = "\/etc\/caddy\/tls\/ca\.crt"/);
   assert.match(source, /DSH_ORBIT_NODE_CA_CERT: NODE_HUB_CA_PATH/);
@@ -107,7 +112,16 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /process\.wait\(timeout=CERTUTIL_TIMEOUT_SECONDS\)/);
   assert.match(source, /taskkill\.exe/);
   assert.match(source, /certutil timed out/);
+  assert.match(source, /an unanswered Windows root-store confirmation dialog blocks certutil/);
   assert.match(source, /forced import is idempotent/);
+  // Removing the trusted root is the step that always raises the modal
+  // confirmation dialog, so it stays behind an explicit operator opt-in.
+  assert.match(source, /REMOVE_DRILL_CA_ENV = "DSH_ORBIT_REMOVE_DRILL_CA"/);
+  assert.match(source, /def drill_ca_cleanup_requested\(\) -> bool/);
+  assert.match(source, /if drill_ca_cleanup_requested\(\):[\s\S]{0,200}?remove_windows_root\(thumbprint\)/);
+  assert.match(source, /windows-root-ca-removed/);
+  assert.match(source, /windows-root-ca-retained/);
+  assert.equal((source.match(/remove_windows_root\(thumbprint\)/g) ?? []).length, 1);
   assert.match(source, /stdin=subprocess\.DEVNULL/);
   assert.match(source, /stdout=subprocess\.DEVNULL/);
   assert.match(source, /stderr=subprocess\.DEVNULL/);
