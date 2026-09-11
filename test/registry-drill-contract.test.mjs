@@ -126,6 +126,9 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /selector endpoint request failed/);
   assert.match(source, /def click_selector_link\(driver, target_url: str/);
   assert.match(source, /selector-click-start:\{label\}/);
+  assert.match(source, /def wait_for_route_page\(/);
+  assert.match(source, /route-page-observed:\{label\}/);
+  assert.match(source, /browser \{label\} did not reach the bound route page/);
   assert.match(source, /selectorOpenAVerified/);
   assert.match(source, /selectorOpenBVerified/);
   assert.match(source, /cookieIsolationVerified/);

@@ -298,6 +298,51 @@ def click_selector_link(driver, target_url: str, label: str, log=None) -> None:
         log(f"selector-click-done:{label}")
 
 
+def wait_for_route_page(
+    driver,
+    expected_url: str,
+    forbidden_text: str,
+    label: str,
+    stop_path: Path,
+    log=None,
+) -> dict | bool:
+    deadline = time.monotonic() + 30
+    last_snapshot = None
+    while time.monotonic() < deadline:
+        if stop_path.exists():
+            return False
+        try:
+            snapshot = driver.execute_script(
+                """
+                return {
+                  url: window.location.href,
+                  readyState: document.readyState,
+                  body: document.body?.innerText || '',
+                };
+                """,
+            )
+            last_snapshot = snapshot
+            if log is not None:
+                log(
+                    f"route-page-observed:{label}:url={snapshot.get('url', '')!r}:"
+                    f"ready={snapshot.get('readyState', '')}:bodyBytes={len(snapshot.get('body', ''))}"
+                )
+            if (
+                snapshot.get("url", "").startswith(expected_url)
+                and snapshot.get("readyState") in {"interactive", "complete"}
+                and forbidden_text not in snapshot.get("body", "")
+            ):
+                return snapshot
+        except WebDriverException as error:
+            if log is not None:
+                log(f"route-page-observation-error:{label}:{type(error).__name__}")
+        time.sleep(0.5)
+    raise RuntimeError(
+        f"browser {label} did not reach the bound route page before timeout: "
+        f"last={last_snapshot!r}"
+    )
+
+
 def run(args: argparse.Namespace) -> int:
     log_path = Path(args.log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -507,24 +552,32 @@ def run(args: argparse.Namespace) -> int:
         hrefs = set(selector_snapshot.get("links", []))
         if open_urls["a"] not in hrefs or open_urls["b"] not in hrefs:
             raise RuntimeError("selector Open hrefs did not match current-run bindings")
-        click_selector_link(driver, open_urls["a"], "open-a", log=log)
-        wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
-        if not driver.current_url.startswith(open_urls["a"]):
-            raise RuntimeError("browser Open A did not navigate to the bound authority")
-        if node_ids[1] in driver.find_element(By.TAG_NAME, "body").text:
-            raise RuntimeError("browser Open A displayed Node B content")
+        route_a = wait_for_route_page(
+            driver,
+            open_urls["a"],
+            node_ids[1],
+            "Open A",
+            stop_path,
+            log=log,
+        )
+        if route_a is False:
+            return 0
         selector_open_a = True
         driver.get(selector_url)
         wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
         selector_snapshot = wait_for_selector_cards(driver, stop_path, expected=2, log=log)
         if selector_snapshot is False:
             return 0
-        click_selector_link(driver, open_urls["b"], "open-b", log=log)
-        wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
-        if not driver.current_url.startswith(open_urls["b"]):
-            raise RuntimeError("browser Open B did not navigate to the bound authority")
-        if node_ids[0] in driver.find_element(By.TAG_NAME, "body").text:
-            raise RuntimeError("browser Open B displayed Node A content")
+        route_b = wait_for_route_page(
+            driver,
+            open_urls["b"],
+            node_ids[0],
+            "Open B",
+            stop_path,
+            log=log,
+        )
+        if route_b is False:
+            return 0
         selector_open_b = True
 
         driver.get(open_urls["a"])
