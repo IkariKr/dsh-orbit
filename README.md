@@ -174,6 +174,10 @@ The recommended flow is:
 
 See [Upgrade guide](docs/upgrade.md), [Compatibility](docs/compatibility.md), and [Downstream production deployment](docs/downstream-production.md).
 
+For DSH version selection and compatibility baseline policy, see:
+
+`docs/dsh-version-policy.md`
+
 ## Candidate upgrade runner
 
 `npm run upgrade -- <command>` orchestrates the manual upgrade sequence as one explicit, fail-closed command. It never promotes production: the furthest it can go is `CANDIDATE PASSED - ELIGIBLE FOR MANUAL PROMOTION`, and promoting remains an operator action.
