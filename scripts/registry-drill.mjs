@@ -1382,6 +1382,10 @@ async function main() {
     attempts: 30,
     intervalMs: 6000,
   });
+  await waitFor("A active Hub route identity after reenroll", async () => {
+    const node = await nodeApi(aNodeId);
+    return node.hubRouteKeys?.some((key) => key.state === "active") === true;
+  }, { attempts: 30, intervalMs: 1000 });
   const afterReenrollNode = await nodeApi(aNodeId);
   const newHubRouteKeyId = afterReenrollNode.hubRouteKeys?.find((key) => key.state === "active")?.keyId ?? null;
   if (!newHubRouteKeyId || newHubRouteKeyId === oldHubRouteKeyId) throw new Error("reenroll did not create a fresh Hub route identity");
