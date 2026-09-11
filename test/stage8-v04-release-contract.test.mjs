@@ -11,6 +11,7 @@ const rootPath = new URL("../", import.meta.url);
 
 const STAGE8_E73_BASE = "0dc00ceb3b0574e2a6bd81eb62502fd6c2e233f3";
 const TEST_CONTRACT_BASE = "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582";
+const RELEASE_TAG = "v0.4.0-rc.1";
 const REQUIRED_CLOSURE_ARTIFACTS = [
   "fresh-install.json",
   "migration.json",
@@ -53,6 +54,39 @@ function gitTagExists(tag) {
   } catch {
     return false;
   }
+}
+
+function gitTagCommit(tag) {
+  if (!gitTagExists(tag)) return null;
+  try {
+    return execFileSync("git", ["rev-list", "-n", "1", tag], { cwd: rootPath, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function gitTagIsAnnotated(tag) {
+  try {
+    const objectType = execFileSync("git", ["cat-file", "-t", `refs/tags/${tag}`], { cwd: rootPath, encoding: "utf8" }).trim();
+    return objectType === "tag";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The gate spans both sides of the release stop point. Before the release the
+ * tag must not exist yet. After it, the tag must be annotated, must peel to the
+ * frozen closure, and must stay an ancestor of HEAD, so the published artifact
+ * remains bound to the evidence that was mechanically validated instead of the
+ * gate refusing to run in every released tree.
+ */
+function assertReleaseTagState() {
+  const taggedCommit = gitTagCommit(RELEASE_TAG);
+  if (taggedCommit === null) return;
+  assert.equal(gitTagIsAnnotated(RELEASE_TAG), true, `${RELEASE_TAG} must be an annotated tag`);
+  assertFullCommit(taggedCommit, `${RELEASE_TAG} peeled commit`);
+  assert.equal(gitIsAncestor(taggedCommit, currentCommit()), true, `${RELEASE_TAG} must stay an ancestor of HEAD`);
 }
 
 function currentCommit() {
@@ -300,7 +334,7 @@ test("Stage 8 construction candidate version declarations", async () => {
   const candidate = currentCommit();
   assertFullCommit(candidate, "construction candidate (current HEAD)");
   assert.equal(gitIsAncestor(STAGE8_E73_BASE, candidate), true, "construction candidate must descend from E7.3");
-  assert.equal(gitTagExists("v0.4.0-rc.1"), false, "release tag must not exist before Final Review");
+  assertReleaseTagState();
   const lock = JSON.parse(await text("package-lock.json"));
   assert.equal(lock.lockfileVersion, 3);
   assert.equal(lock.version, "0.4.0-rc.1");
@@ -346,7 +380,7 @@ test("Stage 8 construction candidate version declarations", async () => {
 test("Stage 8 v0.4 release provenance contract: candidate vs closure, evidence manifest, and fail-closed gate", async () => {
   const current = currentCommit();
   assertFullCommit(current, "current commit (HEAD)");
-  assert.equal(gitTagExists("v0.4.0-rc.1"), false, "release tag must not exist before Final Review");
+  assertReleaseTagState();
   const mode = await detectProvenanceMode();
   if (mode === "construction") {
     assert.equal(gitIsAncestor(STAGE8_E73_BASE, current), true, "current construction candidate must descend from E7.3");
@@ -357,7 +391,9 @@ test("Stage 8 v0.4 release provenance contract: candidate vs closure, evidence m
     return;
   }
 
-  const releaseClosureCommit = current;
+  // Once the release tag exists it, and not HEAD, identifies the frozen closure,
+  // so post-release commits cannot silently redefine the released evidence.
+  const releaseClosureCommit = gitTagCommit(RELEASE_TAG) ?? current;
   const candidateCommit = gitCommitParent(releaseClosureCommit);
   assertFullCommit(candidateCommit, "executable candidate commit (HEAD^)");
   assert.equal(gitIsAncestor(STAGE8_E73_BASE, candidateCommit), true, "closure candidate must descend from E7.3");
