@@ -394,8 +394,23 @@ def run(args: argparse.Namespace) -> int:
                         message = detail_node.text.strip().replace("\\n", " ")[:240]
                         raise RuntimeError(f"node detail request failed for current-run node: {message!r}")
                     if detail_state == "ready":
-                        headings = driver.find_elements(By.CSS_SELECTOR, "#node-detail-view h2")
-                        if len(headings) == 1 and detail_node.get_attribute("hidden") is None and headings[0].text.strip() == node_ids[0]:
+                        detail_snapshot = driver.execute_script(
+                            """
+                            const detail = document.getElementById('node-detail-view');
+                            const heading = detail?.querySelector('h2');
+                            return {
+                              hidden: detail?.hidden === true || detail?.hasAttribute('hidden'),
+                              heading: heading?.textContent?.trim() || '',
+                              text: detail?.textContent || '',
+                            };
+                            """,
+                        )
+                        log(f"node-detail-snapshot:hidden={detail_snapshot.get('hidden')}:heading={detail_snapshot.get('heading')!r}")
+                        if (
+                            detail_snapshot.get("hidden") is False
+                            and detail_snapshot.get("heading") == node_ids[0]
+                            and "Route Target" in detail_snapshot.get("text", "")
+                        ):
                             break
             except WebDriverException as error:
                 log(f"node-detail-observation-error:{type(error).__name__}")
@@ -403,9 +418,7 @@ def run(args: argparse.Namespace) -> int:
             time.sleep(0.5)
         else:
             raise RuntimeError(f"node detail did not render for current-run node: state={detail_state or 'unset'}")
-        detail = driver.find_element(By.ID, "node-detail-view")
-        if "Route Target" not in detail.text:
-            raise RuntimeError("node detail did not expose Route Target")
+        log("node-detail-ready")
 
         # The selector Open and cookie checks must be performed by this real
         # Firefox profile, not inferred from the selector JSON or response headers.
@@ -413,11 +426,16 @@ def run(args: argparse.Namespace) -> int:
         # dynamic authorities before clicking their actual Open anchors. Use a
         # static resource for the challenge so no app script runs under URL
         # userinfo, then load each clean authority URL.
-        for warm_url in [selector_url, open_urls["a"], open_urls["b"]]:
+        for label, warm_url in [("selector", selector_url), ("open-a", open_urls["a"]), ("open-b", open_urls["b"])]:
             authority_warmup = warm_url.rstrip("/") + "/styles.css"
+            log(f"authority-warmup-start:{label}")
             driver.get(authority_warmup.replace("https://", "https://operator:drill-password@", 1))
+            log(f"authority-warmup-loaded:{label}")
             driver.get(warm_url)
+            log(f"authority-loaded:{label}")
+        log("selector-load-start")
         driver.get(selector_url)
+        log("selector-load-complete")
         wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
         cards = driver.find_elements(By.CSS_SELECTOR, ".selector-card")
         if len(cards) < 2:

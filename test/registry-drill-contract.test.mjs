@@ -80,7 +80,7 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /authority_warmup = warm_url\.rstrip\("\/"\) \+ "\/styles\.css"/);
   assert.ok(
     source.indexOf("write_json(Path(args.bootstrap_path), bootstrap)") <
-      source.indexOf("for warm_url in [selector_url, open_urls[\"a\"], open_urls[\"b\"]]"),
+      source.indexOf("authority-warmup-start:{label}"),
     "Selector/Node authority warmup must occur after management bootstrap",
   );
   assert.match(source, /if stop_path\.exists\(\):/);
@@ -114,6 +114,11 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.match(source, /node detail did not render for current-run node/);
   assert.match(source, /node-detail-click-start/);
   assert.match(source, /driver\.execute_script\("arguments\[0\]\.click\(\)", node_target\)/);
+  assert.match(source, /authority-warmup-start:\{label\}/);
+  assert.match(source, /authority-warmup-loaded:\{label\}/);
+  assert.match(source, /authority-loaded:\{label\}/);
+  assert.match(source, /selector-load-start/);
+  assert.match(source, /selector-load-complete/);
   assert.match(source, /selectorOpenAVerified/);
   assert.match(source, /selectorOpenBVerified/);
   assert.match(source, /cookieIsolationVerified/);
