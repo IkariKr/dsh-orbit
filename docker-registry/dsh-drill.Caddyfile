@@ -14,6 +14,7 @@
 # fence expects its configured public host, while RouteIngress already verified
 # the public ORBIT-ROUTE-V1 proof before reaching this adapter.
 :3081 {
+    header X-Drill-Node {$DSH_DRILL_NODE}
     reverse_proxy 127.0.0.1:3080 {
         header_up Host {$DSH_PUBLIC_HOST}
         header_up Origin https://{$DSH_PUBLIC_HOST}

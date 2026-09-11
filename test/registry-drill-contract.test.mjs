@@ -156,6 +156,7 @@ test("mounted DSH adapter preserves route and DSH trust boundaries", async () =>
   const adapterEnd = source.indexOf("\n}\n\nhttps://:9443", adapterStart);
   assert.ok(adapterStart >= 0 && adapterEnd > adapterStart, "mounted DSH adapter block must exist");
   const adapter = source.slice(adapterStart, adapterEnd);
+  assert.ok(adapter.includes("header X-Drill-Node {$DSH_DRILL_NODE}"));
   assert.ok(adapter.includes("header_up Host {$DSH_PUBLIC_HOST}"));
   assert.ok(adapter.includes("header_up Origin https://{$DSH_PUBLIC_HOST}"));
   assert.ok(adapter.includes("header_up X-Forwarded-Proto https"));
