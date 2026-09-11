@@ -60,6 +60,7 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /await stopNode\("dsh-a", "\/data\/dsh-a"\);[\s\S]*?const reenrollMint/);
   assert.match(source, /A active Hub route identity after reenroll/);
   assert.match(source, /hubRouteKeys\?\.some\(\(key\) => key\.state === "active"\)/);
+  assert.match(source, /DSH_ORBIT_REPORT_FILE: "\/data\/dsh-a\/report-drill\.json"[\s\S]*?await startNode\("dsh-a"/);
   assert.match(source, /freshHubRouteIdentity/);
   assert.match(source, /assertMatrixComplete\(\)/);
   assert.match(source, /docker restart \$\{hubContainer\}/);

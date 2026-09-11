@@ -1376,6 +1376,10 @@ async function main() {
   });
   const restoredId = /re-enrolled: (node_[0-9a-f]{32})/.exec(reenrolled)?.[1];
   if (restoredId !== aNodeId) throw new Error(`reenroll restored ${restoredId} !== ${aNodeId}`);
+  const reenrollReport = exec("dsh-a", ["node", NODE_BIN, "upload-report"], {
+    env: { ...nodeEnv("/data/dsh-a"), DSH_ORBIT_REPORT_FILE: "/data/dsh-a/report-drill.json" },
+  });
+  evidence.steps.push(`reenroll A: current identity report re-uploaded (${reenrollReport.replace(/\s+/g, " ").slice(0, 160)})`);
   await startNode("dsh-a", "/data/dsh-a");
   await waitFor("A active again", async () => nodeStateIs(aNodeId, (node) => node.state === "active"), { attempts: 30, intervalMs: 5000 });
   await waitFor("A fresh after reenroll", async () => nodeStateIs(aNodeId, (node) => node.health.registryContact === "fresh"), {
