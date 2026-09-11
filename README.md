@@ -10,11 +10,14 @@ The project focuses on secure remote access, upgrade compatibility, and multi-no
 
 New here? Start with the [overview](docs/dsh-orbit-overview.md): what Orbit is, what v0.4 gives you, and who it is for. Then see [how it compares](docs/comparison.md) to tunnels, VPNs, and web terminals.
 
+Questions, deployment topologies, and upgrade experiences belong in [Discussions](https://github.com/IkariKr/dsh-orbit/discussions); [Show and tell](https://github.com/IkariKr/dsh-orbit/discussions/categories/show-and-tell) collects the setups other operators are running.
+
 ## Status
 
 DSH Orbit `0.4.0-rc.1` targets DeepSeek Harness `0.1.1-rc.2`. The v0.4 Endpoint
 Selector release candidate is `v0.4.0-rc.1`, released as a pre-release after its
-final review passed; the tag and release notes are published on GitHub.
+final review passed; the [tag and release notes](https://github.com/IkariKr/dsh-orbit/releases/tag/v0.4.0-rc.1)
+are published on GitHub, and this branch is the released mainline.
 Production promotion is not authorized and requires a separate gate.
 
 The v0.4 release provides the deployment, compatibility, and multi-node routing
