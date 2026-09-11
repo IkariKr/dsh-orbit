@@ -663,7 +663,19 @@ function gatewayFetch(path, { method = "GET", headers = {}, body, cookie = null,
 // policy): the driver probes it from INSIDE the hub container.
 function hubGetHealth() {
   try {
-    exec("registry-hub", ["sh", "-c", "node -e \"const {get}=require('node:http');get({hostname:'127.0.0.1',port:5445,path:'/',headers:{host:'127.0.0.1:8443'}},r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))\""]);
+    exec("registry-hub", ["sh", "-c", `node -e "const {get}=require('node:http');get({hostname:'127.0.0.1',port:5445,path:'/',headers:{host:'127.0.0.1:8443'}},r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"`]);
+    return Promise.resolve(200);
+  } catch {
+    return Promise.resolve(0);
+  }
+}
+
+// Probe the private machine boundary from a real DSH container. The request is
+// intentionally unsigned and only proves that the verified TLS listener is
+// accepting connections again; Hub authentication remains fail-closed.
+function machineIngressGetHealth(nodeService = "dsh-a") {
+  try {
+    exec(nodeService, ["sh", "-c", `node -e "const fs=require('node:fs'),https=require('node:https');https.get({hostname:'registry-hub',port:5446,path:'/api/v1/heartbeat',ca:fs.readFileSync('/etc/caddy/tls/ca.crt'),servername:'registry-hub',rejectUnauthorized:true},r=>{r.resume();process.exit(r.statusCode>=400&&r.statusCode<500?0:1)}).on('error',()=>process.exit(1))"`]);
     return Promise.resolve(200);
   } catch {
     return Promise.resolve(0);
@@ -1225,9 +1237,13 @@ async function main() {
   // --- 4b. actual Hub process/container restart with persistent registry ---
   sh(`docker restart ${hubContainer}`);
   await waitFor("Hub process restart", async () => (await hubGetHealth()) === 200, { attempts: 40, intervalMs: 1000 });
-  // Caddy shares the Hub container's network namespace. Rebind the owned
-  // gateway process after the Hub container restart so its listener and
-  // loopback upstream are both reconstructed before browser recovery.
+  // Caddy and machine-ingress share the Hub container's network namespace.
+  // Rebind both owned sidecars after the Hub restart so the private machine
+  // listener and browser gateway are reconstructed before recovery.
+  const machineIngressContainer = sh(`docker compose -f ${COMPOSE} ps -q machine-ingress`).trim().split("\n")[0];
+  if (!machineIngressContainer) throw new Error("machine-ingress container is missing after Hub restart");
+  sh(`docker restart ${machineIngressContainer}`);
+  await waitFor("machine ingress after Hub restart", async () => (await machineIngressGetHealth("dsh-a")) === 200, { attempts: 40, intervalMs: 1000 });
   sh(`docker restart ${caddyContainer}`);
   await waitFor("gateway after Hub restart", async () => (await gatewayFetch("/").catch(() => null))?.status === 200, { attempts: 40, intervalMs: 1000 });
   const postHubSession = await gatewayFetch("/hub/session", { method: "POST" });
