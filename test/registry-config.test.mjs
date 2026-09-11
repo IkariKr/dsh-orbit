@@ -4,7 +4,9 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isLoopbackListen, validateHubConfig } from "../src/registry/config.mjs";
+import { isLoopbackListen, validateHubConfig, validateWebSocketConfig } from "../src/registry/config.mjs";
+import { HubWebSocketTracker } from "../src/registry/route-proxy.mjs";
+import { IngressWebSocketTracker } from "../src/node/route-ingress.mjs";
 
 test("loopback listen addresses are accepted", () => {
   assert.equal(isLoopbackListen("127.0.0.1"), true);
@@ -33,4 +35,54 @@ test("the trusted external scheme must be http or https", () => {
 test("a missing listener value fails closed", () => {
   const errors = validateHubConfig({ listen: "", trustedExternalScheme: "http" });
   assert.equal(errors.length, 1);
+});
+
+test("validateWebSocketConfig accepts bounded valid settings", () => {
+  assert.deepEqual(
+    validateWebSocketConfig({
+      maxWsGlobal: 500,
+      maxWsPerNode: 100,
+      wsHandshakeTimeoutMs: 15000,
+    }),
+    [],
+  );
+  assert.deepEqual(validateWebSocketConfig({}), []);
+});
+
+test("validateWebSocketConfig rejects 0, negative, NaN, Infinity, non-integer, and out-of-range values", () => {
+  // 0 / negative
+  assert.match(validateWebSocketConfig({ maxWsGlobal: 0 })[0], /DSH_ORBIT_HUB_WS_GLOBAL_LIMIT/);
+  assert.match(validateWebSocketConfig({ maxWsPerNode: -1 })[0], /DSH_ORBIT_HUB_WS_PER_NODE_LIMIT/);
+  assert.match(validateWebSocketConfig({ wsHandshakeTimeoutMs: 0 })[0], /DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS/);
+
+  // NaN / Infinity / non-integer
+  assert.match(validateWebSocketConfig({ maxWsGlobal: Number.NaN })[0], /DSH_ORBIT_HUB_WS_GLOBAL_LIMIT/);
+  assert.match(validateWebSocketConfig({ maxWsGlobal: Infinity })[0], /DSH_ORBIT_HUB_WS_GLOBAL_LIMIT/);
+  assert.match(validateWebSocketConfig({ maxWsGlobal: 10.5 })[0], /DSH_ORBIT_HUB_WS_GLOBAL_LIMIT/);
+  assert.match(validateWebSocketConfig({ wsHandshakeTimeoutMs: Number.NaN })[0], /DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS/);
+
+  // Exceeds upper limit or below lower limit
+  assert.match(validateWebSocketConfig({ maxWsGlobal: 100001 })[0], /DSH_ORBIT_HUB_WS_GLOBAL_LIMIT/);
+  assert.match(validateWebSocketConfig({ maxWsPerNode: 10001 })[0], /DSH_ORBIT_HUB_WS_PER_NODE_LIMIT/);
+  assert.match(validateWebSocketConfig({ wsHandshakeTimeoutMs: 50 })[0], /DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS/);
+  assert.match(validateWebSocketConfig({ wsHandshakeTimeoutMs: 120001 })[0], /DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS/);
+
+  // maxWsPerNode > maxWsGlobal
+  const perNodeExceeds = validateWebSocketConfig({ maxWsGlobal: 50, maxWsPerNode: 100 });
+  assert.equal(perNodeExceeds.length, 1);
+  assert.match(perNodeExceeds[0], /cannot exceed DSH_ORBIT_HUB_WS_GLOBAL_LIMIT/);
+});
+
+test("HubWebSocketTracker and IngressWebSocketTracker throw RangeError on invalid bounds", () => {
+  assert.throws(() => new HubWebSocketTracker({ maxGlobal: 0 }), RangeError);
+  assert.throws(() => new HubWebSocketTracker({ maxGlobal: -5 }), RangeError);
+  assert.throws(() => new HubWebSocketTracker({ maxGlobal: 100001 }), RangeError);
+  assert.throws(() => new HubWebSocketTracker({ maxPerNode: 0 }), RangeError);
+  assert.throws(() => new HubWebSocketTracker({ maxPerNode: 10001 }), RangeError);
+  assert.throws(() => new HubWebSocketTracker({ maxGlobal: 10, maxPerNode: 20 }), RangeError);
+
+  assert.throws(() => new IngressWebSocketTracker({ maxConnections: 0 }), RangeError);
+  assert.throws(() => new IngressWebSocketTracker({ maxConnections: -1 }), RangeError);
+  assert.throws(() => new IngressWebSocketTracker({ maxConnections: 10001 }), RangeError);
+  assert.throws(() => new IngressWebSocketTracker({ maxConnections: Number.NaN }), RangeError);
 });

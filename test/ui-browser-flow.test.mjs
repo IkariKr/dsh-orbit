@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
-import { createHubServer } from "../src/registry/server.mjs";
+import { createTestServer, privateMachineRequest } from "./helpers/registry-fixture.mjs";
 import { createDeleteRequestId, mapApiError, mapDeleteResult, mapNodeList, mapTokenList, mapTokenMint } from "../ui/view-model.mjs";
 
 const ASSERTION = "gateway-held-assertion-secret";
@@ -20,15 +20,13 @@ const GATEWAY_HEADERS = { [GATEWAY_HEADER]: ASSERTION, [PRINCIPAL_HEADER]: "oper
 
 async function withHub(t, { dbPath } = {}) {
   const registry = new Registry({ db: openRegistryDatabase(dbPath ?? ":memory:") });
-  const { server } = createHubServer({
-    registry,
-    options: { gatewayAssertionSecret: ASSERTION, operatorPrincipal: { mode: "inject" } },
+  const server = await createTestServer(registry, {
+    gatewayAssertionSecret: ASSERTION,
+    operatorPrincipal: { mode: "inject" },
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const baseUrl = server.baseUrl;
   t.after(async () => {
-    server.closeAllConnections?.();
-    await new Promise((resolve) => server.close(resolve));
+    await server.close();
     registry.close();
   });
   return { registry, server, baseUrl };
@@ -69,12 +67,11 @@ test("full operator flow through the browser surface: mint (plaintext once), del
 
   // Put a node on the hub through the machine path.
   const plain = registry.mintEnrollmentToken({ actor: "operator", purpose: "enroll" });
-  const enroll = await fetch(`${baseUrl}/api/v1/enroll`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token: plain.token, enrollmentRequestId: "aa".repeat(16), publicKey: "01".repeat(32) }),
+  const enroll = await privateMachineRequest(baseUrl, {
+    path: "/api/v1/enroll",
+    body: { token: plain.token, enrollmentRequestId: "aa".repeat(16), publicKey: "01".repeat(32) },
   });
-  const enrolled = await enroll.json();
+  const enrolled = enroll.body;
   assert.equal(enroll.status, 200);
 
   const session = await bootstrapUiSession(baseUrl);

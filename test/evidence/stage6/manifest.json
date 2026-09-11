@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 2,
+  "stage": "v0.4 Stage 6 Real Two-Node Mounted Product E2E",
+  "branch": "feat/v0.4-stage6-mounted-e2e",
+  "scope": "physical-two-host-mounted-e2e",
+  "reviewGate": "HOLD",
+  "physicalTwoHostE2E": "PASS",
+  "testedCommit": "eed17af172e725c87d6923b416391a5caf0af907",
+  "timestamp": "2026-09-06T13:41:59.209Z",
+  "browser": {
+    "name": "Microsoft Edge Headless / CDP",
+    "version": "152.0.4191.62",
+    "engine": "Chromium 152.0.0.0",
+    "backend": "iab",
+    "viewport": {
+      "width": 1280,
+      "height": 800
+    }
+  },
+  "gateway": {
+    "rehearsalSelectorAuthority": "stage6.localhost:51558",
+    "trustedExternalScheme": "https",
+    "tlsState": "verified"
+  },
+  "nodeA": {
+    "nodeId": "node_5fcfcc140e38944a9143dfd2a6a4f673",
+    "authority": "n-5fcfcc140e38944a9143dfd2a6a4f673.stage6.localhost:51558",
+    "routeTargetClass": "nas-class",
+    "routeTargetScheme": "https",
+    "tlsMode": "private-ca",
+    "tlsVerified": true,
+    "dshIdentity": "physical-nas-node-A"
+  },
+  "nodeB": {
+    "nodeId": "node_d9691694f26067d59f41d1dc2fb48ead",
+    "authority": "n-d9691694f26067d59f41d1dc2fb48ead.stage6.localhost:51558",
+    "routeTargetClass": "workstation-class",
+    "routeTargetScheme": "http",
+    "tlsMode": "none",
+    "tlsVerified": null,
+    "dshIdentity": "workstation-node-B"
+  },
+  "candidate": {
+    "orbitVersion": "0.4.0",
+    "orbitRevision": "eed17af172e725c87d6923b416391a5caf0af907",
+    "dshVersion": "0.1.1-rc.2",
+    "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "dshCliBinarySha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  },
+  "revalidation": {
+    "kind": "post-review-physical-recovery",
+    "candidateCommit": "eed17af172e725c87d6923b416391a5caf0af907",
+    "startTime": "2026-09-06T14:48:31.273Z",
+    "completionTime": "2026-09-06T14:51:59.088Z",
+    "gatewayTlsVerified": true,
+    "hostnameValidation": true,
+    "tlsBypass": false,
+    "nodeA": "node_cf75069a705898a43da2a7caedf455a8",
+    "nodeB": "node_88f5fe031a2bfea7ecb2f1e0c4de4114",
+    "result": "PASS"
+  },
+  "artifacts": {
+    "nodeATransport": {
+      "file": "node-a-transport.json",
+      "bytes": 1929,
+      "sha256": "77467e2f00484f6f8721588eb8ee56d999f3b6927437e9adb9321270c564c793"
+    },
+    "nodeBTransport": {
+      "file": "node-b-transport.json",
+      "bytes": 1857,
+      "sha256": "4539c05e7cdfdc1cd05e3580024956e634ba598a2a9a424c74d91f3475d4ebc2"
+    },
+    "sessionResume": {
+      "file": "session-resume.json",
+      "bytes": 563,
+      "sha256": "8d63732b9ded55f316d3c62dbd89a08872a001bcc0169d761ad291b24ea0acb5"
+    },
+    "restartIdentity": {
+      "file": "restart-identity.json",
+      "bytes": 640,
+      "sha256": "388df47ca6aa7c028e328e27d474d6b57cf89e8fdf87ee9854a82b25a81cc6f1"
+    },
+    "recoveryRevalidation": {
+      "file": "recovery.json",
+      "bytes": 1639,
+      "sha256": "9edb6551edf348f91f9e0b2484e2604d515c59162f4d7e57f3f2443c2dc2f0e3"
+    }
+  },
+  "scenarios": [
+    {
+      "id": "scenario-1-selector",
+      "name": "Selector Initial Shell",
+      "expected": "Both Node A and Node B converge to 5-condition eligible; Selector displays active Open links",
+      "actual": "Both physical nodes achieved active=true, reachable=ok, activeHubRouteKey, and web.routes capability; Selector shows Open for both",
+      "result": "PASS",
+      "file": "selector-both-eligible.png",
+      "bytes": 34869,
+      "sha256": "298af5468d40bfbefeb23d4e573bad192197c8b0bb3f23efca5113528fb5aae2"
+    },
+    {
+      "id": "scenario-2-open-a",
+      "name": "Open Node A",
+      "expected": "Node A routes to real DSH on NAS host, serving DSH web UI, assets, and WebSocket",
+      "actual": "Tab 1 routes to NAS Node A via Private CA TLS; DSH UI rendered with 200 OK and route-ready verified",
+      "result": "PASS",
+      "file": "node-a-real-dsh.png",
+      "bytes": 76289,
+      "sha256": "bb15f1de864616e5cb74f2731efcb2e1ecdb83ebd9f7694f3e692b463720873b"
+    },
+    {
+      "id": "scenario-3-open-b",
+      "name": "Open Node B in Tab 2",
+      "expected": "Node B opens in Tab 2; Tab 1 remains stably connected to Node A without crosstalk",
+      "actual": "Tab 2 opened Node B on Workstation; Tab 1 retained Node A session without crosstalk",
+      "result": "PASS",
+      "file": "node-b-real-dsh.png",
+      "bytes": 76780,
+      "sha256": "f028110c9f09e06391ea9375ca559314c85c90181179d4d3843ee7809f4ed359"
+    },
+    {
+      "id": "route-isolation",
+      "name": "Route Isolation",
+      "expected": "Subdomain authorities are mutually isolated; Tab 1 remains stably pinned to Node A",
+      "actual": "Node A and Node B authorities verify independent identities and Tab 1 remains connected to Node A",
+      "result": "PASS",
+      "file": "tab1-remains-node-a.png",
+      "bytes": 76289,
+      "sha256": "bb15f1de864616e5cb74f2731efcb2e1ecdb83ebd9f7694f3e692b463720873b"
+    },
+    {
+      "id": "cookie-credential-isolation-automated",
+      "name": "Automated Cookie & Credential Boundary",
+      "expected": "Gateway credentials stripped and Domain removed on route proxy response",
+      "actual": "RouteProxy strips Domain from downstream responses; gateway credentials not forwarded to nodes",
+      "result": "PASS"
+    },
+    {
+      "id": "cookie-browser-jar-isolation",
+      "name": "Mounted Browser Cookie Jar Isolation",
+      "expected": "Downstream Set-Cookie Domain stripped to host-only scope; no cross-subdomain leakage",
+      "actual": "Cookie jar isolation verified: Domain stripping enforced, probe cookie confined to Node A host-only scope and absent on selector/B",
+      "result": "PASS",
+      "file": "cookie-browser-isolation.json",
+      "bytes": 829,
+      "sha256": "7b66fd598c1cc4fd74762b8e13dce8e752b027093d869ce0b7c4f8344826a1f9"
+    },
+    {
+      "id": "drill-route-outage",
+      "name": "RouteIngress Outage",
+      "expected": "When Node A RouteIngress stops, Node A fails closed while Node B remains healthy",
+      "actual": "Node A RouteIngress stopped on NAS; Tab 1 renders Selected Endpoint Unavailable (503); Node B remains fully operational",
+      "result": "PASS",
+      "file": "a-route-outage-b-healthy.png",
+      "bytes": 15507,
+      "sha256": "582c8cac759ad8e3056f6e5a43a7e0b1d962dde70b1fcea67e4505b616eb9822"
+    },
+    {
+      "id": "drill-dsh-outage",
+      "name": "DSH Down, Ingress Alive",
+      "expected": "When NAS DSH stops while Ingress stays alive, Hub marks unreachable; Node B unaffected",
+      "actual": "NAS DSH stopped; RouteIngress returns 502/bad-gateway; Hub marks unreachable; Node B healthy",
+      "result": "PASS",
+      "file": "a-dsh-down.png",
+      "bytes": 15507,
+      "sha256": "582c8cac759ad8e3056f6e5a43a7e0b1d962dde70b1fcea67e4505b616eb9822"
+    },
+    {
+      "id": "drill-recovery",
+      "name": "Recovery Drill",
+      "expected": "When NAS DSH restarts, reachability restores to ok and Open link returns",
+      "actual": "Post-review physical revalidation against the same C6.6 candidate proved Node A root=200, route-ready=200/ready=true, reachable=ok and eligible=true while Node B remained reachable/eligible; trusted gateway TLS hostname validation was enabled with no TLS bypass",
+      "result": "PASS",
+      "file": "recovery.json",
+      "bytes": 1639,
+      "sha256": "9edb6551edf348f91f9e0b2484e2604d515c59162f4d7e57f3f2443c2dc2f0e3"
+    },
+    {
+      "id": "drill-delete",
+      "name": "Delete Drill",
+      "expected": "When Node A is deleted via Hub API, route target removed and route proxy returns 404/not-found",
+      "actual": "Node A deleted via Hub API; tombstoned; Selector removes Node A and bookmark returns not found",
+      "result": "PASS",
+      "file": "a-deleted.png",
+      "bytes": 37995,
+      "sha256": "a43942cea6a1b7317c8a2c7a16bcb409b1119149a2cf0af3f8a966084d46cc4c"
+    },
+    {
+      "id": "drill-restart",
+      "name": "Restart Stability Drill",
+      "expected": "Hub restarts with SQLite persistence; active nodes and configuration recover deterministically",
+      "actual": "Hub and nodes survived restart; database state restored; surviving Node B remained eligible",
+      "result": "PASS",
+      "file": "restart-stability.png",
+      "bytes": 37995,
+      "sha256": "a43942cea6a1b7317c8a2c7a16bcb409b1119149a2cf0af3f8a966084d46cc4c"
+    }
+  ]
+}

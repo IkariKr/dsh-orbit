@@ -1,6 +1,6 @@
 {
   "name": "dsh-orbit",
-  "version": "0.3.0",
+  "version": "0.4.0-rc.1",
   "private": true,
   "description": "Secure self-hosting and fleet layer for DeepSeek Harness.",
   "license": "MIT",

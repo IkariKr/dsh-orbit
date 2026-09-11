@@ -15,10 +15,10 @@ Operator browser --HTTPS :8443--> Caddy
                                       ├── browser paths -> Hub 127.0.0.1:5445
                                       └── /api/v1/* -> 403 (not proxied)
 
-DSH Node A --bridge--> registry-hub:5446 machine-ingress
-DSH Node B --bridge--> registry-hub:5446 machine-ingress
+DSH Node A --bridge--> https://registry-hub:5446 machine-ingress (private HTTPS)
+DSH Node B --bridge--> https://registry-hub:5446 machine-ingress (private HTTPS)
                                       │ same Hub network namespace
-                                      └──> Hub 127.0.0.1:5445
+                                      └──TLS ingress -> Hub 127.0.0.1:5445 (HTTP)
 ```
 
 - The Hub listens on loopback only; any non-loopback bind refuses startup
@@ -34,8 +34,10 @@ DSH Node B --bridge--> registry-hub:5446 machine-ingress
   pass through for RFC-0007 checks.
 - The gateway refuses `/api/v1/*` with 403. Node traffic does not cross the
   browser gateway or a public edge.
-- The `machine-ingress` sidecar listens privately on port 5446 in the shared
-  Hub namespace and forwards only to `127.0.0.1:5445`. It accepts only the
+- The `machine-ingress` sidecar listens privately over verified HTTPS on port
+  5446 in the shared Hub namespace and forwards only over loopback HTTP to
+  `127.0.0.1:5445`. Its certificate must cover `registry-hub`, and every Node
+  must trust the issuing CA through `DSH_ORBIT_NODE_CA_CERT`. It accepts only the
   fixed `/api/v1/enroll`, `/api/v1/heartbeat`, `/api/v1/report-upload`,
   `/api/v1/credential-rotate`, and `/api/v1/reenroll` routes, and rejects
   query strings before any upstream request. DSH A and DSH B use independent
@@ -102,9 +104,9 @@ for real container/browser evidence.
 ## Gate B and Stage 7 status
 
 Review Gate B was approved after the remediation evidence package. Stage 7 is
-complete and accepted. The Stage 8 release candidate is documentation-only and
-is awaiting final review; no tag, publication, or production promotion has
-occurred.
+complete and accepted. The Stage 8 release candidate includes the authority-boundary
+construction changes and is awaiting final review; no tag, publication, or production
+promotion has occurred.
 
 The remediation mounted run from clean commit
 `2f713e8bbd023ac49080bd2da44023c4a31323db` completed the trusted-browser,
@@ -126,6 +128,49 @@ Review Gate B is **approved**. Stage 7 is complete and accepted; see
 `docs/release-attestations/v0.3-stage7-operational-hardening.md` for the
 operator-grade evidence. Stage 8 remains at its final-review stop point; see
 `docs/release-attestations/v0.3.0-rc.1.md`.
+
+## Stage 3 Wildcard route authority gateway
+
+RFC-0010 defines deterministic public node routing via `n-<nodeId-hex>.<routeDomain>`.
+The gateway architecture requires:
+
+1. **Wildcard DNS and TLS Termination**: The outer gateway terminates wildcard TLS for `*.<routeDomain>` (e.g., `*.dsh.example.local` in production or `*.stage3-test.example` for testing/rehearsal). The production domain `dsh.ikarikore.top` remains untouched until production release.
+2. **Canonical Host Preservation**: The gateway forwards requests to the Hub's loopback listener preserving the exact canonical `Host` header. The Hub routes on `Host` only; if an incoming request carries conflicting `Host` and `X-Forwarded-Host` headers, it fails closed with HTTP 400.
+3. **Gateway Credential Stripping**: Any outer gateway authentication credentials (such as gateway Basic Auth or gateway headers) are consumed and stripped at the gateway boundary so they never reach the Hub, Node RouteIngress, or DSH.
+4. **Opaque DSH Route Namespace**: The wildcard node authority forwards all ordinary HTTP request paths opaquely to the downstream node's DSH adapter without blanket path interference. Orbit's private machine surface (`/api/v1/*`) remains restricted to the loopback listener and private registration/selector authority.
+5. **Fail-closed Routing and Isolation**: Requests targeting an unroutable node fail closed with generic HTTP 503 (`Selected node is unavailable`). Upstream `Set-Cookie` headers have any `Domain=` attribute stripped to ensure strict host-only cookie isolation to the specific public node authority.
+
+## Browser trust anchor on Windows
+
+The mounted drill's runner-owned Firefox trusts the drill CA through the Windows
+user Root store (`security.enterprise_roots.enabled`) while
+`accept_insecure_certs = False`; the browser still performs real chain
+validation and no TLS bypass is used.
+
+Windows raises a modal confirmation whenever a process writes a **new** trust
+anchor or deletes an existing one:
+
+- Trusting the same CA again is silent, so repeated runs against one drill CA
+  never prompt.
+- The drill CA is therefore long-lived and rotates rarely, while the leaf
+  certificate keeps its short life and is regenerated silently.
+- Deleting the anchor always prompts, so the bridge retains it by default and
+  reports `windows-root-ca-retained`. Set `DSH_ORBIT_REMOVE_DRILL_CA=1` to
+  un-trust at the end of a run; that path is expected to prompt.
+
+An unattended run never has to answer those dialogs. If one is left unanswered
+the bridge fails closed with a `certutil timed out` error that names the
+dialog.
+
+Residual anchors from earlier interrupted runs can be reviewed and removed by
+hand, one prompt per removal:
+
+```powershell
+Get-ChildItem Cert:\CurrentUser\Root |
+  Where-Object { $_.Subject -eq 'CN=dsh-orbit-drill-ca' } |
+  Select-Object Thumbprint, NotAfter
+certutil -user -delstore Root <thumbprint>
+```
 
 ## Stage 8 stop point
 

@@ -72,6 +72,43 @@ heartbeat succeeds. Capabilities may be withheld while report evidence is
 stale. Do not edit SQLite timestamps or shorten production thresholds to make a
 real deployment appear healthy.
 
+## v0.4 Endpoint Selector & Routing Diagnostics
+
+### Node unavailable / not selectable in UI
+- Check 5-condition eligibility:
+  1. `state === 'active'` (not tombstoned or provisioned);
+  2. `authenticated === 'ok'` (machine heartbeat authenticated);
+  3. `dshHealthy === 'ok'` (DSH runtime readiness check passed);
+  4. `orbitCompatible === 'pass'` (fresh compatibility report uploaded);
+  5. `reachable === 'ok'` (Hub route probe succeeded against RouteIngress).
+- If any condition is missing, the selector renders the node with an informative badge and denies selection.
+
+### Route target missing or unreachable
+- Verify operator has assigned a route target: `hub.setRouteTarget(nodeId, origin)`.
+- If DSH is down behind RouteIngress, RouteIngress returns 502/504; the Hub marks `reachable=unreachable`.
+- Automatic recovery: once DSH recovers, the next probe restores `reachable=ok`.
+- **No silent failover**: an outage on Node A will NEVER redirect browser traffic to Node B.
+
+### Stale compatibility & capability withdrawal
+- Unsupported DSH version (or version not matching `0.1.1-rc.2`) causes immediate withholding of `web.routes`.
+- Missing or failing `webSocketTransport` check withdraws `web.routes`.
+- When `web.routes` is withdrawn, `orbitCompatible` fails or becomes stale, blocking selector navigation.
+
+### TLS verification & Private CA failures
+- Unknown CA or mismatched SAN fails closed immediately with TLS handshake rejection.
+- In production, set `DSH_ORBIT_HUB_CA_CERT` to trust the node route ingress certificate.
+- **Strictly prohibited**: never attempt to bypass TLS via `rejectUnauthorized: false`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, or `--ignore-certificate-errors`.
+
+### Dropped connections & WebSocket capacity
+- RouteIngress and Hub enforce concurrent WebSocket limits (`DSH_ORBIT_NODE_WS_LIMIT`, `DSH_ORBIT_HUB_WS_PER_NODE_LIMIT`, `DSH_ORBIT_HUB_WS_GLOBAL_LIMIT`).
+- If capacity is exhausted, requests receive 503 Service Unavailable.
+- Early client aborts or transport failures cleanly release tracked connection slots.
+
+### Delete, tombstone & re-enrollment
+- Deleting a node immediately marks it `tombstoned` and revokes all Hub route keys.
+- Historical browser bookmarks fail closed with 404.
+- Explicit re-enrollment mints a tombstone-bound token (`reenroll`), restores the **same nodeId**, and provisions a fresh cryptographic route key pair while keeping deleted-era keys revoked.
+
 ## Permissions and platform notes
 
 On POSIX, Registry DB, backup, restore images, and Node state are explicitly

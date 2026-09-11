@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import https from "node:https";
@@ -183,6 +184,51 @@ async function startGateway(config, fence, fenceSecret) {
       respond(res, body.rpcId, { ok: true, value: {} });
     },
   );
+  server.on("upgrade", (req, socket, head) => {
+    if (req.url?.startsWith("/api/dsh-ssh/terminal")) {
+      const expectedAuthorization = `Basic ${Buffer.from(`${config.basicUser}:${config.basicPassword}`).toString("base64")}`;
+      if (req.headers.authorization !== expectedAuthorization) {
+        socket.write("HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"error\":\"unauthorized\"}");
+        socket.destroy();
+        return;
+      }
+      const fenceRequest = {
+        headers: {
+          host: FENCE_PUBLIC_HOST,
+          "x-forwarded-proto": "https",
+          "x-dsh-orbit-authenticated-proxy": fenceSecret,
+          "sec-fetch-site": req.headers["sec-fetch-site"],
+          origin: req.headers.origin,
+        },
+      };
+      if (!fence.isDshOrbitAuthenticatedProxyRequest(fenceRequest)) {
+        socket.write("HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"error\":\"forbidden\"}");
+        socket.destroy();
+        return;
+      }
+    }
+    const key = req.headers["sec-websocket-key"] || "";
+    const accept = createHash("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    socket.on("data", (chunk) => {
+      // If client sent Ping frame (opcode 0x09), reply Pong (opcode 0x0a) with matching payload (RFC 6455)
+      const opcode = chunk[0] & 0x0f;
+      if (opcode === 0x09) {
+        const payloadLen = chunk[1] & 0x7f;
+        let payload = Buffer.alloc(0);
+        if (chunk[1] & 0x80) {
+          const mask = chunk.slice(2, 6);
+          payload = Buffer.alloc(payloadLen);
+          for (let i = 0; i < payloadLen; i++) payload[i] = chunk[6 + i] ^ mask[i % 4];
+        } else {
+          payload = chunk.slice(2, 2 + payloadLen);
+        }
+        socket.write(Buffer.concat([Buffer.from([0x8a, payload.length]), payload]));
+      } else {
+        socket.write(chunk);
+      }
+    });
+  });
   server.listen(0, "127.0.0.1");
   return new Promise((resolve) => server.once("listening", () => resolve({ server, port: server.address().port })));
 }

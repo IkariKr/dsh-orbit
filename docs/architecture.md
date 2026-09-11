@@ -89,9 +89,42 @@ not advertise capabilities, and reports do not restore heartbeat contact. See
 `docs/registry-mvp.md`, `docs/registry-deployment.md`, and the frozen RFCs for
 the contract details.
 
-## Explicitly out of scope
+## Implemented v0.4 Endpoint Selector & Routing Architecture
 
-Endpoint routing, reverse connections, multi-node sessions, fleet execution,
-and third-party plugin compatibility remain outside the v0.3 MVP. The existing
-third-party compatibility debt is freeze-only and is not expanded by this
-release candidate. See `docs/roadmap.md` and `docs/third-party-debt.md`.
+The v0.4 release candidate implements the Endpoint Selector and routing layer
+over the accepted Registry:
+
+```text
+Browser --HTTPS (wildcard *.routeDomain)--> authenticated gateway --> Hub Router (loopback)
+                                                                       ^
+                                                                       | ORBIT-ROUTE-V1 (signed)
+                                                                       v
+                                                                 Node RouteIngress
+                                                                       | loopback
+                                                                      DSH
+```
+
+The selector entrypoint lives at the route domain apex (e.g. `dsh.example.com`).
+Selecting an eligible node navigates to its deterministic authority
+`n-<nodeId>.<routeDomain>`. Wildcard DNS and TLS terminate at the outer gateway.
+Host-based selection keeps DSH at `/`, enforces host-only cookie isolation, and
+eliminates global mutable active-node session state.
+
+The Hub stores one operator-approved server-reachable route target per node. It
+authenticates to the node-side RouteIngress using per-node Ed25519 route keys
+(`hub_route_keys`, RFC-0010 / RFC-0008), forwarding HTTP and WebSocket traffic
+opaquely. The Hub router does not inspect private DSH application state. A node
+is routable only when all five deterministic conditions are met (`state=active`,
+`authenticated=ok`, `dshHealthy=ok`, `orbitCompatible=pass`, `reachable=ok`).
+
+**No silent failover**: an unavailable node fails closed immediately.
+
+> **Reverse-connected nodes are not part of v0.4. They remain a v0.5 scope.**
+> NAT traversal, reverse tunnels, and fleet-wide execution remain future milestones.
+
+## Explicitly out of scope for the implemented v0.4 release
+
+Reverse connections, NAT traversal, multi-node concurrent sessions, fleet
+execution, and third-party plugin compatibility remain outside v0.4. Existing
+third-party compatibility debt remains freeze-only. See `docs/roadmap.md` and
+`docs/third-party-debt.md`.

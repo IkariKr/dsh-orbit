@@ -1,0 +1,20 @@
+{
+  "beforeRestart": {
+    "nodeIdA": "node_5fcfcc140e38944a9143dfd2a6a4f673",
+    "nodeIdB": "node_d9691694f26067d59f41d1dc2fb48ead",
+    "authorityB": "n-d9691694f26067d59f41d1dc2fb48ead.stage6.localhost:51558",
+    "routeTargetB": "http://127.0.0.1:50085",
+    "stateB": "active",
+    "reachableB": "ok"
+  },
+  "afterRestart": {
+    "nodeIdB": "node_d9691694f26067d59f41d1dc2fb48ead",
+    "authorityB": "n-d9691694f26067d59f41d1dc2fb48ead.stage6.localhost:51558",
+    "routeTargetB": "http://127.0.0.1:50085",
+    "stateB": "active",
+    "reachableB": "ok",
+    "eligibleB": true,
+    "identityPreserved": true
+  },
+  "result": "PASS"
+}

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
+import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { spawn } from "node:child_process";
@@ -89,12 +90,19 @@ export async function stopCaptured(processHandle, { force = false, timeoutMs = 5
 }
 
 export async function startHubProcess({ dbPath, agingClockPath = null, port = "0" } = {}) {
+  if (port === "0" || port === 0 || port === null) {
+    const reservation = net.createServer();
+    await new Promise((resolve) => reservation.listen(0, "127.0.0.1", resolve));
+    port = reservation.address().port;
+    await new Promise((resolve) => reservation.close(resolve));
+  }
   const env = {
     DSH_ORBIT_HUB_DB: dbPath,
     DSH_ORBIT_HUB_PORT: String(port),
     DSH_ORBIT_HUB_LISTEN: "127.0.0.1",
     DSH_ORBIT_HUB_GATEWAY_SECRET: "stage7-gateway-secret",
     DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: "operator",
+    DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: `127.0.0.1:${port}`,
   };
   if (agingClockPath !== null) {
     env.DSH_ORBIT_HUB_DRILL_AGING = "1";

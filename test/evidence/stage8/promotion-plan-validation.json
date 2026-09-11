@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "candidateCommit": "a263e7592d0726dd3c30895e27469a30f94b1768",
+  "executedAt": "2026-09-11T10:19:39.306Z",
+  "mountedRunId": "634cda14-8291-46af-8b4f-4316c83f1331",
+  "mountedEvidenceCandidate": "a263e7592d0726dd3c30895e27469a30f94b1768",
+  "kind": "stage8-promotion-plan-validation",
+  "execution": "reviewed-production-promotion-rollback-plan",
+  "productionTarget": {
+    "managementAuthority": "orbit-admin.ikarikore.top",
+    "authorityApex": "dsh.ikarikore.top",
+    "wildcardRouteDomain": "*.dsh.ikarikore.top",
+    "rollbackContract": "gateway-and-dns-only-no-identity-destruction"
+  },
+  "preflightChecksPass": true,
+  "cutoverStepsReviewed": true,
+  "rollbackTestedInStaging": false,
+  "status": "PLAN_DOCUMENTED_PROMOTION_DEFERRED_UNTIL_FINAL_REVIEW"
+}

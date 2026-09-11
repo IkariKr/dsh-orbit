@@ -1,0 +1,827 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { access, readFile } from "node:fs/promises";
+import test from "node:test";
+import { assertMountedMatrixShape, REQUIRED_MOUNTED_MATRIX_FIELDS } from "../scripts/stage8-mounted-matrix.mjs";
+
+const ROOT = new URL("../", import.meta.url);
+const text = async (path) => readFile(new URL(path, ROOT), "utf8");
+const rootPath = new URL("../", import.meta.url);
+
+const STAGE8_E73_BASE = "0dc00ceb3b0574e2a6bd81eb62502fd6c2e233f3";
+const TEST_CONTRACT_BASE = "2559a17ed6e7ff0cbe58f1b45d40e3b166eb0582";
+const RELEASE_TAG = "v0.4.0-rc.1";
+const REQUIRED_CLOSURE_ARTIFACTS = [
+  "fresh-install.json",
+  "migration.json",
+  "backup-restore.json",
+  "mounted-runner-raw.json",
+  "two-node-mounted-smoke.json",
+  "promotion-plan-validation.json",
+];
+
+function gitCommitExists(commit) {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], { cwd: rootPath, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function gitCommitParent(commit) {
+  try {
+    return execFileSync("git", ["rev-parse", `${commit}^`], { cwd: rootPath, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function gitCommitDate(commit) {
+  const iso = execFileSync("git", ["show", "-s", "--format=%cI", commit], { cwd: rootPath, encoding: "utf8" }).trim();
+  return new Date(iso);
+}
+
+function gitCommitSubject(commit) {
+  return execFileSync("git", ["show", "-s", "--format=%s", commit], { cwd: rootPath, encoding: "utf8" }).trim();
+}
+
+function gitTagExists(tag) {
+  try {
+    execFileSync("git", ["show-ref", "--tags", "--verify", `refs/tags/${tag}`], { cwd: rootPath, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function gitTagCommit(tag) {
+  if (!gitTagExists(tag)) return null;
+  try {
+    return execFileSync("git", ["rev-list", "-n", "1", tag], { cwd: rootPath, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function gitTagIsAnnotated(tag) {
+  try {
+    const objectType = execFileSync("git", ["cat-file", "-t", `refs/tags/${tag}`], { cwd: rootPath, encoding: "utf8" }).trim();
+    return objectType === "tag";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The gate spans both sides of the release stop point. Before the release the
+ * tag must not exist yet. After it, the tag must be annotated, must peel to the
+ * frozen closure, and must stay an ancestor of HEAD, so the published artifact
+ * remains bound to the evidence that was mechanically validated instead of the
+ * gate refusing to run in every released tree.
+ */
+function assertReleaseTagState() {
+  const taggedCommit = gitTagCommit(RELEASE_TAG);
+  if (taggedCommit === null) return;
+  assert.equal(gitTagIsAnnotated(RELEASE_TAG), true, `${RELEASE_TAG} must be an annotated tag`);
+  assertFullCommit(taggedCommit, `${RELEASE_TAG} peeled commit`);
+  assert.equal(gitIsAncestor(taggedCommit, currentCommit()), true, `${RELEASE_TAG} must stay an ancestor of HEAD`);
+}
+
+function currentCommit() {
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: rootPath, encoding: "utf8" }).trim();
+}
+
+function gitIsAncestor(ancestor, descendant) {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], { cwd: rootPath, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function gitChangedPaths(from, to) {
+  try {
+    const stdout = execFileSync("git", ["diff", "--name-only", `${from}..${to}`], { cwd: rootPath, encoding: "utf8" });
+    return stdout.trim().split(/\r?\n/).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function assertFullCommit(commit, label) {
+  assert.match(commit ?? "", /^[0-9a-f]{40}$/, `${label} must be a full 40-character SHA`);
+  assert.equal(gitCommitExists(commit), true, `${label} must resolve to a real commit`);
+}
+
+function sha256(buf) {
+  return createHash("sha256").update(buf).digest("hex");
+}
+
+function assertRequiredClosureArtifactSet(manifest) {
+  assert.deepEqual(
+    Object.keys(manifest.artifacts ?? {}).sort(),
+    [...REQUIRED_CLOSURE_ARTIFACTS].sort(),
+    "closure manifest artifact set must be complete and exact",
+  );
+}
+
+function assertFinalReleaseArtifactResults({ artifacts }) {
+  const acceptanceKinds = {
+    "fresh-install.json": "stage8-fresh-install-acceptance",
+    "migration.json": "stage8-migration-acceptance",
+    "backup-restore.json": "stage8-backup-restore-acceptance",
+  };
+  for (const [fileName, kind] of Object.entries(acceptanceKinds)) {
+    assert.equal(artifacts[fileName]?.json?.kind, kind, `${fileName} kind mismatch`);
+    assert.equal(
+      artifacts[fileName]?.json?.result,
+      "PASS",
+      `final release requires ${fileName} result PASS`,
+    );
+  }
+
+  const promotionPlan = artifacts["promotion-plan-validation.json"]?.json;
+  assert.equal(promotionPlan?.schemaVersion, 1, "promotion plan schemaVersion must be 1");
+  assert.equal(promotionPlan?.kind, "stage8-promotion-plan-validation", "promotion plan kind mismatch");
+  assert.match(
+    promotionPlan?.productionTarget?.managementAuthority ?? "",
+    /^(?!dsh\.ikarikore\.top$)(?!.*\.dsh\.ikarikore\.top$)[a-z0-9.-]+(?::[0-9]+)?$/,
+    "promotion plan must define a valid management authority outside the route namespace",
+  );
+  assert.deepEqual(
+    promotionPlan?.productionTarget,
+    {
+      managementAuthority: "orbit-admin.ikarikore.top",
+      authorityApex: "dsh.ikarikore.top",
+      wildcardRouteDomain: "*.dsh.ikarikore.top",
+      rollbackContract: "gateway-and-dns-only-no-identity-destruction",
+    },
+    "promotion plan must preserve the gateway/DNS-only rollback contract",
+  );
+  assert.equal(
+    promotionPlan?.preflightChecksPass,
+    true,
+    "final release requires promotion preflightChecksPass true",
+  );
+  assert.equal(
+    promotionPlan?.cutoverStepsReviewed,
+    true,
+    "final release requires promotion cutoverStepsReviewed true",
+  );
+  assert.equal(
+    promotionPlan?.status,
+    "PLAN_DOCUMENTED_PROMOTION_DEFERRED_UNTIL_FINAL_REVIEW",
+    "final release requires promotion to remain deferred until final review",
+  );
+  assert.equal(
+    typeof promotionPlan?.rollbackTestedInStaging,
+    "boolean",
+    "promotion plan rollbackTestedInStaging must be explicit",
+  );
+}
+
+function replaceArtifact({ manifest, artifacts }, fileName, json) {
+  const buffer = Buffer.from(JSON.stringify(json));
+  return {
+    manifest: {
+      ...manifest,
+      artifacts: {
+        ...manifest.artifacts,
+        [fileName]: { sha256: sha256(buffer), bytes: buffer.byteLength },
+      },
+    },
+    artifacts: {
+      ...artifacts,
+      [fileName]: { buffer, json },
+    },
+  };
+}
+
+async function detectProvenanceMode() {
+  const attestationPath = new URL("../docs/release-attestations/v0.4.0-rc.1.md", import.meta.url);
+  const manifestPath = new URL("../test/evidence/stage8/manifest.json", import.meta.url);
+  const stage8Dir = new URL("../test/evidence/stage8", import.meta.url);
+  let hasAttestation = false;
+  let hasManifest = false;
+  let hasStage8Dir = false;
+  try { await access(attestationPath); hasAttestation = true; } catch {}
+  try { await access(manifestPath); hasManifest = true; } catch {}
+  try { await access(stage8Dir); hasStage8Dir = true; } catch {}
+  if (!hasAttestation && !hasManifest && !hasStage8Dir) return "construction";
+  if (!hasAttestation || !hasManifest) {
+    assert.fail(`Partial release bundle detected: hasAttestation=${hasAttestation}, hasManifest=${hasManifest}, hasStage8Dir=${hasStage8Dir}`);
+  }
+  return "closure";
+}
+
+function validateMountedBinding({ mountedArtifact, rawArtifact, rawBuffer, manifest }) {
+  assert.equal(rawArtifact.kind, "stage8-mounted-runner-raw", "raw mounted evidence kind mismatch");
+  assert.equal(rawArtifact.producer, "registry-drill-runner", "raw mounted evidence producer mismatch");
+  assert.equal(rawArtifact.success, true, "raw mounted evidence must be successful");
+  assert.equal(rawArtifact.commit, mountedArtifact.candidateCommit, "raw mounted candidate mismatch");
+  assert.equal(rawArtifact.runId, mountedArtifact.runId, "raw mounted runId mismatch");
+  assertMountedMatrixShape(rawArtifact.requiredMatrix, { requirePass: true });
+  assert.deepEqual(mountedArtifact.requiredMatrix, rawArtifact.requiredMatrix, "mounted matrix must equal runner raw matrix");
+  const rawSha = sha256(rawBuffer);
+  assert.equal(mountedArtifact.provenance?.rawEvidenceSha256, rawSha, "mounted raw evidence hash mismatch");
+  assert.equal(mountedArtifact.provenance?.rawEvidenceBytes, rawBuffer.byteLength, "mounted raw evidence byte count mismatch");
+  assert.equal(manifest.mountedRun?.rawEvidenceSha256, rawSha, "manifest raw evidence hash mismatch");
+  assert.equal(manifest.mountedRun?.runId, rawArtifact.runId, "manifest mounted runId mismatch");
+}
+
+/**
+ * Mechanically validates a frozen candidate/closure bundle.
+ * Final-release mode requires typed artifact outcomes, mounted PASS, strict chronology, hashes, and no pending wording.
+ * The closure SHA is never required inside the attestation itself.
+ */
+function validateReleaseProvenance({
+  candidateCommit,
+  releaseClosureCommit,
+  candidateCommitDate,
+  closureCommitDate,
+  parentBaseline,
+  manifest,
+  artifacts,
+  attestationText,
+  mode = "evaluate",
+}) {
+  assertFullCommit(candidateCommit, "executableCandidateCommit");
+  assertFullCommit(releaseClosureCommit, "releaseClosureCommit");
+  assert.equal(gitCommitParent(releaseClosureCommit), candidateCommit, "releaseClosureCommit parent must equal candidateCommit");
+  if (!mode.endsWith("-synthetic")) {
+    assert.equal(gitIsAncestor(STAGE8_E73_BASE, candidateCommit), true, "candidateCommit must descend from E7.3");
+  }
+
+  assert.equal(manifest.testedCandidateCommit, candidateCommit, "manifest.testedCandidateCommit must equal candidateCommit");
+  assert.equal(manifest.parentStage7Evidence, parentBaseline, "manifest.parentStage7Evidence must match parent baseline");
+
+  assert.ok(attestationText.includes(candidateCommit), "attestation must contain candidateCommit SHA");
+  assert.ok(attestationText.includes(parentBaseline), "attestation must contain parent baseline SHA");
+
+  for (const [fileName, meta] of Object.entries(manifest.artifacts)) {
+    const artifact = artifacts[fileName];
+    assert.ok(artifact, `artifact ${fileName} must be provided`);
+    const actualSha = sha256(artifact.buffer);
+    assert.equal(actualSha, meta.sha256, `${fileName} sha256 mismatch`);
+    assert.equal(artifact.buffer.byteLength, meta.bytes, `${fileName} bytes mismatch`);
+    const artifactCommit = fileName === "mounted-runner-raw.json" ? artifact.json.commit : artifact.json.candidateCommit;
+    assert.equal(artifactCommit, candidateCommit, `${fileName} candidate commit mismatch`);
+
+    const executedDate = new Date(artifact.json.executedAt ?? artifact.json.finishedAt ?? artifact.json.startedAt);
+    assert.ok(!Number.isNaN(executedDate.getTime()), `${fileName} executedAt must be a valid date`);
+    assert.ok(
+      candidateCommitDate.getTime() < executedDate.getTime(),
+      `chronology: candidate commit (${candidateCommitDate.toISOString()}) must precede ${fileName} executedAt (${executedDate.toISOString()})`,
+    );
+
+    assert.ok(
+      executedDate.getTime() < closureCommitDate.getTime(),
+      `chronology: ${fileName} executedAt (${executedDate.toISOString()}) must precede closure commit (${closureCommitDate.toISOString()})`,
+    );
+  }
+
+  if (mode.startsWith("final-release")) {
+    assertFinalReleaseArtifactResults({ artifacts });
+  }
+
+  const mountedArtifact = artifacts["two-node-mounted-smoke.json"]?.json;
+  const rawArtifact = artifacts["mounted-runner-raw.json"]?.json;
+  if (rawArtifact || mountedArtifact?.result === "PASS" || mountedArtifact?.execution === "executed" || manifest.physicalMountedGate === "PASS") {
+    assert.ok(rawArtifact, "mounted PASS requires runner-owned raw evidence");
+    validateMountedBinding({
+      mountedArtifact,
+      rawArtifact,
+      rawBuffer: artifacts["mounted-runner-raw.json"].buffer,
+      manifest,
+    });
+  }
+  const isPass =
+    mountedArtifact?.result === "PASS" &&
+    mountedArtifact?.execution === "executed" &&
+    manifest.physicalMountedGate === "PASS" &&
+    !/\bpending\b/i.test(attestationText);
+
+  if (mode.startsWith("final-release")) {
+    assert.equal(mountedArtifact?.result, "PASS", "final release requires mounted smoke result PASS");
+    assert.equal(mountedArtifact?.execution, "executed", "final release requires mounted smoke execution executed");
+    assert.equal(manifest.physicalMountedGate, "PASS", "final release requires manifest physicalMountedGate PASS");
+    assert.doesNotMatch(attestationText, /\bpending\b/i, "final release forbids pending wording in attestation");
+  }
+
+  return { isPass, candidateCommit, releaseClosureCommit };
+}
+
+const requiredDocs = [
+  "package.json",
+  "CHANGELOG.md",
+  "README.md",
+  "docs/architecture.md",
+  "docs/roadmap.md",
+  "docs/configuration-reference.md",
+  "docs/sop/v0.3-operator-sop.md",
+  "docs/sop/v0.4-selector-operator-sop.md",
+  "docs/sop/v0.3-node-enrollment-sop.md",
+  "docs/sop/v0.3-registry-backup-restore-sop.md",
+  "docs/sop/v0.4-production-promotion-rollback-plan.md",
+  "docs/troubleshooting.md",
+  "docs/release-attestations/v0.4-stage7-failure-hardening.md",
+];
+
+test("Stage 8 construction candidate version declarations", async () => {
+  const candidate = currentCommit();
+  assertFullCommit(candidate, "construction candidate (current HEAD)");
+  assert.equal(gitIsAncestor(STAGE8_E73_BASE, candidate), true, "construction candidate must descend from E7.3");
+  assertReleaseTagState();
+  const lock = JSON.parse(await text("package-lock.json"));
+  assert.equal(lock.lockfileVersion, 3);
+  assert.equal(lock.version, "0.4.0-rc.1");
+  assert.equal(lock.packages?.[""].version, "0.4.0-rc.1");
+  const requiredDocs = [
+    "package.json",
+    "CHANGELOG.md",
+    "README.md",
+    "docs/architecture.md",
+    "docs/roadmap.md",
+    "docs/configuration-reference.md",
+    "docs/sop/v0.4-selector-operator-sop.md",
+    "docs/sop/v0.3-node-enrollment-sop.md",
+    "docs/sop/v0.4-production-promotion-rollback-plan.md",
+    "docs/troubleshooting.md",
+    "docs/release-attestations/v0.4-stage7-failure-hardening.md",
+  ];
+  for (const path of requiredDocs) await access(new URL(`../${path}`, import.meta.url));
+
+  const pkg = JSON.parse(await text("package.json"));
+  assert.equal(pkg.version, "0.4.0-rc.1");
+
+  const changelog = await text("CHANGELOG.md");
+  assert.match(changelog, /### 0\.4\.0-rc\.1 candidate/);
+
+  const readme = await text("README.md");
+  assert.match(readme, /0\.4\.0-rc\.1/);
+  assert.match(readme, /Reverse-connected nodes are not part of v0\.4/i);
+
+  const roadmap = await text("docs/roadmap.md");
+  assert.match(roadmap, /Implemented in `v0\.4\.0-rc\.1`/);
+  assert.match(roadmap, /Reverse-connected nodes are not part of v0\.4/i);
+
+  const architecture = await text("docs/architecture.md");
+  assert.match(architecture, /Implemented v0\.4 Endpoint Selector/);
+  assert.match(architecture, /Reverse-connected nodes are not part of v0\.4/i);
+
+  const config = await text("docs/configuration-reference.md");
+  assert.match(config, /`DSH_ORBIT_NODE_ORBIT_VERSION`.*`0\.4\.0-rc\.1`/s);
+  assert.match(config, /`DSH_ORBIT_REGISTRY_TAG`.*`v0\.4\.0-rc\.1`/s);
+});
+
+test("Stage 8 v0.4 release provenance contract: candidate vs closure, evidence manifest, and fail-closed gate", async () => {
+  const current = currentCommit();
+  assertFullCommit(current, "current commit (HEAD)");
+  assertReleaseTagState();
+  const mode = await detectProvenanceMode();
+  if (mode === "construction") {
+    assert.equal(gitIsAncestor(STAGE8_E73_BASE, current), true, "current construction candidate must descend from E7.3");
+    const constructionPaths = gitChangedPaths(STAGE8_E73_BASE, current);
+    assert.ok(constructionPaths.length > 0, "construction candidate must contain transplanted construction");
+    assert.equal(constructionPaths.some((p) => p.startsWith("test/evidence/stage8/")), false, "construction candidate must not contain Stage 8 evidence");
+    assert.equal(constructionPaths.includes("docs/release-attestations/v0.4.0-rc.1.md"), false, "construction candidate must not contain release closure attestation");
+    return;
+  }
+
+  // Once the release tag exists it, and not HEAD, identifies the frozen closure,
+  // so post-release commits cannot silently redefine the released evidence.
+  const releaseClosureCommit = gitTagCommit(RELEASE_TAG) ?? current;
+  const candidateCommit = gitCommitParent(releaseClosureCommit);
+  assertFullCommit(candidateCommit, "executable candidate commit (HEAD^)");
+  assert.equal(gitIsAncestor(STAGE8_E73_BASE, candidateCommit), true, "closure candidate must descend from E7.3");
+  const changedPaths = gitChangedPaths(candidateCommit, releaseClosureCommit);
+  assert.ok(changedPaths.length > 0, "closure commit must contain evidence changes");
+  for (const changedPath of changedPaths) {
+    assert.ok(changedPath === "docs/release-attestations/v0.4.0-rc.1.md" || changedPath.startsWith("test/evidence/stage8/"), `closure changed forbidden path: ${changedPath}`);
+  }
+  const manifest = JSON.parse(await text("test/evidence/stage8/manifest.json"));
+  const attestationText = await text("docs/release-attestations/v0.4.0-rc.1.md");
+  assert.ok(manifest.artifacts && Object.keys(manifest.artifacts).length > 0, "closure manifest must declare artifacts");
+  assertRequiredClosureArtifactSet(manifest);
+  const artifacts = {};
+  for (const [fileName] of Object.entries(manifest.artifacts)) {
+    const buffer = await readFile(new URL(`../test/evidence/stage8/${fileName}`, import.meta.url));
+    artifacts[fileName] = { buffer, json: JSON.parse(buffer.toString("utf8")) };
+  }
+  for (const requiredArtifact of REQUIRED_CLOSURE_ARTIFACTS) {
+    assert.ok(artifacts[requiredArtifact], `required closure artifact missing: ${requiredArtifact}`);
+  }
+  validateReleaseProvenance({
+    candidateCommit,
+    releaseClosureCommit,
+    candidateCommitDate: gitCommitDate(candidateCommit),
+    closureCommitDate: gitCommitDate(releaseClosureCommit),
+    parentBaseline: STAGE8_E73_BASE,
+    manifest,
+    artifacts,
+    attestationText,
+    mode: "final-release",
+  });
+});
+
+test("Stage 8 closure requires every required artifact", () => {
+  for (const missing of ["migration.json", "backup-restore.json", "promotion-plan-validation.json"]) {
+    const partial = { artifacts: Object.fromEntries(REQUIRED_CLOSURE_ARTIFACTS.filter((name) => name !== missing).map((name) => [name, {}])) };
+    assert.throws(() => assertRequiredClosureArtifactSet(partial), /complete and exact/, `missing ${missing} must fail closed`);
+  }
+});
+
+test("Stage 8 v0.4 release provenance mechanical validation: enforce fail-closed gate semantics", () => {
+  const candidateCommit = "6245c66d399bb8d593ab445649135699c28d0bcc";
+  const releaseClosureCommit = "cee5efce4dae090407b07cc77859d7fa2cfb53e5";
+  const candidateCommitDate = new Date("2026-09-07T07:42:34.000Z");
+  const closureCommitDate = new Date("2026-09-07T08:30:00.000Z");
+
+  const validFreshInstallJson = {
+    schemaVersion: 1,
+    kind: "stage8-fresh-install-acceptance",
+    candidateCommit,
+    executedAt: "2026-09-07T08:00:00.000Z",
+    result: "PASS",
+  };
+  const validMigrationJson = {
+    schemaVersion: 1,
+    kind: "stage8-migration-acceptance",
+    candidateCommit,
+    executedAt: "2026-09-07T08:01:00.000Z",
+    result: "PASS",
+  };
+  const validBackupRestoreJson = {
+    schemaVersion: 1,
+    kind: "stage8-backup-restore-acceptance",
+    candidateCommit,
+    executedAt: "2026-09-07T08:02:00.000Z",
+    result: "PASS",
+  };
+  const validPromotionPlanJson = {
+    schemaVersion: 1,
+    kind: "stage8-promotion-plan-validation",
+    candidateCommit,
+    executedAt: "2026-09-07T08:03:00.000Z",
+    productionTarget: {
+      managementAuthority: "orbit-admin.ikarikore.top",
+      authorityApex: "dsh.ikarikore.top",
+      wildcardRouteDomain: "*.dsh.ikarikore.top",
+      rollbackContract: "gateway-and-dns-only-no-identity-destruction",
+    },
+    preflightChecksPass: true,
+    cutoverStepsReviewed: true,
+    rollbackTestedInStaging: false,
+    status: "PLAN_DOCUMENTED_PROMOTION_DEFERRED_UNTIL_FINAL_REVIEW",
+  };
+  const validMatrix = Object.fromEntries(REQUIRED_MOUNTED_MATRIX_FIELDS.map((field) => [field, "PASS"]));
+  const validRawJson = {
+    schemaVersion: 3,
+    kind: "stage8-mounted-runner-raw",
+    producer: "registry-drill-runner",
+    commit: candidateCommit,
+    candidateCommit,
+    runId: "11111111-1111-4111-8111-111111111111",
+    startedAt: "2026-09-07T08:05:00.000Z",
+    finishedAt: "2026-09-07T08:09:00.000Z",
+    success: true,
+    cleanup: "complete",
+    requiredMatrix: validMatrix,
+  };
+  const rawBuf = Buffer.from(JSON.stringify(validRawJson));
+  const validMountedSmokeJson = {
+    schemaVersion: 3,
+    candidateCommit,
+    executedAt: "2026-09-07T08:10:00.000Z",
+    execution: "executed",
+    result: "PASS",
+    runId: validRawJson.runId,
+    requiredMatrix: validMatrix,
+    provenance: {
+      rawEvidenceSha256: sha256(rawBuf),
+      rawEvidenceBytes: rawBuf.byteLength,
+    },
+  };
+  const freshBuf = Buffer.from(JSON.stringify(validFreshInstallJson));
+  const migrationBuf = Buffer.from(JSON.stringify(validMigrationJson));
+  const backupRestoreBuf = Buffer.from(JSON.stringify(validBackupRestoreJson));
+  const promotionPlanBuf = Buffer.from(JSON.stringify(validPromotionPlanJson));
+  const mountedBuf = Buffer.from(JSON.stringify(validMountedSmokeJson));
+  const rawArtifact = { buffer: rawBuf, json: validRawJson };
+
+  const validArtifactBuffers = {
+    "fresh-install.json": freshBuf,
+    "migration.json": migrationBuf,
+    "backup-restore.json": backupRestoreBuf,
+    "mounted-runner-raw.json": rawBuf,
+    "two-node-mounted-smoke.json": mountedBuf,
+    "promotion-plan-validation.json": promotionPlanBuf,
+  };
+  const validManifest = {
+    testedCandidateCommit: candidateCommit,
+    parentStage7Evidence: STAGE8_E73_BASE,
+    physicalMountedGate: "PASS",
+    artifacts: Object.fromEntries(Object.entries(validArtifactBuffers).map(([name, buffer]) => [name, { sha256: sha256(buffer), bytes: buffer.byteLength }])),
+  mountedRun: {
+    runId: validRawJson.runId,
+    rawEvidenceSha256: sha256(rawBuf),
+  },
+};
+
+  const validAttestation = `Candidate: ${candidateCommit}\nClosure: ${releaseClosureCommit}\nParent: ${STAGE8_E73_BASE}\nStatus: PASS`;
+
+  const validArtifacts = {
+    "fresh-install.json": { buffer: freshBuf, json: validFreshInstallJson },
+    "migration.json": { buffer: migrationBuf, json: validMigrationJson },
+    "backup-restore.json": { buffer: backupRestoreBuf, json: validBackupRestoreJson },
+    "mounted-runner-raw.json": rawArtifact,
+    "two-node-mounted-smoke.json": { buffer: mountedBuf, json: validMountedSmokeJson },
+    "promotion-plan-validation.json": { buffer: promotionPlanBuf, json: validPromotionPlanJson },
+  };
+
+  // 1. Valid final release bundle passes
+  const validResult = validateReleaseProvenance({
+    candidateCommit,
+    releaseClosureCommit,
+    candidateCommitDate,
+    closureCommitDate,
+    parentBaseline: STAGE8_E73_BASE,
+    manifest: validManifest,
+    artifacts: validArtifacts,
+    attestationText: validAttestation,
+    mode: "final-release-synthetic",
+  });
+  assert.equal(validResult.isPass, true);
+
+  const assertArtifactRejected = (fileName, json, message) => {
+    const variant = replaceArtifact({ manifest: validManifest, artifacts: validArtifacts }, fileName, json);
+    assert.throws(
+      () =>
+        validateReleaseProvenance({
+          candidateCommit,
+          releaseClosureCommit,
+          candidateCommitDate,
+          closureCommitDate,
+          parentBaseline: STAGE8_E73_BASE,
+          ...variant,
+          attestationText: validAttestation,
+          mode: "final-release-synthetic",
+        }),
+      message,
+    );
+  };
+
+  // 2. Non-mounted acceptance artifacts must report their own successful result.
+  assertArtifactRejected(
+    "fresh-install.json",
+    { ...validFreshInstallJson, result: "FAIL" },
+    /final release requires fresh-install\.json result PASS/,
+  );
+  assertArtifactRejected(
+    "migration.json",
+    { ...validMigrationJson, result: "FAIL" },
+    /final release requires migration\.json result PASS/,
+  );
+  assertArtifactRejected(
+    "backup-restore.json",
+    { ...validBackupRestoreJson, result: "FAIL" },
+    /final release requires backup-restore\.json result PASS/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, productionTarget: { ...validPromotionPlanJson.productionTarget, managementAuthority: "dsh.ikarikore.top" } },
+    /promotion plan must define (?:a valid )?management authority outside the route namespace/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, productionTarget: { ...validPromotionPlanJson.productionTarget, managementAuthority: undefined } },
+    /promotion plan must define (?:a valid )?management authority outside the route namespace/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, preflightChecksPass: false },
+    /final release requires promotion preflightChecksPass true/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, cutoverStepsReviewed: false },
+    /final release requires promotion cutoverStepsReviewed true/,
+  );
+  assertArtifactRejected(
+    "promotion-plan-validation.json",
+    { ...validPromotionPlanJson, status: "PROMOTION_EXECUTED" },
+    /final release requires promotion to remain deferred until final review/,
+  );
+
+  // 3. Fails closed if mounted smoke result is not PASS
+  const blockedMountedJson = { ...validMountedSmokeJson, result: "BLOCKED" };
+  const blockedBuf = Buffer.from(JSON.stringify(blockedMountedJson));
+  assert.throws(
+    () =>
+      validateReleaseProvenance({
+        candidateCommit,
+        releaseClosureCommit,
+        candidateCommitDate,
+        closureCommitDate,
+        parentBaseline: STAGE8_E73_BASE,
+        manifest: {
+          ...validManifest,
+          physicalMountedGate: "BLOCKED",
+          artifacts: {
+            ...validManifest.artifacts,
+            "two-node-mounted-smoke.json": { sha256: sha256(blockedBuf), bytes: blockedBuf.byteLength },
+          },
+        },
+        artifacts: {
+          ...validArtifacts,
+          "two-node-mounted-smoke.json": { buffer: blockedBuf, json: blockedMountedJson },
+        },
+        attestationText: validAttestation,
+        mode: "final-release-synthetic",
+      }),
+    /final release requires mounted smoke result PASS/,
+  );
+
+  // 3. Fails closed if attestation contains pending wording
+  assert.throws(
+    () =>
+      validateReleaseProvenance({
+        candidateCommit,
+        releaseClosureCommit,
+        candidateCommitDate,
+        closureCommitDate,
+        parentBaseline: STAGE8_E73_BASE,
+        manifest: validManifest,
+        artifacts: validArtifacts,
+        attestationText: `${validAttestation}\nDocs pending commit below`,
+        mode: "final-release-synthetic",
+      }),
+    /final release forbids pending wording/,
+  );
+
+  // 4. Constructibility test: attestation does NOT require self-referential releaseClosureCommit SHA.
+  // Proves that a valid bundle where attestation does not mention closure commit succeeds,
+  // whereas requiring attestation to contain releaseClosureCommit would fail constructibility.
+  const attestationWithoutClosure = `Candidate: ${candidateCommit}\nParent: ${STAGE8_E73_BASE}\nStatus: PASS`;
+  const constructibleResult = validateReleaseProvenance({
+    candidateCommit,
+    releaseClosureCommit,
+    candidateCommitDate,
+    closureCommitDate,
+    parentBaseline: STAGE8_E73_BASE,
+    manifest: validManifest,
+    artifacts: validArtifacts,
+    attestationText: attestationWithoutClosure,
+    mode: "final-release-synthetic",
+  });
+  assert.equal(constructibleResult.isPass, true, "constructibility: attestation must not require self-referential closure SHA");
+
+  // Constructibility verification: verify that requiring closure commit in attestation WOULD fail
+  assert.throws(
+    () => {
+      assert.ok(
+        attestationWithoutClosure.includes(releaseClosureCommit),
+        "impossible requirement: attestation must contain releaseClosureCommit",
+      );
+    },
+    /impossible requirement: attestation must contain releaseClosureCommit/,
+  );
+
+  // 5. Fails closed if executedAt is after closure timestamp
+  const lateMountedJson = { ...validMountedSmokeJson, executedAt: "2026-09-07T09:00:00.000Z" };
+  const lateBuf = Buffer.from(JSON.stringify(lateMountedJson));
+  assert.throws(
+    () =>
+      validateReleaseProvenance({
+        candidateCommit,
+        releaseClosureCommit,
+        candidateCommitDate,
+        closureCommitDate,
+        parentBaseline: STAGE8_E73_BASE,
+        manifest: {
+          ...validManifest,
+          artifacts: {
+            ...validManifest.artifacts,
+            "two-node-mounted-smoke.json": { sha256: sha256(lateBuf), bytes: lateBuf.byteLength },
+          },
+        },
+        artifacts: {
+          ...validArtifacts,
+          "two-node-mounted-smoke.json": { buffer: lateBuf, json: lateMountedJson },
+        },
+        attestationText: validAttestation,
+        mode: "final-release-synthetic",
+      }),
+    /chronology: two-node-mounted-smoke\.json executedAt .* must precede closure commit/,
+  );
+
+  // 6. Fails closed if executedAt is before candidate commit timestamp
+  const earlyMountedJson = { ...validMountedSmokeJson, executedAt: "2026-09-07T07:00:00.000Z" };
+  const earlyBuf = Buffer.from(JSON.stringify(earlyMountedJson));
+  assert.throws(
+    () =>
+      validateReleaseProvenance({
+        candidateCommit,
+        releaseClosureCommit,
+        candidateCommitDate,
+        closureCommitDate,
+        parentBaseline: STAGE8_E73_BASE,
+        manifest: {
+          ...validManifest,
+          artifacts: {
+            ...validManifest.artifacts,
+            "two-node-mounted-smoke.json": { sha256: sha256(earlyBuf), bytes: earlyBuf.byteLength },
+          },
+        },
+        artifacts: {
+          ...validArtifacts,
+          "two-node-mounted-smoke.json": { buffer: earlyBuf, json: earlyMountedJson },
+        },
+        attestationText: validAttestation,
+        mode: "final-release-synthetic",
+      }),
+    /chronology: candidate commit .* must precede two-node-mounted-smoke\.json executedAt/,
+  );
+
+  // 7. Fails closed if artifact candidateCommit does not match
+  const mismatchedArtifactJson = { ...validMountedSmokeJson, candidateCommit: TEST_CONTRACT_BASE };
+  const mismatchBuf = Buffer.from(JSON.stringify(mismatchedArtifactJson));
+  assert.throws(
+    () =>
+      validateReleaseProvenance({
+        candidateCommit,
+        releaseClosureCommit,
+        candidateCommitDate,
+        closureCommitDate,
+        parentBaseline: STAGE8_E73_BASE,
+        manifest: {
+          ...validManifest,
+          artifacts: {
+            ...validManifest.artifacts,
+            "two-node-mounted-smoke.json": { sha256: sha256(mismatchBuf), bytes: mismatchBuf.byteLength },
+          },
+        },
+        artifacts: {
+          ...validArtifacts,
+          "two-node-mounted-smoke.json": { buffer: mismatchBuf, json: mismatchedArtifactJson },
+        },
+        attestationText: validAttestation,
+        mode: "final-release-synthetic",
+      }),
+    /candidate commit mismatch/,
+  );
+});
+
+test("Stage 8 pinned external DeepSeek Harness baseline contract", async () => {
+  const readme = await text("README.md");
+  assert.match(readme, /0\.1\.1-rc\.2/);
+
+  const stage6Contract = await text("test/stage6-mounted-drill-contract.test.mjs");
+  assert.match(stage6Contract, /b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/);
+  assert.match(stage6Contract, /c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62/);
+
+  const stage7Attestation = await text("docs/release-attestations/v0.4-stage7-failure-hardening.md");
+  assert.match(stage7Attestation, /0\.1\.1-rc\.2/);
+  assert.match(stage7Attestation, /b150a551b8d465e31e418e1b2eaf5e79bbb7d28e/);
+  assert.match(stage7Attestation, /c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62/);
+});
+
+test("Stage 8 schema version and route configuration safety", async () => {
+  const sqliteSource = await text("src/registry/sqlite.mjs");
+  assert.match(sqliteSource, /SCHEMA_VERSION = 5/);
+
+  const configDoc = await text("docs/configuration-reference.md");
+  assert.match(configDoc, /DSH_ORBIT_HUB_ROUTE_DOMAIN/);
+  assert.match(configDoc, /DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS/);
+  assert.match(configDoc, /DSH_ORBIT_HUB_WS_GLOBAL_LIMIT/);
+  assert.match(configDoc, /DSH_ORBIT_HUB_WS_PER_NODE_LIMIT/);
+  assert.match(configDoc, /DSH_ORBIT_NODE_WS_LIMIT/);
+});
+
+test("Stage 8 production promotion and rollback plan constraints", async () => {
+  const plan = await text("docs/sop/v0.4-production-promotion-rollback-plan.md");
+  assert.match(plan, /dsh\.ikarikore\.top/);
+  assert.match(plan, /n-<nodeId>\.dsh\.ikarikore\.top/);
+  assert.match(plan, /Rollback Contract/);
+  assert.match(plan, /No Identity Destruction/);
+});
+
+test("Stage 8 security boundaries: strictly no TLS bypass permitted", async () => {
+  const files = [
+    "src/node/route-ingress.mjs",
+    "src/registry/route-proxy.mjs",
+    "src/registry/registry.mjs",
+    "scripts/registry-stage7-drill.mjs",
+    "scripts/registry-drill.mjs",
+    "test/stage7-hardening.test.mjs",
+  ];
+  for (const f of files) {
+    const content = await text(f);
+    assert.doesNotMatch(content, /rejectUnauthorized\s*:\s*false/);
+    assert.doesNotMatch(content, new RegExp("NODE_" + "TLS_" + "REJECT_" + "UNAUTHORIZED"));
+    assert.doesNotMatch(content, /ignore-certificate-errors/);
+  }
+});

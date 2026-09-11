@@ -7,8 +7,20 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
-import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS } from "./protocol.mjs";
+import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS, normalizeAuthority, parseOriginAuthority, validateManagementAuthority } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
+import { validateWebSocketConfig } from "./config.mjs";
+import {
+  classifyHostAuthority,
+  evaluateRouteEligibility,
+  getSelectorReturnUrl,
+  HubWebSocketTracker,
+  isValidOriginFormTarget,
+  proxyHttpRequest,
+  proxyWebSocketUpgrade,
+  sendSocketHttpError,
+} from "./route-proxy.mjs";
+import { buildSelectorReadModel, mapEligibilityReason, isHtmlAccept, renderUnavailableHtml } from "./selector-view.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -139,16 +151,22 @@ export function createHubServer({ registry, options = {} }) {
     // scheme from the socket (plain http from the gateway) and must not
     // trust client-supplied X-Forwarded-Proto. The operator pins the
     // trusted external scheme explicitly (P1-09).
-    trustedExternalScheme = "http",
+    trustedExternalScheme = options.trustedExternalScheme ?? registry.trustedExternalScheme ?? "http",
+    managementAuthority = options.managementAuthority ?? registry.managementAuthority ?? null,
   } = options;
   if (trustedExternalScheme !== "http" && trustedExternalScheme !== "https") {
     throw new Error(`trustedExternalScheme must be http or https (got ${JSON.stringify(trustedExternalScheme)})`);
   }
+  const canonicalManagementAuthority = managementAuthority === null
+    ? null
+    : validateManagementAuthority(managementAuthority, registry.routeDomain);
+  const browserManagementEnabled = gatewayAssertionSecret !== null || operatorPrincipal !== null || lanBoundaryOnly;
+  if (browserManagementEnabled && canonicalManagementAuthority === null) {
+    throw new Error("managementAuthority is required when browser management is enabled");
+  }
   const limiter = new SlidingWindowLimiter();
 
-  // Stage 5: the operator UI shell (pure static assets; the API stays
-  // fully behind the RFC-0007 protections). Public by design — these
-  // files hold no data and no secrets.
+  // Operator management UI assets
   const UI_ROOT = new URL("../../ui/", import.meta.url);
   const UI_ASSETS = new Map([
     ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -158,8 +176,175 @@ export function createHubServer({ registry, options = {} }) {
     ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
   ]);
 
+  // Stage 5: Independent Selector UI assets (RFC-0011, Stage 5 Guide)
+  const SELECTOR_UI_ROOT = new URL("../../ui/selector/", import.meta.url);
+  const SELECTOR_UI_ASSETS = new Map([
+    ["/", ["index.html", "text/html; charset=utf-8"]],
+    ["/index.html", ["index.html", "text/html; charset=utf-8"]],
+    ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
+    ["/view-model.mjs", ["view-model.mjs", "text/javascript; charset=utf-8"]],
+    ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
+  ]);
+
   const server = createServer((request, response) => {
-    // Query strings are excluded from the v0.3 protocol by construction.
+    // Stage 3: Check if incoming request targets a deterministic node route authority
+    // e.g. n-<32hex>.<routeDomain>
+    // Canonical route authority is determined SOLELY by Host header.
+    // Outer gateway preserves canonical Host. If client-supplied X-Forwarded-Host
+    // conflicts with Host, fail closed immediately.
+    const rawHost = request.headers.host;
+    const xfh = request.headers["x-forwarded-host"];
+    if (xfh && rawHost && xfh.trim().toLowerCase() !== rawHost.trim().toLowerCase()) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "conflicting-host-headers", message: "Host and X-Forwarded-Host mismatch" },
+      }));
+      return;
+    }
+
+    const hostHeader = rawHost;
+    const hostClass = registry.routeDomain
+      ? classifyHostAuthority(hostHeader, registry.routeDomain, canonicalManagementAuthority)
+      : { type: canonicalManagementAuthority && rawHost === canonicalManagementAuthority ? "management" : "unrelated", authority: rawHost ?? null };
+
+    if (hostClass.type === "node-route") {
+      let nodeRouteUrl;
+      try {
+        nodeRouteUrl = new URL(request.url ?? "/", "http://registry.local");
+      } catch {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed request URL" } });
+      }
+      if (MACHINE_ROUTES.has(nodeRouteUrl.pathname)) {
+        return sendJson(response, 404, { error: { code: "machine-ingress-private", message: "the machine surface is private" } });
+      }
+      // Validate origin-form request-target
+      if (!isValidOriginFormTarget(request.url)) {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          error: { code: "invalid-target", message: "only origin-form request-target is supported" },
+        }));
+        return;
+      }
+
+      // Check 5-condition eligibility
+      const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
+      if (!eligibility.eligible) {
+        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
+        const accept = request.headers.accept || "";
+
+        if (isHtmlAccept(accept)) {
+          const reasonMapping = mapEligibilityReason(eligibility.reason);
+          const html = renderUnavailableHtml({
+            reasonMessage: reasonMapping.message,
+            routeAuthority: hostClass.routeAuthority,
+            selectorUrl,
+          });
+          response.writeHead(503, {
+            "content-type": "text/html; charset=utf-8",
+            "content-length": Buffer.byteLength(html),
+          });
+          response.end(html);
+          return;
+        }
+
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          error: {
+            code: "node-unavailable",
+            message: "Selected node is unavailable",
+            selectorUrl,
+          },
+        }));
+        return;
+      }
+
+      // Proxy request to node route ingress
+      proxyHttpRequest({
+        req: request,
+        res: response,
+        snapshot: eligibility.snapshot,
+        routeAuthority: hostClass.routeAuthority,
+        configuredRouteDomain: registry.routeDomain,
+        trustedScheme: trustedExternalScheme,
+        caCertificates: registry.caCertificates,
+        nowMs: registry.now().getTime(),
+      });
+      return;
+    }
+
+    if (hostClass.type === "selector-apex") {
+      let url;
+      try {
+        url = new URL(request.url ?? "/", "http://registry.local");
+      } catch {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed request URL" } });
+      }
+      if (url.searchParams.size > 0) {
+        return sendJson(response, 400, { error: { code: "query-not-allowed", message: "query strings are not part of the registry protocol" } });
+      }
+      const path = url.pathname;
+
+      if (MACHINE_ROUTES.has(path)) {
+        return sendJson(response, 404, { error: { code: "machine-ingress-private", message: "the machine surface is private" } });
+      }
+
+      // Selector-owned static assets
+      if (request.method === "GET" && SELECTOR_UI_ASSETS.has(path)) {
+        const [fileName, contentType] = SELECTOR_UI_ASSETS.get(path);
+        readFile(new URL(fileName, SELECTOR_UI_ROOT))
+          .then((content) => {
+            let body = content;
+            if (fileName === "index.html") {
+              const htmlStr = content.toString("utf8").replace("</head>", `<meta name="selector-authority" content="${hostClass.authority}"></head>`);
+              body = Buffer.from(htmlStr, "utf8");
+            }
+            response.writeHead(200, { "content-type": contentType, "content-length": body.length });
+            response.end(body);
+          })
+          .catch(() => sendJson(response, 404, { error: { code: "not-found", message: "selector asset missing" } }));
+        return;
+      }
+
+      // Strict (method, path) tuple allowlist on selector authority:
+      // 1. POST /hub/session (bootstrap session)
+      // 2. GET /hub/session (verify session)
+      // 3. POST /hub/session/logout (optional logout)
+      // 4. GET /hub/selector/nodes (sanitized selector read model)
+      const method = request.method;
+      const isAllowedSelectorApi =
+        (method === "POST" && (path === "/hub/session" || path === "/hub/session/")) ||
+        (method === "GET" && (path === "/hub/session" || path === "/hub/session/")) ||
+        (method === "POST" && (path === "/hub/session/logout" || path === "/hub/session/logout/")) ||
+        (method === "GET" && (path === "/hub/selector/nodes" || path === "/hub/selector/nodes/"));
+
+      if (isAllowedSelectorApi) {
+        handleBrowserRequest(request, response, path).catch((error) => sendError(response, error));
+        return;
+      }
+
+      // Explicitly forbidden on selector authority:
+      // All other methods, all other /hub/* (management mutations, tokens, route-target, delete, reenroll)
+      // and all /api/v1/* machine routes return 404 on selector authority.
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "not-found", message: "selector authority exposes only selector surface" },
+      }));
+      return;
+    }
+
+    // Defense-in-depth Wildcard Route Fence:
+    // Any other host inside or targeting the routeDomain namespace
+    // (e.g. foo.dsh.example.com, foo.dsh.example.com., dsh.example.com., malformed ports, non-node subdomains)
+    // fails closed immediately with 404. It NEVER falls through to Registry /api/v1/* or /hub/* !
+    if (hostClass.type === "invalid-route-domain") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        error: { code: "route-not-found", message: "invalid or unrecognized node route authority" },
+      }));
+      return;
+    }
+
+    // Query strings are excluded from the v0.3 Hub/management protocol by construction.
     let url;
     try {
       url = new URL(request.url ?? "/", "http://registry.local");
@@ -170,6 +355,24 @@ export function createHubServer({ registry, options = {} }) {
       return sendJson(response, 400, { error: { code: "query-not-allowed", message: "query strings are not part of the registry protocol" } });
     }
     const path = url.pathname;
+
+    if (MACHINE_ROUTES.has(path)) {
+      const browserHeadersPresent = Boolean(
+        request.headers[ASSERTION_HEADER] ||
+        request.headers[PRINCIPAL_HEADER] ||
+        request.headers.origin ||
+        request.headers["sec-fetch-site"],
+      );
+      if (hostClass.type === "management" || hostClass.type === "selector-apex" || hostClass.type === "node-route" || hostClass.type === "invalid-route-domain" || browserHeadersPresent) {
+        return sendJson(response, 404, { error: { code: "machine-ingress-private", message: "the machine surface is private" } });
+      }
+      handleMachineRequest(request, response, path).catch((error) => sendError(response, error));
+      return;
+    }
+
+    if (hostClass.type !== "management") {
+      return sendJson(response, 404, { error: { code: "authority-not-allowed", message: "request authority is not configured for this surface" } });
+    }
 
     if (request.method === "GET" && UI_ASSETS.has(path)) {
       const [fileName, contentType] = UI_ASSETS.get(path);
@@ -182,10 +385,6 @@ export function createHubServer({ registry, options = {} }) {
       return;
     }
 
-    if (MACHINE_ROUTES.has(path)) {
-      handleMachineRequest(request, response, path).catch((error) => sendError(response, error));
-      return;
-    }
     if (path.startsWith("/hub")) {
       handleBrowserRequest(request, response, path).catch((error) => sendError(response, error));
       return;
@@ -320,15 +519,23 @@ export function createHubServer({ registry, options = {} }) {
   function checkOriginAndFetchSite(request) {
     const origin = request.headers.origin;
     if (typeof origin === "string" && origin !== "") {
-      let originUrl;
+      let parsedOrigin;
       try {
-        originUrl = new URL(origin);
+        parsedOrigin = parseOriginAuthority(origin);
       } catch {
         throw new DeniedError(403, "origin-denied", "malformed Origin header");
       }
       // Host AND scheme must match the trusted external scheme
-      // (RFC-0007; P1-09). X-Forwarded-Proto is never trusted.
-      if (originUrl.protocol !== `${trustedExternalScheme}:` || originUrl.host !== request.headers.host) {
+      // (RFC-0007; P1-09). X-Forwarded-Proto is never trusted. Parse the
+      // raw Origin before any WHATWG URL canonicalization so default-port,
+      // IDNA, Unicode, and other unsupported equivalences fail closed.
+      let requestAuthority;
+      try {
+        requestAuthority = normalizeAuthority(request.headers.host, "request authority");
+      } catch {
+        throw new DeniedError(403, "origin-denied", "request authority is malformed");
+      }
+      if (parsedOrigin.scheme !== trustedExternalScheme || parsedOrigin.authority !== requestAuthority) {
         throw new DeniedError(403, "origin-denied", "Origin does not match the trusted scheme and host");
       }
     }
@@ -379,17 +586,36 @@ export function createHubServer({ registry, options = {} }) {
 
     const session = validateSessionOnly(request);
 
-    if (path === "/hub/session" || path === "/hub/session/") {
+    if (request.method === "GET" && (path === "/hub/session" || path === "/hub/session/")) {
       return sendJson(response, 200, { principal: session.operatorPrincipal, csrfToken: session.csrfToken, expiresAt: session.expiresAt });
     }
-    if (path === "/hub/session/logout" || path === "/hub/session/logout/") {
+    if (request.method === "POST" && (path === "/hub/session/logout" || path === "/hub/session/logout/")) {
       requireCsrf(request, session);
       registry.endSession({ sessionId: session.sessionId, actor: session.operatorPrincipal });
       return sendJson(response, 200, { ok: true });
     }
+    if (path === "/hub/session" || path === "/hub/session/" || path === "/hub/session/logout" || path === "/hub/session/logout/") {
+      return sendJson(response, 405, { error: { code: "method-not-allowed", message: "method not supported for session endpoint" } });
+    }
     if (request.method === "GET") {
+      if (path === "/hub/selector/nodes" || path === "/hub/selector/nodes/") {
+        const readModel = buildSelectorReadModel(registry, {
+          routeDomain: registry.routeDomain,
+          trustedScheme: trustedExternalScheme,
+        });
+        return sendJson(response, 200, readModel);
+      }
       if (path === "/hub/nodes" || path === "/hub/nodes/") {
         return sendJson(response, 200, { nodes: registry.listNodes() });
+      }
+      const routeTargetGetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
+      if (routeTargetGetMatch) {
+        const nodeId = decodeURIComponent(routeTargetGetMatch[1]);
+        const node = registry.getNodeRow(nodeId);
+        if (!node) {
+          return sendJson(response, 404, { error: { code: "not-found", message: "no such node" } });
+        }
+        return sendJson(response, 200, { nodeId, routeTarget: registry.getRouteTarget(nodeId) });
       }
       const nodeMatch = path.match(/^\/hub\/nodes\/([^/]+)\/?$/);
       if (nodeMatch) {
@@ -402,6 +628,29 @@ export function createHubServer({ registry, options = {} }) {
     }
 
     requireCsrf(request, session);
+
+    const routeTargetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
+    if (routeTargetMatch) {
+      const nodeId = decodeURIComponent(routeTargetMatch[1]);
+      if (request.method === "PUT") {
+        const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+        const target = body.routeTarget ?? body.routeTargetOrigin ?? body.origin;
+        const result = registry.setRouteTarget({
+          actor: session.operatorPrincipal,
+          nodeId,
+          routeTarget: target,
+        });
+        return sendJson(response, 200, result);
+      }
+      if (request.method === "DELETE") {
+        const result = registry.removeRouteTarget({
+          actor: session.operatorPrincipal,
+          nodeId,
+        });
+        return sendJson(response, 200, result);
+      }
+      return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected PUT or DELETE" } });
+    }
 
     if (path === "/hub/tokens" || path === "/hub/tokens/") {
       if (request.method === "POST") {
@@ -446,5 +695,132 @@ export function createHubServer({ registry, options = {} }) {
     return sendJson(response, 404, { error: { code: "not-found", message: "no such management route" } });
   }
 
-  return { server };
+  // Stage 4: WebSocket Connection Tracker & Resource Limits
+  const maxWsGlobal = options.maxWsGlobal ?? (process.env.DSH_ORBIT_HUB_WS_GLOBAL_LIMIT !== undefined ? Number(process.env.DSH_ORBIT_HUB_WS_GLOBAL_LIMIT) : undefined);
+  const maxWsPerNode = options.maxWsPerNode ?? (process.env.DSH_ORBIT_HUB_WS_PER_NODE_LIMIT !== undefined ? Number(process.env.DSH_ORBIT_HUB_WS_PER_NODE_LIMIT) : undefined);
+  const wsHandshakeTimeoutMs = options.wsHandshakeTimeoutMs ?? (process.env.DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS !== undefined ? Number(process.env.DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS) : undefined);
+
+  const wsConfigErrors = validateWebSocketConfig({ maxWsGlobal, maxWsPerNode, wsHandshakeTimeoutMs });
+  if (wsConfigErrors.length > 0) {
+    throw new RangeError(wsConfigErrors[0]);
+  }
+
+  const wsTracker = options.wsTracker ?? new HubWebSocketTracker({
+    ...(maxWsGlobal !== undefined ? { maxGlobal: maxWsGlobal } : {}),
+    ...(maxWsPerNode !== undefined ? { maxPerNode: maxWsPerNode } : {}),
+  });
+
+  // Stage 4: Server WebSocket Upgrade Pipeline (RFC-0010 D7)
+  server.on("upgrade", (request, socket, head) => {
+    const upgradeHeader = request.headers.upgrade;
+    if (typeof upgradeHeader !== "string" || upgradeHeader.toLowerCase() !== "websocket") {
+      sendSocketHttpError(socket, 400, "Bad Request", {}, {
+        error: { code: "unsupported-upgrade-protocol", message: "only WebSocket upgrade is supported" },
+      });
+      return;
+    }
+
+    const rawHost = request.headers.host;
+    const xfh = request.headers["x-forwarded-host"];
+    if (xfh && rawHost && xfh.trim().toLowerCase() !== rawHost.trim().toLowerCase()) {
+      sendSocketHttpError(socket, 400, "Bad Request", {}, {
+        error: { code: "conflicting-host-headers", message: "Host and X-Forwarded-Host mismatch" },
+      });
+      return;
+    }
+
+    const hostHeader = rawHost;
+    const hostClass = registry.routeDomain
+      ? classifyHostAuthority(hostHeader, registry.routeDomain, canonicalManagementAuthority)
+      : { type: canonicalManagementAuthority && rawHost === canonicalManagementAuthority ? "management" : "unrelated", authority: rawHost ?? null };
+
+    if (hostClass.type === "node-route") {
+      let nodeRouteUrl;
+      try {
+        nodeRouteUrl = new URL(request.url ?? "/", "http://registry.local");
+      } catch {
+        sendSocketHttpError(socket, 400, "Bad Request", {}, {
+          error: { code: "bad-request", message: "malformed request URL" },
+        });
+        return;
+      }
+      if (MACHINE_ROUTES.has(nodeRouteUrl.pathname)) {
+        sendSocketHttpError(socket, 404, "Not Found", {}, {
+          error: { code: "machine-ingress-private", message: "the machine surface is private" },
+        });
+        return;
+      }
+      // Validate origin-form request-target
+      if (!isValidOriginFormTarget(request.url)) {
+        sendSocketHttpError(socket, 400, "Bad Request", {}, {
+          error: { code: "invalid-target", message: "only origin-form request-target is supported" },
+        });
+        return;
+      }
+
+      // Check Hub WebSocket capacity limits
+      const capacityCheck = wsTracker.canAccept(hostClass.nodeId);
+      if (!capacityCheck.allowed) {
+        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
+        sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
+          error: { code: "capacity-exhausted", message: "Hub WebSocket capacity limit reached", selectorUrl },
+        });
+        return;
+      }
+
+      // Check 5-condition eligibility
+      const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
+      if (!eligibility.eligible) {
+        const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
+        sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
+          error: {
+            code: "node-unavailable",
+            message: "Selected node is unavailable",
+            selectorUrl,
+          },
+        });
+        return;
+      }
+
+      // Proxy WebSocket upgrade to node route ingress
+      proxyWebSocketUpgrade({
+        req: request,
+        socket,
+        head,
+        snapshot: eligibility.snapshot,
+        routeAuthority: hostClass.routeAuthority,
+        tracker: wsTracker,
+        configuredRouteDomain: registry.routeDomain,
+        trustedScheme: trustedExternalScheme,
+        caCertificates: registry.caCertificates,
+        ...(wsHandshakeTimeoutMs !== undefined ? { handshakeTimeoutMs: wsHandshakeTimeoutMs } : {}),
+        nowMs: registry.now().getTime(),
+      });
+      return;
+    }
+
+    if (hostClass.type === "selector-apex") {
+      sendSocketHttpError(socket, 404, "Not Found", {}, {
+        error: { code: "not-found", message: "WebSocket upgrades are not supported on selector authority" },
+      });
+      return;
+    }
+
+    if (hostClass.type === "invalid-route-domain") {
+      sendSocketHttpError(socket, 404, "Not Found", {}, {
+        error: { code: "route-not-found", message: "invalid or unrecognized node route authority" },
+      });
+      return;
+    }
+
+    sendSocketHttpError(socket, 404, "Not Found", {}, {
+      error: { code: "not-found", message: "WebSocket upgrades are not supported on this authority" },
+    });
+  });
+
+  server.on("close", () => {
+    wsTracker.destroyAll();
+  });
+
+  return { server, wsTracker };
 }

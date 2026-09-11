@@ -1,0 +1,62 @@
+{
+  "manifestVersion": 1,
+  "stage": "7",
+  "testedCandidateCommit": "190b296352513b1d92d359fefebf0f40569675aa",
+  "parentCandidate": "190b296352513b1d92d359fefebf0f40569675aa",
+  "branch": "chore/v0.4-stage7-corrective-evidence",
+  "reviewGate": "READY_FOR_INDEPENDENT_STAGE7_FINAL_REVIEW",
+  "stage8": "NOT_STARTED",
+  "artifacts": [
+    {
+      "path": "test/evidence/stage7/automated-drill.json",
+      "sha256": "c0bb5414272d29e261d7e87e241f327db52533487685c822b14f291941495cba",
+      "bytes": 1097
+    },
+    {
+      "path": "test/evidence/stage7/live-two-host.json",
+      "sha256": "35f767721b4d920d4387c229408aaf4c8ed82f57ee2a8da322b421dd910a70b3",
+      "bytes": 1480
+    },
+    {
+      "path": "test/evidence/stage7/dsh-loss-recovery.json",
+      "sha256": "efeaf5496213c1607f8386a14bc5c2d8a645eb2834009cd7cde1727080833df6",
+      "bytes": 558
+    },
+    {
+      "path": "test/evidence/stage7/route-key-rotation.json",
+      "sha256": "ea0b4b15ba7e54156ff845af006dd817d76c52bf36808fff2cb57111c4a47ab2",
+      "bytes": 763
+    },
+    {
+      "path": "test/evidence/stage7/tls-failure.json",
+      "sha256": "59960129b144641aaab7a656c9cf1193f80734f6d666f888969fbcc1589859eb",
+      "bytes": 642
+    },
+    {
+      "path": "test/evidence/stage7/delete-reenroll.json",
+      "sha256": "fe5bfda3fb862409d50debd51f963119760aea0988c5ae6731e4de367c912f9e",
+      "bytes": 743
+    },
+    {
+      "path": "test/evidence/stage7/restart-stability.json",
+      "sha256": "2448b5481c36912fcee3ff7f8559762f0fc621ebebd0d05a086d93bdf3048d5b",
+      "bytes": 655
+    },
+    {
+      "path": "test/evidence/stage7/verification-summary.json",
+      "sha256": "7f07ab03bb1a6966de87c023ef3177227656d09b9710bb6319cf0db74cdd0d05",
+      "bytes": 1493
+    }
+  ],
+  "externalDsh": {
+    "version": "0.1.1-rc.2",
+    "commitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "cliSha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  },
+  "chronology": {
+    "candidateFrozen": "2026-09-08T03:16:54.000Z",
+    "physicalEvidenceCaptured": "2026-09-08T08:52:39.878Z",
+    "evidenceGenerated": "2026-09-08T09:02:07.917Z"
+  },
+  "secretPolicy": "public evidence excludes private keys, tokens, token digests, passwords, cookies, CSRF values, gateway secrets, and raw authenticated headers"
+}

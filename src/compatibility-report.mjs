@@ -15,6 +15,7 @@ export const REQUIRED_CHECKS = Object.freeze([
 
 export const OPTIONAL_CHECKS = Object.freeze([
   "longLivedTransport",
+  "webSocketTransport",
   "terminalFence",
   "terminalPtty",
 ]);

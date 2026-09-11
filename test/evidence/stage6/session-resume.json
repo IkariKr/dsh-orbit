@@ -1,0 +1,19 @@
+{
+  "nodeA": {
+    "authority": "n-5fcfcc140e38944a9143dfd2a6a4f673.stage6.localhost:51558",
+    "sessionResume": "PASS",
+    "modelReselected": true,
+    "provider": "deepseek-official",
+    "model": "deepseek-v4-flash",
+    "executedAt": "2026-09-06T13:41:51.160Z"
+  },
+  "nodeB": {
+    "authority": "n-d9691694f26067d59f41d1dc2fb48ead.stage6.localhost:51558",
+    "sessionResume": "PASS",
+    "modelReselected": true,
+    "provider": "deepseek-official",
+    "model": "deepseek-v4-flash",
+    "executedAt": "2026-09-06T13:41:51.873Z"
+  },
+  "result": "PASS"
+}

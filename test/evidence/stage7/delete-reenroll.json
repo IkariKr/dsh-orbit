@@ -1,0 +1,10 @@
+{
+  "artifact": "delete-reenroll",
+  "testedCandidateCommit": "190b296352513b1d92d359fefebf0f40569675aa",
+  "nodeId": "node_c225828f64597c70f715b3bdb1516093",
+  "delete": { "state": "tombstoned", "oldRouteKeysExposedAfterDelete": false, "reachable": "unknown" },
+  "reenroll": { "tokenBoundToTombstone": true, "sameNodeId": true, "freshKeyId": "b6398ce068eb106cc96bf6b50dd4e80c", "oldRouteIdentityReused": false },
+  "postRecovery": { "state": "active", "registryContact": "fresh", "reachable": "ok", "orbitCompatible": "pass", "capabilities": ["sessions.resume", "settings.remote", "web.routes"] },
+  "nodeBIsolation": { "nodeId": "node_a7fa8eb2a60d3554702ad1457640c0bc", "reachable": "ok", "crossTalkObserved": false },
+  "status": "PASS"
+}

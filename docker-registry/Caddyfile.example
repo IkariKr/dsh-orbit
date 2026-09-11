@@ -36,6 +36,7 @@ registration.example.invalid {
             operator $2a$10$REPLACE_WITH_BCRYPT_HASH
         }
         reverse_proxy 127.0.0.1:5445 {
+            header_up Host {http.request.hostport}
             header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
             header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
         }
@@ -48,6 +49,7 @@ registration.example.invalid {
             operator $2a$10$REPLACE_WITH_BCRYPT_HASH
         }
         reverse_proxy 127.0.0.1:5445 {
+            header_up Host {http.request.hostport}
             header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
             header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
             # Cookie / Origin / Sec-Fetch-Site pass through untouched.
@@ -57,3 +59,24 @@ registration.example.invalid {
 
 # Generate the bcrypt hash with:
 #   caddy hash-password --plaintext '<gateway operator password>'
+
+# Wildcard public route authority and selector apex (RFC-0010, Stage 3).
+# Terminates public TLS for *.dsh.example.local and the selector apex dsh.example.local.
+# Executes the outer gateway authentication GATE first (basic_auth below), consumes/strips
+# gateway-owned authentication credentials, preserves canonical Host, and reverse proxies
+# to the Hub loopback listener. The Hub routes opaquely based on deterministic Host:
+# - dsh.example.local -> Selector return landing
+# - n-<nodeId>.dsh.example.local -> Deterministic node route proxying to downstream DSH
+# - invalid wildcard subdomains -> 404 route-not-found (fail closed before private APIs)
+dsh.example.local, *.dsh.example.local {
+    basic_auth {
+        operator $2a$10$REPLACE_WITH_BCRYPT_HASH
+    }
+    reverse_proxy 127.0.0.1:5445 {
+        header_up Host {http.request.hostport}
+        header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
+        header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
+        header_up -Authorization
+        header_up -X-Gateway-Auth
+    }
+}

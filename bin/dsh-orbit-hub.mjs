@@ -13,13 +13,17 @@
 //   DSH_ORBIT_HUB_OPERATOR_PRINCIPAL fixed single operator principal
 //   DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY  accept browser requests from loopback only
 //   DSH_ORBIT_HUB_ROTATION_OVERLAP_H rotation overlap in hours (1-168, default 24)
+//   DSH_ORBIT_HUB_ROUTE_DOMAIN       deterministic v0.4 route domain (default localhost)
+//   DSH_ORBIT_HUB_CA_CERT            optional private-CA PEM or PEM file for Node route targets
+//   DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS route probe cadence (default 60)
+//   DSH_ORBIT_HUB_ROUTE_ROTATION_OVERLAP_DAYS Hub route-key overlap (1-30, default 14)
 //   DSH_ORBIT_HUB_DRILL_AGING / DSH_ORBIT_HUB_DRILL_AGING_CLOCK
 //                                    isolated mounted-drill contact-aging clock;
 //                                    rejected unless drill mode is explicit
 
 import { existsSync, readFileSync } from "node:fs";
 import process from "node:process";
-import { createMaintenanceScheduler } from "../src/registry/scheduler.mjs";
+import { createMaintenanceScheduler, createRouteProbeScheduler } from "../src/registry/scheduler.mjs";
 import { validateHubConfig } from "../src/registry/config.mjs";
 import { openRegistryDatabase, RegistryDatabaseError } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
@@ -32,7 +36,21 @@ const gatewaySecret = process.env.DSH_ORBIT_HUB_GATEWAY_SECRET ?? null;
 const singlePrincipal = process.env.DSH_ORBIT_HUB_OPERATOR_PRINCIPAL ?? null;
 const lanBoundaryOnly = process.env.DSH_ORBIT_HUB_LAN_BOUNDARY_ONLY === "1";
 const trustedExternalScheme = process.env.DSH_ORBIT_HUB_TRUSTED_SCHEME ?? "http";
+const managementAuthority = process.env.DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY ?? null;
 const rotationOverlapHours = Number.parseInt(process.env.DSH_ORBIT_HUB_ROTATION_OVERLAP_H ?? "24", 10);
+const routeDomain = process.env.DSH_ORBIT_HUB_ROUTE_DOMAIN ?? "localhost";
+const probeCadenceSeconds = Number(process.env.DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS ?? "60");
+const hubRouteOverlapDays = Number(process.env.DSH_ORBIT_HUB_ROUTE_ROTATION_OVERLAP_DAYS ?? "14");
+
+let caCertificates = null;
+if (process.env.DSH_ORBIT_HUB_CA_CERT) {
+  const caTarget = process.env.DSH_ORBIT_HUB_CA_CERT;
+  if (existsSync(caTarget)) {
+    caCertificates = [readFileSync(caTarget, "utf8")];
+  } else {
+    caCertificates = [caTarget];
+  }
+}
 const acceleratedAging = process.env.DSH_ORBIT_HUB_DRILL_AGING === "1";
 const agingClockPath = process.env.DSH_ORBIT_HUB_DRILL_AGING_CLOCK ?? null;
 if (agingClockPath !== null && !acceleratedAging) {
@@ -76,7 +94,7 @@ const drillContactNow = acceleratedAging
     }
   : null;
 
-const configErrors = validateHubConfig({ listen, trustedExternalScheme });
+const configErrors = validateHubConfig({ listen, trustedExternalScheme, managementAuthority, routeDomain });
 if (configErrors.length > 0) {
   for (const error of configErrors) {
     console.error(`dsh-orbit-hub: ${error}`);
@@ -103,9 +121,14 @@ try {
 const registry = new Registry({
   db,
   rotationOverlapHours,
+  hubRouteOverlapDays,
+  routeDomain,
+  trustedExternalScheme,
+  managementAuthority,
+  caCertificates,
   ...(drillContactNow ? { registryContactNow: drillContactNow } : {}),
 });
-const options = { lanBoundaryOnly, trustedExternalScheme };
+const options = { lanBoundaryOnly, trustedExternalScheme, managementAuthority };
 if (gatewaySecret !== null) options.gatewayAssertionSecret = gatewaySecret;
 if (singlePrincipal !== null) {
   options.operatorPrincipal = { mode: "single", principal: singlePrincipal };
@@ -125,12 +148,16 @@ server.listen(port, listen, () => {
 // reachable when maintenance actually runs at that cadence.
 const maintenanceScheduler = createMaintenanceScheduler(registry, { tickMs: 30 * 1000 });
 
+// 60s asynchronous route probe scheduler (RFC-0010, SOP Stage 2).
+const routeProbeScheduler = createRouteProbeScheduler(registry, { cadenceSeconds: probeCadenceSeconds });
+
 let shuttingDown = false;
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`dsh-orbit-hub: ${signal}, shutting down`);
   maintenanceScheduler.stop();
+  routeProbeScheduler.stop();
   server.closeAllConnections?.();
   server.close(() => {
     registry.close();

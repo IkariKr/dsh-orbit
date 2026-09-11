@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const DRIVER = new URL("../scripts/registry-drill.mjs", import.meta.url);
+const BRIDGE = new URL("../scripts/registry-drill-firefox-bridge.py", import.meta.url);
+const DSH_CADDY = new URL("../docker-registry/dsh-drill.Caddyfile", import.meta.url);
 
 test("mounted drill requires trusted browser evidence and real compatibility reports", async () => {
   const source = await readFile(DRIVER, "utf8");
@@ -18,14 +20,186 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /BROWSER_BINDINGS_PATH/);
   assert.match(source, /resolveOpenSsl\(\)/);
   assert.match(source, /DSH_ORBIT_OPENSSL_BIN/);
+  assert.match(source, /ROUTE_DOMAIN_HOST/);
+  assert.match(source, /DNS:registry-hub/);
+  assert.match(source, /certificateHasDnsSan\(DRILL_CERT_PATH, "registry-hub"\)/);
+  // Only the browser trust anchor is long-lived; the leaf stays short-lived.
+  // A fresh anchor raises a Windows root-store confirmation dialog, so the CA
+  // rotates rarely while the silently regenerated leaf keeps its short life.
+  assert.match(source, /"-x509",[\s\S]{0,200}?"-days",\s*"365"/);
+  assert.match(source, /"x509",[\s\S]{0,400}?"-days",\s*"2"/);
+  assert.match(source, /NODE_HUB_URL = "https:\/\/registry-hub:5446\//);
+  assert.match(source, /NODE_HUB_CA_PATH = "\/etc\/caddy\/tls\/ca\.crt"/);
+  assert.match(source, /DSH_ORBIT_NODE_CA_CERT: NODE_HUB_CA_PATH/);
+  assert.match(source, /ROUTE_DOMAIN =/);
   assert.match(source, /checkpoint\.leafFingerprint/);
+  assert.match(source, /runner-owned-firefox-selenium/);
+  assert.match(source, /DSH_ORBIT_BROWSER_CHALLENGE/);
+  assert.match(source, /BROWSER_NODE_BINDING_PATH/);
+  assert.match(source, /browserBridgeProcess/);
+  assert.match(source, /BROWSER_BRIDGE_LOG_PATH/);
+  assert.match(source, /prepareDrillProxySecret\(\)/);
+  assert.match(source, /removeDrillProxySecret\(\)/);
+  assert.match(source, /DRILL_PROXY_SECRET_PATH/);
   assert.match(source, /nodeIds: \[aNodeId, bNodeId\]/);
   assert.match(source, /runVerificationSequence\(/);
   assert.match(source, /createCompatibilityReport\(/);
+  assert.match(source, /REQUIRED_MOUNTED_MATRIX_FIELDS/);
+  assert.match(source, /ROUTE_DOMAIN/);
+  assert.match(source, /GATEWAY_URL/);
+  assert.match(source, /requiredMatrix/);
+  assert.match(source, /browserCheckpoint\.selectorOpenAVerified/);
+  assert.match(source, /browserCheckpoint\.cookieIsolationVerified/);
+  assert.match(source, /\\bdsh-b\(\?:\\\.test\)\?\\b/);
+  assert.match(source, /\\bdsh-a\(\?:\\\.test\)\?\\b/);
+  assert.doesNotMatch(source, /routeRootTextA\.includes\("dsh-b"\)/);
+  assert.doesNotMatch(source, /routeRootTextB\.includes\("dsh-a"\)/);
+  assert.match(source, /browser lifecycle checkpoint did not verify Selector Open A\/B navigation/);
+  assert.match(source, /routeTargetsConfiguredAB/);
+  assert.match(source, /hubRestartRecovery/);
+  assert.match(source, /headers:\{host:'127\.0\.0\.1:8443'\}/);
+  assert.doesNotMatch(source, /get\('http:\/\/127\.0\.0\.1:5445\//);
+  assert.match(source, /dshLossAndRecovery/);
+  assert.match(source, /bookmarkFailClosed/);
+  assert.match(source, /sameNodeIdReenroll/);
+  assert.match(source, /await stopNode\("dsh-a", "\/data\/dsh-a"\);[\s\S]*?const reenrollMint/);
+  assert.match(source, /A active Hub route identity after reenroll/);
+  assert.match(source, /hubRouteKeys\?\.some\(\(key\) => key\.state === "active"\)/);
+  assert.match(source, /DSH_ORBIT_REPORT_FILE: "\/data\/dsh-a\/report-drill\.json"[\s\S]*?await startNode\("dsh-a"/);
+  assert.match(source, /A route eligible after reenroll/);
+  assert.match(source, /node\.health\?\.reachable === "ok"/);
+  assert.match(source, /capability\.name === "web\.routes"/);
+  assert.match(source, /freshHubRouteIdentity/);
+  assert.match(source, /assertMatrixComplete\(\)/);
+  assert.match(source, /docker restart \$\{hubContainer\}/);
+  assert.match(source, /docker restart \$\{caddyContainer\}/);
+  assert.match(source, /machineIngressGetHealth\("dsh-a"\)/);
+  assert.match(source, /https\.get\(\{hostname:'registry-hub',port:5446/);
+  assert.match(source, /servername:'registry-hub'/);
+  assert.match(source, /rejectUnauthorized:true/);
+  assert.match(source, /Caddy and machine-ingress share the Hub container's network namespace/);
+  assert.match(source, /suspendDsh/);
+  assert.match(source, /routeWebSocket\(/);
   assert.match(source, /runningImageEvidence\(/);
   assert.match(source, /aging reset healed A without heartbeat/);
-  assert.doesNotMatch(source, /Object\.fromEntries\(/);
   assert.doesNotMatch(source, /rejectUnauthorized:\s*false/);
+  assert.doesNotMatch(source, /http:\/\/registry-hub:5446/);
+  assert.doesNotMatch(source, /accept_insecure_certs\s*=\s*True/);
+  assert.doesNotMatch(source, /NODE_TLS_REJECT_UNAUTHORIZED/);
+  assert.doesNotMatch(source, /--ignore-certificate-errors/);
+  assert.doesNotMatch(source, /requiredMatrix\s*=\s*\{[^}]*PASS/s);
+});
+
+test("runner-owned Firefox bridge requires trusted browser settings and secret-free checkpoints", async () => {
+  const source = await readFile(BRIDGE, "utf8");
+  assert.match(source, /accept_insecure_certs = False/);
+  assert.match(source, /security\.enterprise_roots\.enabled/);
+  assert.match(source, /runner-owned-firefox-selenium/);
+  assert.match(source, /data-plaintext-once/);
+  assert.match(source, /application document never runs[\s\S]*contains userinfo/);
+  assert.match(source, /driver\.get\(gateway \+ "\/"\)/);
+  assert.match(source, /authority_warmup\.replace\("https:\/\/", "https:\/\/operator:drill-password@", 1\)/);
+  assert.match(source, /gateway_warmup = gateway\.rstrip\("\/"\) \+ "\/styles\.css"/);
+  assert.match(source, /authority_warmup = warm_url\.rstrip\("\/"\) \+ "\/styles\.css"/);
+  assert.ok(
+    source.indexOf("write_json(Path(args.bootstrap_path), bootstrap)") <
+      source.indexOf("authority-warmup-start:{label}"),
+    "Selector/Node authority warmup must occur after management bootstrap",
+  );
+  assert.match(source, /if stop_path\.exists\(\):/);
+  assert.match(source, /CERTUTIL_TIMEOUT_SECONDS/);
+  assert.match(source, /subprocess\.Popen\(/);
+  assert.match(source, /process\.wait\(timeout=CERTUTIL_TIMEOUT_SECONDS\)/);
+  assert.match(source, /taskkill\.exe/);
+  assert.match(source, /certutil timed out/);
+  assert.match(source, /an unanswered Windows root-store confirmation dialog blocks certutil/);
+  assert.match(source, /forced import is idempotent/);
+  // Removing the trusted root is the step that always raises the modal
+  // confirmation dialog, so it stays behind an explicit operator opt-in.
+  assert.match(source, /REMOVE_DRILL_CA_ENV = "DSH_ORBIT_REMOVE_DRILL_CA"/);
+  assert.match(source, /def drill_ca_cleanup_requested\(\) -> bool/);
+  assert.match(source, /if drill_ca_cleanup_requested\(\):[\s\S]{0,200}?remove_windows_root\(thumbprint\)/);
+  assert.match(source, /windows-root-ca-removed/);
+  assert.match(source, /windows-root-ca-retained/);
+  assert.equal((source.match(/remove_windows_root\(thumbprint\)/g) ?? []).length, 1);
+  assert.match(source, /stdin=subprocess\.DEVNULL/);
+  assert.match(source, /stdout=subprocess\.DEVNULL/);
+  assert.match(source, /stderr=subprocess\.DEVNULL/);
+  assert.doesNotMatch(source, /certutil_run\(\["-user", "-store", "Root"/);
+  assert.match(source, /Firefox trust setup unavailable/);
+  assert.match(source, /driver\.get\(gateway \+ "\/"\)/);
+  assert.match(source, /management-nodes-reloaded/);
+  assert.match(source, /wait_for_node_ids\(driver, node_ids, stop_path, log=log\)/);
+  assert.match(source, /nodes-observed:count=/);
+  assert.match(source, /WEBDRIVER_COMMAND_TIMEOUT_SECONDS = 20/);
+  assert.match(source, /FirefoxRemoteConnection/);
+  assert.match(source, /ClientConfig\([\s\S]*timeout=WEBDRIVER_COMMAND_TIMEOUT_SECONDS/);
+  assert.match(source, /driver = webdriver\.Remote\(/);
+  assert.match(source, /def stop_owned_process\(process, label: str\)/);
+  assert.match(source, /quit_thread\.join\(timeout=5\)/);
+  assert.match(source, /driver-quit-timeout; forcing owned geckodriver shutdown/);
+  assert.match(source, /stop_owned_process\(getattr\(service, "process", None\), "geckodriver"\)/);
+  assert.match(source, /detail_deadline = time\.monotonic\(\) \+ 30/);
+  assert.match(source, /detail_nodes = driver\.find_elements\(By\.ID, "node-detail-view"\)/);
+  assert.match(source, /data-detail-state/);
+  assert.match(source, /node detail request failed for current-run node/);
+  assert.match(source, /node detail did not render for current-run node/);
+  assert.match(source, /node-detail-click-start/);
+  assert.match(source, /driver\.execute_script\("arguments\[0\]\.click\(\)", node_target\)/);
+  assert.match(source, /authority-warmup-start:\{label\}/);
+  assert.match(source, /authority-warmup-loaded:\{label\}/);
+  assert.match(source, /HTTP\/1\.1 200 Connection Established\\r\\n\\r\\n/);
+  assert.match(source, /authority-loaded:\{label\}/);
+  assert.match(source, /selector-load-start/);
+  assert.match(source, /selector-load-complete/);
+  assert.match(source, /def selector_surface_snapshot\(driver\)/);
+  assert.match(source, /def wait_for_selector_cards\(driver, stop_path/);
+  assert.match(source, /selector-surface-observed:cards=/);
+  assert.match(source, /selector endpoint request failed/);
+  assert.match(source, /def click_selector_link\(driver, target_url: str/);
+  assert.match(source, /selector-click-start:\{label\}/);
+  assert.match(source, /def wait_for_route_page\(/);
+  assert.match(source, /route-page-observed:\{label\}/);
+  assert.match(source, /browser \{label\} did not reach the bound route page/);
+  assert.match(source, /selectorOpenAVerified/);
+  assert.match(source, /selectorOpenBVerified/);
+  assert.match(source, /cookieIsolationVerified/);
+  assert.match(source, /driver\.get_cookies\(\)/);
+  assert.match(source, /verify_cookie_jar_isolation/);
+  assert.match(source, /expected_value/);
+  assert.match(source, /drill_node/);
+  assert.match(source, /host-only/);
+  assert.match(source, /open_urls/);
+  assert.match(source, /selectorUrl/);
+  assert.match(source, /return True/);
+  assert.doesNotMatch(source, /plaintext.*write_text|token.*write_text/i);
+  assert.doesNotMatch(source, /accept_insecure_certs\s*=\s*True/);
+  assert.doesNotMatch(source, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);
+});
+
+test("mounted DSH adapter preserves route and DSH trust boundaries", async () => {
+  const source = await readFile(DSH_CADDY, "utf8");
+  const adapterStart = source.indexOf(":3081 {");
+  const adapterEnd = source.indexOf("\n}\n\nhttps://:9443", adapterStart);
+  assert.ok(adapterStart >= 0 && adapterEnd > adapterStart, "mounted DSH adapter block must exist");
+  const adapter = source.slice(adapterStart, adapterEnd);
+  assert.ok(adapter.includes("header X-Drill-Node {$DSH_DRILL_NODE}"));
+  assert.ok(adapter.includes("header_up Host {$DSH_PUBLIC_HOST}"));
+  assert.ok(adapter.includes("header_up Origin https://{$DSH_PUBLIC_HOST}"));
+  assert.ok(adapter.includes("header_up X-Forwarded-Proto https"));
+  assert.ok(adapter.includes("header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}"));
+  assert.doesNotMatch(adapter, /header_up X-Forwarded-Proto http(?:\s|$)/);
+  assert.doesNotMatch(adapter, /header_down X-Drill-Node/);
+  assert.ok(adapter.includes("header_down Set-Cookie \"drill_node={$DSH_DRILL_NODE}; Domain=.dsh-orbit.test"));
+});
+
+test("mounted evidence emitter is the only PASS artifact producer", async () => {
+  const source = await readFile(new URL("../scripts/emit-stage8-mounted-evidence.mjs", import.meta.url), "utf8");
+  assert.match(source, /drill-evidence\.json/);
+  assert.match(source, /assertMountedMatrixShape\(raw\.requiredMatrix, \{ requirePass: true \}\)/);
+  assert.match(source, /rawEvidenceSha256/);
+  assert.match(source, /rawEvidenceBytes/);
+  assert.doesNotMatch(source, /process\.argv.*PASS|process\.argv.*requiredMatrix/);
 });
 
 test("mounted drill keeps the RFC production thresholds explicit", async () => {

@@ -22,6 +22,7 @@ import {
 } from "./view-model.mjs";
 
 const SESSION_ERRORS = new Set(["gateway-denied", "no-principal", "no-session"]);
+const API_TIMEOUT_MS = 15_000;
 
 export function createRegistryUi({ document, fetchImpl }) {
   let csrfToken = null;
@@ -34,19 +35,31 @@ export function createRegistryUi({ document, fetchImpl }) {
   async function api(path, { method = "GET", body } = {}) {
     const headers = { "content-type": "application/json" };
     if (csrfToken !== null && method !== "GET") headers["x-csrf-token"] = csrfToken;
-    const response = await fetchImpl(path, {
-      method,
-      headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const parsed = await response.json().catch(() => ({}));
-    if (response.status === 401 && SESSION_ERRORS.has(parsed?.error?.code)) {
-      throw Object.assign(new Error("session required"), { sessionRequired: true });
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timeout = controller === null ? null : setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    try {
+      const response = await fetchImpl(path, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        ...(controller === null ? {} : { signal: controller.signal }),
+      });
+      const parsed = await response.json().catch(() => ({}));
+      if (response.status === 401 && SESSION_ERRORS.has(parsed?.error?.code)) {
+        throw Object.assign(new Error("session required"), { sessionRequired: true });
+      }
+      if (!response.ok) {
+        throw Object.assign(new Error(mapApiError(parsed).message), { code: parsed?.error?.code, status: response.status });
+      }
+      return parsed;
+    } catch (error) {
+      if (controller?.signal.aborted) {
+        throw Object.assign(new Error(`request timed out after ${API_TIMEOUT_MS}ms`), { code: "request-timeout" });
+      }
+      throw error;
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
     }
-    if (!response.ok) {
-      throw Object.assign(new Error(mapApiError(parsed).message), { code: parsed?.error?.code, status: response.status });
-    }
-    return parsed;
   }
 
   async function bootstrap() {
@@ -220,6 +233,20 @@ export function createRegistryUi({ document, fetchImpl }) {
         </dl>
         ${renderBadges(detail)}
       </div>
+      <div class="panel">
+        <h3>Route Target</h3>
+        <dl class="detail-grid">
+          <dt>current target</dt><dd id="current-route-target">${escapeHtml(detail.routeTarget?.origin ?? "none")}</dd>
+        </dl>
+        ${detail.state === "tombstoned"
+          ? `<div class="banner empty" style="margin-top:12px">read-only (node is tombstoned)</div>`
+          : `<div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+          <input id="route-target-input" type="text" placeholder="https://nas.example" value="${escapeHtml(detail.routeTarget?.origin ?? "")}" style="flex:1; max-width:320px;">
+          <button id="save-route-target" class="primary" type="button" data-node-id="${escapeHtml(detail.nodeId)}">save</button>
+          ${detail.routeTarget ? `<button id="remove-route-target" class="danger" type="button" data-node-id="${escapeHtml(detail.nodeId)}">remove</button>` : ""}
+        </div>
+        <div id="route-target-error" class="banner error" style="margin-top:8px; display:none;"></div>`}
+      </div>
       ${reportBlock}
       <div class="panel"><h3>Events</h3>${events}</div>`;
   }
@@ -313,6 +340,45 @@ export function createRegistryUi({ document, fetchImpl }) {
     }
   }
 
+  async function saveRouteTarget(nodeId) {
+    const input = $("route-target-input");
+    const errorEl = $("route-target-error");
+    if (errorEl) {
+      errorEl.style.display = "none";
+      errorEl.textContent = "";
+    }
+    const routeTarget = input ? input.value.trim() : "";
+    try {
+      await api(`/hub/nodes/${nodeId}/route-target`, {
+        method: "PUT",
+        body: { routeTarget },
+      });
+      await loadNodeDetail(nodeId);
+    } catch (error) {
+      if (errorEl) {
+        errorEl.textContent = `validation error: ${error.message}`;
+        errorEl.style.display = "block";
+      }
+    }
+  }
+
+  async function removeRouteTarget(nodeId) {
+    const errorEl = $("route-target-error");
+    if (errorEl) {
+      errorEl.style.display = "none";
+      errorEl.textContent = "";
+    }
+    try {
+      await api(`/hub/nodes/${nodeId}/route-target`, { method: "DELETE" });
+      await loadNodeDetail(nodeId);
+    } catch (error) {
+      if (errorEl) {
+        errorEl.textContent = `validation error: ${error.message}`;
+        errorEl.style.display = "block";
+      }
+    }
+  }
+
   function wireActions() {
     $("nav-nodes").addEventListener("click", async () => {
       $("nav-nodes").classList.add("active");
@@ -345,10 +411,18 @@ export function createRegistryUi({ document, fetchImpl }) {
         return;
       }
       const row = target.closest(".node-id");
-      if (row) loadNodeDetail(row.textContent.trim());
+      if (row) await loadNodeDetail(row.textContent.trim());
     });
-    $("node-detail-view").addEventListener("click", (event) => {
-      if (event.target.id === "back-to-nodes") loadNodes();
+    $("node-detail-view").addEventListener("click", async (event) => {
+      if (event.target.id === "back-to-nodes") await loadNodes();
+      if (event.target.id === "save-route-target") {
+        const nodeId = event.target.dataset?.nodeId;
+        if (nodeId) await saveRouteTarget(nodeId);
+      }
+      if (event.target.id === "remove-route-target") {
+        const nodeId = event.target.dataset?.nodeId;
+        if (nodeId) await removeRouteTarget(nodeId);
+      }
     });
     $("nav-logout").addEventListener("click", async () => {
       try {
@@ -364,13 +438,19 @@ export function createRegistryUi({ document, fetchImpl }) {
 
   async function loadNodeDetail(nodeId) {
     showBanner(LOADING_STATE);
+    const detailView = $("node-detail-view");
+    detailView.dataset.detailState = "loading";
     try {
       const body = await api(`/hub/nodes/${nodeId}`);
       $("nodes-list").innerHTML = "";
-      $("node-detail-view").hidden = false;
+      detailView.hidden = false;
       renderDetail(body);
+      detailView.dataset.detailState = "ready";
       showBanner({});
     } catch (error) {
+      detailView.hidden = false;
+      detailView.dataset.detailState = "error";
+      detailView.innerHTML = `<div class="banner error">failed to load node: ${escapeHtml(error.message)}</div>`;
       showBanner({ message: `failed to load node: ${error.message}` });
     }
   }

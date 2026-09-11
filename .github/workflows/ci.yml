@@ -14,6 +14,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # The release provenance gates resolve candidate, closure, mounted
+          # run, and attestation commits, walk ancestry back to the Stage 7
+          # baseline, and inspect the release tag. The default depth-1 checkout
+          # without tags cannot evaluate any of that, so those gates failed in
+          # CI with "must resolve to a real git commit" / "must be a full
+          # 40-character SHA" instead of validating the evidence.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

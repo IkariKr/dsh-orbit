@@ -20,13 +20,15 @@ services:
       context: ..
       dockerfile: docker-registry/Dockerfile
     # Bind this explicitly to an RC or release image tag (for example,
-    # v0.3.0-rc.1). The Stage 6 construction tag v0.3.0-s6 is never a
+    # v0.4.0-rc.1). The Stage 6 construction tag v0.3.0-s6 is never a
     # default and must not be used for deployment.
     image: dsh-orbit-registry:${DSH_ORBIT_REGISTRY_TAG:?set DSH_ORBIT_REGISTRY_TAG}
     environment:
       DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:?set in .env}
       DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: ${DSH_ORBIT_HUB_OPERATOR_PRINCIPAL:-operator}
       DSH_ORBIT_HUB_TRUSTED_SCHEME: https
+      DSH_ORBIT_HUB_ROUTE_DOMAIN: dsh.example.local
+      DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: registration.example.invalid
     volumes:
       - ../data/orbit:/data/orbit:rw
     ports:
@@ -44,7 +46,7 @@ services:
     pids_limit: 128
     stop_grace_period: 15s
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('node:http').get('http://127.0.0.1:5445/', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"require('node:http').get({hostname:'127.0.0.1', port:5445, path:'/', headers:{host:process.env.DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY}}, (r) => { r.resume(); process.exit(r.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 3

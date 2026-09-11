@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 5,
+  "stage": "v0.4 Stage 8 Release Closure",
+  "releaseCandidate": "v0.4.0-rc.1",
+  "branch": "chore/v0.4-stage8-authority-boundary-c8.4",
+  "parentStage7Evidence": "0dc00ceb3b0574e2a6bd81eb62502fd6c2e233f3",
+  "testedCandidateCommit": "a263e7592d0726dd3c30895e27469a30f94b1768",
+  "evidenceClosure": "E8.5",
+  "externalHarnessBaseline": {
+    "dshVersion": "0.1.1-rc.2",
+    "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "dshCliBinarySha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  },
+  "automatedGates": {
+    "publicTree": "PASS",
+    "releaseContracts": "PASS",
+    "localAcceptanceSubset": "PASS",
+    "localAcceptanceTests": "43 total / 41 pass / 0 fail / 2 skip",
+    "migrationAcceptance": "PASS — 25 total / 25 pass / 0 fail / 0 skip",
+    "backupRestoreAcceptance": "PASS — 28 total / 26 pass / 0 fail / 2 skip",
+    "fullRegression": "PASS — 404 total / 400 pass / 0 fail / 4 skip",
+    "realDsh": "PASS — exact 0.1.1-rc.2 baseline and process acceptance",
+    "diffCheck": "PASS"
+  },
+  "physicalMountedGate": "PASS",
+  "mountedRun": {
+    "runId": "634cda14-8291-46af-8b4f-4316c83f1331",
+    "rawEvidenceSha256": "0bd268dd8fecf7d02fc281ccd53cf4de071b567a5a3798eebc0619eccc32308e",
+    "rawEvidenceBytes": 8258,
+    "executedAt": "2026-09-11T10:07:00.088Z",
+    "browserProducer": "runner-owned-firefox-selenium",
+    "browserChallengeBound": true,
+    "browserBridgeExitCode": 0,
+    "tlsValidation": "enabled",
+    "caFingerprint": "sha256 Fingerprint=D5:79:44:2A:DC:5C:D8:6C:C4:AB:39:2D:2F:99:82:69:4A:45:A9:32:43:A4:18:DA:C4:E1:2C:70:A4:6E:41:33",
+    "leafFingerprint": "sha256 Fingerprint=AA:3F:1B:1D:6D:9A:CB:E4:99:E6:03:66:84:BF:47:86:37:44:61:1C:5D:14:7D:FB:83:C0:13:7A:87:31:9D:75",
+    "nodeIds": [
+      "node_91afc82d74254a9d3ef9f98a3a96f605",
+      "node_5127d34706eb835a719b07ec5f07c820"
+    ]
+  },
+  "artifacts": {
+    "fresh-install.json": {
+      "sha256": "00b7e018c450386b6926b1372313e819d46cd15b57d6e50691e6fb5372965248",
+      "bytes": 756
+    },
+    "migration.json": {
+      "sha256": "2f362fe87ff67c5e0eca538dc6b9de905002b673f0cc9843df8758a2ef6ecf26",
+      "bytes": 830
+    },
+    "backup-restore.json": {
+      "sha256": "d41a27696a0bec788ed9e1d171101ab83d01bbbe90b818b20e8f9322acb08fed",
+      "bytes": 873
+    },
+    "mounted-runner-raw.json": {
+      "sha256": "0bd268dd8fecf7d02fc281ccd53cf4de071b567a5a3798eebc0619eccc32308e",
+      "bytes": 8258
+    },
+    "two-node-mounted-smoke.json": {
+      "sha256": "fe582a75ae5a3258e84bf9b2946a8781743dc43242545e7ddde502658ad8f06c",
+      "bytes": 4287
+    },
+    "promotion-plan-validation.json": {
+      "sha256": "ece450bfb0dd6903920d85fe22e3f9059f0e4c1bce7f8cc77dd9c1d77a29efb8",
+      "bytes": 790
+    }
+  },
+  "status": "PASS — complete runner-owned mounted lifecycle and local acceptance closure recorded; awaiting independent Final Review"
+}

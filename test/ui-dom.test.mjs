@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
-import { createHubServer } from "../src/registry/server.mjs";
+import { createTestServer, privateMachineRequest } from "./helpers/registry-fixture.mjs";
 import { createRegistryUi } from "../ui/app.mjs";
 
 const ASSERTION = "gateway-held-assertion-secret";
@@ -33,6 +33,8 @@ const ELEMENT_IDS = [
   "confirm-reason",
   "confirm-cancel",
   "confirm-ok",
+  "route-target-input",
+  "route-target-error",
 ];
 
 class FakeElement {
@@ -45,6 +47,7 @@ class FakeElement {
     this.dataset = {};
     this.listeners = {};
     this.opened = false;
+    this.style = {};
     this.classList = {
       names: new Set(),
       add: (name) => this.classList.names.add(name),
@@ -102,15 +105,13 @@ function browserFetch(baseUrl) {
 
 async function withHub(t) {
   const registry = new Registry({ db: openRegistryDatabase(":memory:") });
-  const { server } = createHubServer({
-    registry,
-    options: { gatewayAssertionSecret: ASSERTION, operatorPrincipal: { mode: "inject" } },
+  const server = await createTestServer(registry, {
+    gatewayAssertionSecret: ASSERTION,
+    operatorPrincipal: { mode: "inject" },
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const baseUrl = server.baseUrl;
   t.after(async () => {
-    server.closeAllConnections?.();
-    await new Promise((resolve) => server.close(resolve));
+    await server.close();
     registry.close();
   });
   return { registry, baseUrl };
@@ -118,13 +119,12 @@ async function withHub(t) {
 
 async function enrollRawNode(baseUrl, registry) {
   const plain = registry.mintEnrollmentToken({ actor: "operator", purpose: "enroll" });
-  const response = await fetch(`${baseUrl}/api/v1/enroll`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ token: plain.token, enrollmentRequestId: "aa".repeat(16), publicKey: "01".repeat(32) }),
+  const response = await privateMachineRequest(baseUrl, {
+    path: "/api/v1/enroll",
+    body: { token: plain.token, enrollmentRequestId: "aa".repeat(16), publicKey: "01".repeat(32) },
   });
   assert.equal(response.status, 200);
-  return (await response.json()).nodeId;
+  return response.body.nodeId;
 }
 
 async function click(element) {
@@ -199,4 +199,71 @@ test("app-level: delete confirmation flow and tombstoned-node reenroll token flo
   const reenrollHtml = dom.getElementById("reenroll-result").innerHTML;
   assert.match(reenrollHtml, /Re-enrollment token for/);
   assert.match(reenrollHtml, /data-plaintext-once>/);
+});
+
+test("app-level: node detail can set, report validation error, and remove route target through the UI", async (t) => {
+  const { registry, baseUrl } = await withHub(t);
+  const nodeId = await enrollRawNode(baseUrl, registry);
+  const dom = new FakeDom();
+  const ui = createRegistryUi({ document: dom, fetchImpl: browserFetch(baseUrl) });
+  await ui.start();
+
+  // Emulate clicking on the node row to view detail
+  await dom.getElementById("nodes-list").listeners.click({
+    target: {
+      dataset: {},
+      closest: (selector) => (selector === ".node-id" ? { textContent: nodeId } : null),
+    },
+  });
+
+  const detailHtml = dom.getElementById("node-detail-view").innerHTML;
+  assert.match(detailHtml, /Route Target/);
+  assert.match(detailHtml, /current target/);
+
+  // 1. Enter invalid target -> validation error displayed
+  dom.getElementById("route-target-input").value = "http://remote-insecure";
+  await dom.getElementById("node-detail-view").listeners.click({
+    target: { id: "save-route-target", dataset: { nodeId } },
+  });
+  assert.match(dom.getElementById("route-target-error").textContent, /validation error/);
+
+  // 2. Enter valid target -> saved and detail refreshed
+  dom.getElementById("route-target-input").value = "https://nas.example:8443";
+  await dom.getElementById("node-detail-view").listeners.click({
+    target: { id: "save-route-target", dataset: { nodeId } },
+  });
+  assert.equal(registry.getRouteTarget(nodeId).origin, "https://nas.example:8443");
+
+  // 3. Remove target -> removed
+  await dom.getElementById("node-detail-view").listeners.click({
+    target: { id: "remove-route-target", dataset: { nodeId } },
+  });
+  assert.equal(registry.getRouteTarget(nodeId), null);
+});
+
+test("app-level: tombstoned node detail renders route target as read-only with mutation controls disabled", async (t) => {
+  const { registry, baseUrl } = await withHub(t);
+  const nodeId = await enrollRawNode(baseUrl, registry);
+  registry.setRouteTarget({ actor: "operator", nodeId, routeTarget: "https://nas.example:8443" });
+  registry.deleteNode({ actor: "operator", nodeId, requestId: "01".repeat(16), reason: "retired" });
+
+  const dom = new FakeDom();
+  const ui = createRegistryUi({ document: dom, fetchImpl: browserFetch(baseUrl) });
+  await ui.start();
+
+  await dom.getElementById("nodes-list").listeners.click({
+    target: {
+      dataset: {},
+      closest: (selector) => (selector === ".node-id" ? { textContent: nodeId } : null),
+    },
+  });
+
+  const detailHtml = dom.getElementById("node-detail-view").innerHTML;
+  assert.match(detailHtml, /Route Target/);
+  assert.match(detailHtml, /current target/);
+  assert.match(detailHtml, /https:\/\/nas\.example:8443/);
+  assert.match(detailHtml, /read-only \(node is tombstoned\)/);
+  assert.equal(dom.getElementById("route-target-input").value, "");
+  assert.equal(detailHtml.includes('id="save-route-target"'), false);
+  assert.equal(detailHtml.includes('id="remove-route-target"'), false);
 });

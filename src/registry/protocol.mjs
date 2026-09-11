@@ -4,8 +4,11 @@
 
 export const MACHINE_V1_LABEL = "ORBIT-MACHINE-V1";
 export const REENROLL_V1_LABEL = "ORBIT-REENROLL-V1";
+export const ROUTE_V1_LABEL = "ORBIT-ROUTE-V1";
 
 export const SIGNATURE_SKEW_SECONDS = 30;
+export const ROUTE_SKEW_MS = 30 * 1000;
+export const NONCE_CACHE_RETENTION_MS = 60 * 1000;
 
 export const NODE_ID_PATTERN = /^node_[0-9a-f]{32}$/;
 export const KEY_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -21,6 +24,14 @@ export const MACHINE_HEADERS = Object.freeze([
   "x-orbit-nonce",
   "x-orbit-key",
   "x-orbit-signature",
+]);
+
+export const ROUTE_HEADERS = Object.freeze([
+  "x-orbit-route-node",
+  "x-orbit-route-key",
+  "x-orbit-route-timestamp",
+  "x-orbit-route-nonce",
+  "x-orbit-route-signature",
 ]);
 
 // Body size limits (fixed): heartbeat/enroll/reenroll/rotate <= 64 KiB,
@@ -42,6 +53,14 @@ export const RATE_LIMITS = Object.freeze({
 export const ROTATION_OVERLAP_HOURS_DEFAULT = 24;
 export const ROTATION_OVERLAP_HOURS_MIN = 1;
 export const ROTATION_OVERLAP_HOURS_MAX = 168;
+
+export const HUB_ROUTE_ROTATION_OVERLAP_DAYS_DEFAULT = 14;
+export const HUB_ROUTE_ROTATION_OVERLAP_DAYS_MIN = 1;
+export const HUB_ROUTE_ROTATION_OVERLAP_DAYS_MAX = 30;
+
+export const ROUTE_PROBE_CADENCE_SECONDS_DEFAULT = 60;
+export const ROUTE_PROBE_FAILURE_THRESHOLD = 3;
+export const DEFAULT_ROUTE_DOMAIN = "dsh.example.com";
 
 export const HEARTBEAT_CADENCE_SECONDS_DEFAULT = 60;
 
@@ -82,6 +101,98 @@ export const MAINTENANCE_TICK_MS = 30 * 1000;
 
 export function buildSigningString({ label, method, path, timestamp, nonce, bodyHash, nodeId }) {
   return [label, method, path, String(timestamp), nonce, bodyHash, nodeId].join("\n");
+}
+
+export function buildRouteSigningString({ label = ROUTE_V1_LABEL, nodeId, routeAuthority, method, rawTarget, timestamp, nonce }) {
+  return [label, nodeId, routeAuthority, method, rawTarget, String(timestamp), nonce].join("\n");
+}
+
+export function validateRouteDomain(value) {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error("routeDomain is required");
+  }
+  const trimmed = value.trim().toLowerCase().replace(/^\.+|\.+$/g, "");
+  if (trimmed.includes("/") || trimmed.includes("?") || trimmed.includes("#") || trimmed.includes("@")) {
+    throw new Error(`routeDomain must carry no scheme, path, query, or credentials (got ${JSON.stringify(value)})`);
+  }
+  if (!/^[a-z0-9.-]+(:[0-9]+)?$/.test(trimmed)) {
+    throw new Error(`routeDomain is malformed (got ${JSON.stringify(value)})`);
+  }
+  return trimmed;
+}
+
+export function normalizeAuthority(value, label = "authority") {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${label} is required`);
+  }
+  if (value !== value.trim() || /[\s/?#@]/.test(value) || value.includes("://")) {
+    throw new Error(`${label} must be a host[:port] authority without scheme, path, query, credentials, or whitespace`);
+  }
+  const lower = value.toLowerCase();
+  if (lower.startsWith("[") || lower.includes("]")) {
+    throw new Error(`${label} must use the supported DNS/IPv4 authority grammar`);
+  }
+  const match = /^([a-z0-9.-]+)(?::([0-9]+))?$/.exec(lower);
+  if (!match) throw new Error(`${label} is malformed`);
+  let hostname = match[1];
+  if (hostname.endsWith("..")) throw new Error(`${label} has multiple trailing dots`);
+  hostname = hostname.replace(/\.$/, "");
+  if (hostname === "" || hostname.includes("..")) throw new Error(`${label} has an empty hostname label`);
+  if (match[2] !== undefined) {
+    const port = Number(match[2]);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`${label} has an invalid port`);
+    return `${hostname}:${port}`;
+  }
+  return hostname;
+}
+
+export function validateManagementAuthority(value, routeDomain) {
+  const authority = normalizeAuthority(value, "managementAuthority");
+  const route = validateRouteDomain(routeDomain);
+  const authorityHost = authority.split(":")[0];
+  const routeHost = route.split(":")[0];
+  if (authorityHost === routeHost || authorityHost.endsWith(`.${routeHost}`)) {
+    throw new Error("managementAuthority must not belong to the routeDomain namespace");
+  }
+  return authority;
+}
+
+export function parseOriginAuthority(value, label = "Origin") {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${label} is required`);
+  }
+  const match = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)$/.exec(value);
+  if (!match || match[2] === "") {
+    throw new Error(`${label} must be an origin with a scheme and authority only`);
+  }
+  return {
+    scheme: match[1].toLowerCase(),
+    authority: normalizeAuthority(match[2], `${label} authority`),
+  };
+}
+
+export function computeRouteAuthority(nodeId, routeDomain = DEFAULT_ROUTE_DOMAIN) {
+  if (typeof nodeId !== "string" || !NODE_ID_PATTERN.test(nodeId)) {
+    throw new Error(`invalid nodeId for route authority: ${JSON.stringify(nodeId)}`);
+  }
+  const cleanDomain = validateRouteDomain(routeDomain);
+  const hex = nodeId.slice("node_".length);
+  return `n-${hex}.${cleanDomain}`;
+}
+
+// RFC 9112 origin-form target validation:
+// Must begin with a single "/" and must not begin with "//" (scheme-relative)
+// or contain scheme "://" or backslash before the query component.
+export function isValidOriginFormTarget(target) {
+  if (typeof target !== "string" || !target.startsWith("/") || target.startsWith("//")) {
+    return false;
+  }
+  const qIdx = target.indexOf("?");
+  const pathOnly = qIdx === -1 ? target : target.slice(0, qIdx);
+  if (pathOnly.startsWith("//") || pathOnly.includes("://") || pathOnly.includes("\\")) {
+    return false;
+  }
+  return true;
 }
 
 export function requireHex(value, pattern, label) {

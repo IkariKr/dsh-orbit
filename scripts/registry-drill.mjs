@@ -12,30 +12,49 @@
 //   node scripts/registry-drill.mjs [--compose-up] [--wait-for-browser] [--keep]
 // Prints a JSON evidence record and writes data/drill-evidence.json.
 
-import { randomUUID } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { get as httpGet } from "node:http";
 import { request as httpsRequest } from "node:https";
+import tls from "node:tls";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCompatibilityReport } from "../src/compatibility-report.mjs";
 import { runVerificationSequence } from "../src/upgrade-runner.mjs";
+import { REQUIRED_MOUNTED_MATRIX_FIELDS, emptyMountedMatrix, assertMountedMatrixShape } from "./stage8-mounted-matrix.mjs";
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const COMPOSE = "docker-registry/drill.compose.yaml";
 const HUB_URL = "http://127.0.0.1:5445/";
+const ROUTE_DOMAIN_HOST = "dsh-orbit.test";
+const ROUTE_DOMAIN = `${ROUTE_DOMAIN_HOST}:8443`;
+const ROUTE_GATEWAY_TOKEN = "drill-proxy-secret";
 // Nodes reach the Hub through the PRIVATE machine ingress on the
 // compose bridge (the Hub process itself stays loopback-only).
-const NODE_HUB_URL = "http://registry-hub:5446/";
+const NODE_HUB_URL = "https://registry-hub:5446/";
+const NODE_HUB_CA_PATH = "/etc/caddy/tls/ca.crt";
 const GATEWAY_URL = "https://127.0.0.1:8443";
+const ROUTE_GATEWAY_URL = GATEWAY_URL;
 const AUTH = `Basic ${Buffer.from("operator:drill-password").toString("base64")}`;
+const DRILL_PROXY_SECRET = "drill-proxy-secret";
+const DRILL_PROXY_SECRET_PATH = join(REPO, "secrets", "dsh_proxy_auth");
 const NODE_BIN = "/usr/local/lib/dsh-orbit/bin/dsh-orbit-node.mjs";
 const REVISION = execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO }).toString().trim();
 const HEARTBEAT_CADENCE_SECONDS = 60;
 const HEARTBEAT_MISSED_BEATS = 3;
 const HEARTBEAT_LOST_MS = 24 * 60 * 60 * 1000;
 const AGING_CLOCK_PATH = join(REPO, "data", "orbit-drill", "drill-aging-clock");
+const RAW_EVIDENCE_PATH = join(REPO, "data", "drill-evidence.json");
 const DRILL_CA_PATH = join(REPO, "data", "orbit-drill", "tls", "ca.crt");
 const DRILL_CA_KEY_PATH = join(REPO, "data", "orbit-drill", "tls", "ca.key");
 const DRILL_CERT_PATH = join(REPO, "data", "orbit-drill", "tls", "tls.crt");
@@ -50,16 +69,39 @@ const BROWSER_BOOTSTRAP_CHECKPOINT_PATH = join(
 );
 const BROWSER_CHECKPOINT_PATH = join(REPO, "data", "orbit-drill", "browser-checkpoint.json");
 const BROWSER_BINDINGS_PATH = join(REPO, "data", "orbit-drill", "browser-checkpoint-bindings.json");
+const BROWSER_NODE_BINDING_PATH = join(REPO, "data", "orbit-drill", "browser-node-binding.json");
+const BROWSER_STOP_PATH = join(REPO, "data", "orbit-drill", "browser-stop");
+const BROWSER_BRIDGE_LOG_PATH = join(REPO, "data", "orbit-drill", "browser-bridge.log");
+const BROWSER_BRIDGE_PATH = join(REPO, "scripts", "registry-drill-firefox-bridge.py");
+const REQUIRED_MATRIX_FIELDS = REQUIRED_MOUNTED_MATRIX_FIELDS;
 const RUN_ID = randomUUID();
+const BROWSER_CHALLENGE = randomUUID();
+let browserBridgeProcess = null;
 let resolvedOpenSsl = null;
 
 const evidence = {
+  schemaVersion: 3,
+  kind: "stage8-mounted-runner-raw",
   runId: RUN_ID,
   commit: REVISION,
+  candidateCommit: REVISION,
   startedAt: new Date().toISOString(),
+  producer: "registry-drill-runner",
+  requiredMatrix: emptyMountedMatrix(),
   steps: [],
 };
 let runCleanup = async () => {};
+
+function markMatrix(...fields) {
+  for (const field of fields) {
+    if (!REQUIRED_MATRIX_FIELDS.includes(field)) throw new Error(`unknown mounted matrix field: ${field}`);
+    evidence.requiredMatrix[field] = "PASS";
+  }
+}
+
+function assertMatrixComplete() {
+  assertMountedMatrixShape(evidence.requiredMatrix, { requirePass: true });
+}
 
 function requireCleanCandidateWorktree() {
   const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: REPO })
@@ -120,11 +162,25 @@ function certificateUsable(path, caPath = null) {
   return true;
 }
 
+function certificateHasDnsSan(path, hostname) {
+  if (!existsSync(path)) return false;
+  const openssl = resolveOpenSsl();
+  const result = spawnSync(openssl, ["x509", "-in", path, "-noout", "-ext", "subjectAltName"], {
+    cwd: REPO,
+    encoding: "utf8",
+  });
+  return result.status === 0 && result.stdout.includes(`DNS:${hostname}`);
+}
+
 function ensureDrillCertificate() {
   const openssl = resolveOpenSsl();
   mkdirSync(join(REPO, "data", "orbit-drill", "tls"), { recursive: true });
   const caReady = existsSync(DRILL_CA_KEY_PATH) && certificateUsable(DRILL_CA_PATH);
   if (!caReady) {
+    // The browser bridge installs this CA into the Windows user Root store.
+    // Trusting a brand-new anchor raises a confirmation dialog while
+    // re-trusting the same CA stays silent, so the anchor is long-lived and
+    // rotated rarely instead of expiring on every short cycle.
     file(openssl, [
       "req",
       "-x509",
@@ -132,7 +188,7 @@ function ensureDrillCertificate() {
       "rsa:2048",
       "-sha256",
       "-days",
-      "2",
+      "365",
       "-nodes",
       "-keyout",
       DRILL_CA_KEY_PATH,
@@ -146,9 +202,15 @@ function ensureDrillCertificate() {
   const leafReady =
     existsSync(DRILL_CERT_KEY_PATH) &&
     existsSync(DRILL_EXT_PATH) &&
-    certificateUsable(DRILL_CERT_PATH, DRILL_CA_PATH);
+    readFileSync(DRILL_EXT_PATH, "utf8").includes("DNS:registry-hub") &&
+    readFileSync(DRILL_EXT_PATH, "utf8").includes(ROUTE_DOMAIN_HOST) &&
+    certificateUsable(DRILL_CERT_PATH, DRILL_CA_PATH) &&
+    certificateHasDnsSan(DRILL_CERT_PATH, "registry-hub");
   if (!leafReady) {
-    writeFileSync(DRILL_EXT_PATH, "subjectAltName=IP:127.0.0.1,DNS:dsh-a.test,DNS:dsh-b.test\n");
+    writeFileSync(
+      DRILL_EXT_PATH,
+      `subjectAltName=IP:127.0.0.1,DNS:registry-hub,DNS:${ROUTE_DOMAIN_HOST},DNS:*.${ROUTE_DOMAIN_HOST},DNS:dsh-a,DNS:dsh-b,DNS:dsh-a.test,DNS:dsh-b.test\n`,
+    );
     file(openssl, [
       "req",
       "-new",
@@ -191,7 +253,7 @@ function ensureDrillCertificate() {
     caPath: DRILL_CA_PATH,
     caFingerprint: file(openssl, ["x509", "-in", DRILL_CA_PATH, "-noout", "-fingerprint", "-sha256"]),
     leafFingerprint: file(openssl, ["x509", "-in", DRILL_CERT_PATH, "-noout", "-fingerprint", "-sha256"]),
-    sans: ["127.0.0.1", "dsh-a.test", "dsh-b.test"],
+    sans: ["127.0.0.1", "registry-hub", ROUTE_DOMAIN_HOST, `*.${ROUTE_DOMAIN_HOST}`, "dsh-a", "dsh-b", "dsh-a.test", "dsh-b.test"],
   };
   mkdirSync(dirname(BROWSER_BINDINGS_PATH), { recursive: true });
   writeFileSync(
@@ -201,9 +263,10 @@ function ensureDrillCertificate() {
         runId: RUN_ID,
         commit: REVISION,
         gatewayUrl: GATEWAY_URL,
-        caFingerprint: evidence.tls.caFingerprint,
-        leafFingerprint: evidence.tls.leafFingerprint,
-        tlsValidation: "enabled",
+    caFingerprint: evidence.tls.caFingerprint,
+    leafFingerprint: evidence.tls.leafFingerprint,
+    selectorUrl: `https://${ROUTE_DOMAIN}/`,
+    tlsValidation: "enabled",
       },
       null,
       2,
@@ -224,6 +287,13 @@ function readCheckpoint(path, label) {
 }
 
 function validateBrowserBindings(checkpoint, label) {
+  if (checkpoint.browserProducer !== "runner-owned-firefox-selenium") {
+    throw new Error(`${label} must be produced by runner-owned Firefox bridge`);
+  }
+  const expectedChallengeDigest = createHash("sha256").update(BROWSER_CHALLENGE).digest("hex");
+  if (checkpoint.challengeDigest !== expectedChallengeDigest) {
+    throw new Error(`${label} challenge binding mismatch`);
+  }
   const bindings = [
     ["runId", checkpoint.runId, RUN_ID],
     ["commit", checkpoint.commit, REVISION],
@@ -241,6 +311,10 @@ function validateBrowserBindings(checkpoint, label) {
 
 async function waitForCheckpoint(path, label, { attempts = 1800, intervalMs = 1000 } = {}) {
   return waitFor(label, async () => {
+    if (browserBridgeProcess && browserBridgeProcess.exitCode !== null) {
+      const status = evidence.browserBridgeExit;
+      throw new Error(`runner-owned Firefox bridge exited ${status?.code ?? browserBridgeProcess.exitCode}${status?.error ? `: ${status.error}` : ""}`);
+    }
     if (!existsSync(path)) return false;
     try {
       return JSON.parse(readFileSync(path, "utf8"));
@@ -277,7 +351,7 @@ async function requireBrowserCheckpoint({ wait = false, nodeIds = [] } = {}) {
   const checkpoint = wait
     ? await waitForCheckpoint(BROWSER_CHECKPOINT_PATH, "browser lifecycle checkpoint")
     : readCheckpoint(BROWSER_CHECKPOINT_PATH, "browser lifecycle checkpoint");
-  const required = ["trustedHttps", "authenticated", "nodesObserved", "nodeDetailObserved", "sessionBootstrapped", "tokenMinted", "plaintextOneTimeVerified"];
+  const required = ["trustedHttps", "authenticated", "nodesObserved", "nodeDetailObserved", "sessionBootstrapped", "tokenMinted", "plaintextOneTimeVerified", "selectorOpenAVerified", "selectorOpenBVerified", "cookieIsolationVerified"];
   const missing = required.filter((key) => checkpoint[key] !== true);
   if (missing.length > 0) {
     throw new Error(`browser checkpoint incomplete: ${missing.join(", ")}`);
@@ -310,6 +384,86 @@ async function requireBrowserCheckpoint({ wait = false, nodeIds = [] } = {}) {
     leafFingerprint: evidence.tls.leafFingerprint,
     nodeIds: [...checkpoint.nodeIds],
   };
+}
+
+function prepareDrillProxySecret() {
+  mkdirSync(dirname(DRILL_PROXY_SECRET_PATH), { recursive: true });
+  if (existsSync(DRILL_PROXY_SECRET_PATH)) {
+    const stat = lstatSync(DRILL_PROXY_SECRET_PATH);
+    if (stat.isDirectory()) {
+      const entries = readdirSync(DRILL_PROXY_SECRET_PATH);
+      if (entries.length !== 0) throw new Error("secrets/dsh_proxy_auth directory is not an empty placeholder");
+      rmSync(DRILL_PROXY_SECRET_PATH, { recursive: true, force: true });
+    } else if (!stat.isFile()) {
+      throw new Error("secrets/dsh_proxy_auth must be a regular file or empty placeholder directory");
+    } else if (readFileSync(DRILL_PROXY_SECRET_PATH, "utf8").trim() !== DRILL_PROXY_SECRET) {
+      throw new Error("secrets/dsh_proxy_auth exists with unexpected content; refusing to overwrite");
+    } else {
+      chmodSync(DRILL_PROXY_SECRET_PATH, 0o600);
+      return;
+    }
+  }
+  writeFileSync(DRILL_PROXY_SECRET_PATH, `${DRILL_PROXY_SECRET}\n`, { encoding: "utf8", mode: 0o600 });
+  try { chmodSync(DRILL_PROXY_SECRET_PATH, 0o600); } catch {}
+}
+
+function removeDrillProxySecret() {
+  if (!existsSync(DRILL_PROXY_SECRET_PATH)) return;
+  const stat = lstatSync(DRILL_PROXY_SECRET_PATH);
+  if (stat.isFile() && readFileSync(DRILL_PROXY_SECRET_PATH, "utf8").trim() === DRILL_PROXY_SECRET) {
+    rmSync(DRILL_PROXY_SECRET_PATH, { force: true });
+    mkdirSync(DRILL_PROXY_SECRET_PATH, { recursive: true });
+  }
+}
+
+function browserBridgeArgs() {
+  return [
+    "--bindings-path", BROWSER_BINDINGS_PATH,
+    "--ca-path", DRILL_CA_PATH,
+    "--bootstrap-path", BROWSER_BOOTSTRAP_CHECKPOINT_PATH,
+    "--lifecycle-path", BROWSER_CHECKPOINT_PATH,
+    "--node-binding-path", BROWSER_NODE_BINDING_PATH,
+    "--stop-path", BROWSER_STOP_PATH,
+    "--log-path", BROWSER_BRIDGE_LOG_PATH,
+  ];
+}
+
+function startBrowserBridge() {
+  if (!existsSync(BROWSER_BRIDGE_PATH)) {
+    throw new Error(`runner-owned Firefox bridge missing: ${BROWSER_BRIDGE_PATH}`);
+  }
+  const python = process.env.DSH_ORBIT_PYTHON ?? "python";
+  browserBridgeProcess = spawn(python, [BROWSER_BRIDGE_PATH, ...browserBridgeArgs()], {
+    cwd: REPO,
+    env: {
+      ...process.env,
+      DSH_ORBIT_BROWSER_CHALLENGE: BROWSER_CHALLENGE,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  let stderr = "";
+  browserBridgeProcess.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+  browserBridgeProcess.on("exit", (code, signal) => {
+    evidence.browserBridgeExit = { code, signal, error: code === 0 ? null : stderr.trim().slice(0, 500) };
+  });
+  evidence.browserBridge = {
+    producer: "runner-owned-firefox-selenium",
+    challengeDigest: createHash("sha256").update(BROWSER_CHALLENGE).digest("hex"),
+    python,
+    startedAt: new Date().toISOString(),
+  };
+}
+
+async function stopBrowserBridge() {
+  if (!browserBridgeProcess) return;
+  writeFileSync(BROWSER_STOP_PATH, "stop\n", { encoding: "utf8", mode: 0o640 });
+  await waitFor("Firefox bridge exit", async () => browserBridgeProcess.exitCode !== null, { attempts: 60, intervalMs: 500 });
+  if (browserBridgeProcess.exitCode !== 0) {
+    throw new Error(`runner-owned Firefox bridge exited ${browserBridgeProcess.exitCode}`);
+  }
+  browserBridgeProcess = null;
+  rmSync(BROWSER_STOP_PATH, { force: true });
 }
 
 function file(command, args, { expect = 0 } = {}) {
@@ -356,9 +510,123 @@ function exec(service, args, { env = {}, expect = 0, timeoutMs = 120000 } = {}) 
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function gatewayFetch(path, { method = "GET", headers = {}, body, cookie = null, authenticate = true, origin = null, baseUrl = GATEWAY_URL } = {}) {
+function routeAuthority(nodeId) {
+  if (!/^node_[0-9a-f]{32}$/.test(nodeId)) throw new Error(`invalid mounted nodeId: ${nodeId}`);
+  return `n-${nodeId.slice(5)}.${ROUTE_DOMAIN}`;
+}
+
+function routeFetch(path, authority, options = {}) {
+  return gatewayFetch(path, {
+    ...options,
+    authority,
+    headers: {
+      authorization: AUTH,
+      ...(options.headers ?? {}),
+    },
+  });
+}
+
+function connectRouteTls(authority) {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect({
+      host: "127.0.0.1",
+      port: 8443,
+      servername: authority.split(":")[0],
+      ca: readFileSync(DRILL_CA_PATH),
+      rejectUnauthorized: true,
+    }, () => resolve(socket));
+    socket.on("error", reject);
+  });
+}
+
+function encodeWsFrame(payload, { opcode = 0x01 } = {}) {
+  const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+  const mask = Buffer.from([1, 2, 3, 4]);
+  const length = data.length;
+  const extra = length <= 125 ? 0 : length <= 65535 ? 2 : 8;
+  const out = Buffer.alloc(2 + extra + 4 + length);
+  out[0] = 0x80 | opcode;
+  let offset = 2;
+  if (length <= 125) out[1] = 0x80 | length;
+  else if (length <= 65535) { out[1] = 0x80 | 126; out.writeUInt16BE(length, offset); offset += 2; }
+  else { out[1] = 0x80 | 127; out.writeBigUInt64BE(BigInt(length), offset); offset += 8; }
+  mask.copy(out, offset); offset += 4;
+  for (let i = 0; i < length; i += 1) out[offset + i] = data[i] ^ mask[i % 4];
+  return out;
+}
+
+function decodeWsFrame(buffer) {
+  if (buffer.length < 2) return null;
+  const opcode = buffer[0] & 0x0f;
+  let length = buffer[1] & 0x7f;
+  let offset = 2;
+  if (length === 126) { if (buffer.length < 4) return null; length = buffer.readUInt16BE(2); offset = 4; }
+  else if (length === 127) { if (buffer.length < 10) return null; length = Number(buffer.readBigUInt64BE(2)); offset = 10; }
+  const masked = (buffer[1] & 0x80) !== 0;
+  if (masked) { if (buffer.length < offset + 4) return null; offset += 4; }
+  if (buffer.length < offset + length) return null;
+  const payload = Buffer.from(buffer.slice(offset, offset + length));
+  return { opcode, payload, totalLength: offset + length };
+}
+
+async function routeWebSocket(authority, { path = "/api/events.mux", pingPayload = "orbit-mounted-ping", expectedNode = null } = {}) {
+  const socket = await connectRouteTls(authority);
+  const secKey = randomBytes(16).toString("base64");
+  socket.write([
+    `GET ${path} HTTP/1.1`,
+    `Host: ${authority}`,
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    "Sec-WebSocket-Version: 13",
+    `Sec-WebSocket-Key: ${secKey}`,
+    `Origin: https://${authority}`,
+    `Authorization: Basic ${Buffer.from("operator:drill-password").toString("base64")}`,
+    "",
+    "",
+  ].join("\r\n"));
+  let received = Buffer.alloc(0);
+  const response = await new Promise((resolve, reject) => {
+    const onData = (chunk) => {
+      received = Buffer.concat([received, chunk]);
+      const marker = received.indexOf("\r\n\r\n");
+      if (marker === -1) return;
+      const header = received.slice(0, marker).toString("utf8");
+      const status = Number(header.match(/^HTTP\/1\.[01] (\d+)/m)?.[1] ?? 0);
+      const headers = Object.fromEntries(header.split("\r\n").slice(1).filter(Boolean).map((line) => {
+        const index = line.indexOf(":"); return [line.slice(0, index).trim().toLowerCase(), line.slice(index + 1).trim()];
+      }));
+      socket.removeListener("data", onData);
+      resolve({ status, headers, remaining: received.slice(marker + 4) });
+    };
+    socket.on("data", onData);
+    socket.on("error", reject);
+  });
+  if (response.status !== 101) { socket.destroy(); return { ...response, ping: false }; }
+  if (expectedNode && response.headers["x-drill-node"] !== expectedNode) throw new Error(`mounted WSS reached wrong node: expected ${expectedNode}, got ${response.headers["x-drill-node"]}`);
+  const expected = createHash("sha1").update(secKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+  if (response.headers["sec-websocket-accept"] !== expected) throw new Error("mounted WSS Sec-WebSocket-Accept mismatch");
+  socket.write(encodeWsFrame(pingPayload, { opcode: 0x09 }));
+  const pong = await new Promise((resolve, reject) => {
+    let pending = response.remaining;
+    const onData = (chunk) => {
+      pending = Buffer.concat([pending, chunk]);
+      let frame;
+      while ((frame = decodeWsFrame(pending)) !== null) {
+        pending = pending.slice(frame.totalLength);
+        if (frame.opcode === 0x0a) { socket.removeListener("data", onData); resolve(frame.payload.toString("utf8")); return; }
+      }
+    };
+    socket.on("data", onData);
+    socket.on("error", reject);
+  });
+  socket.destroy();
+  return { ...response, ping: pong === pingPayload };
+}
+
+function gatewayFetch(path, { method = "GET", headers = {}, body, cookie = null, authenticate = true, origin = null, baseUrl = GATEWAY_URL, authority = null } = {}) {
   return new Promise((resolve, reject) => {
     const finalHeaders = { ...headers };
+    if (authority) finalHeaders.host = authority;
     if (cookie) finalHeaders.cookie = cookie;
     if (method === "POST") {
       finalHeaders.origin = origin ?? GATEWAY_URL;
@@ -367,7 +635,14 @@ function gatewayFetch(path, { method = "GET", headers = {}, body, cookie = null,
     if (authenticate) finalHeaders.authorization = AUTH;
     const req = httpsRequest(
       `${baseUrl}${path}`,
-      { method, headers: finalHeaders, ca: readFileSync(DRILL_CA_PATH), rejectUnauthorized: true },
+      {
+        method,
+        headers: finalHeaders,
+        ca: readFileSync(DRILL_CA_PATH),
+        rejectUnauthorized: true,
+        servername: authority ? authority.split(":")[0] : undefined,
+        timeout: 10000,
+      },
       (response) => {
         const chunks = [];
         response.on("data", (c) => chunks.push(c));
@@ -382,6 +657,7 @@ function gatewayFetch(path, { method = "GET", headers = {}, body, cookie = null,
       },
     );
     req.on("error", reject);
+    req.on("timeout", () => req.destroy(new Error("gateway request timeout")));
     if (body !== undefined) req.write(body);
     req.end();
   });
@@ -391,7 +667,19 @@ function gatewayFetch(path, { method = "GET", headers = {}, body, cookie = null,
 // policy): the driver probes it from INSIDE the hub container.
 function hubGetHealth() {
   try {
-    exec("registry-hub", ["sh", "-c", "node -e \"const {get}=require('node:http');get('http://127.0.0.1:5445/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]);
+    exec("registry-hub", ["sh", "-c", `node -e "const {get}=require('node:http');get({hostname:'127.0.0.1',port:5445,path:'/',headers:{host:'127.0.0.1:8443'}},r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"`]);
+    return Promise.resolve(200);
+  } catch {
+    return Promise.resolve(0);
+  }
+}
+
+// Probe the private machine boundary from a real DSH container. The request is
+// intentionally unsigned and only proves that the verified TLS listener is
+// accepting connections again; Hub authentication remains fail-closed.
+function machineIngressGetHealth(nodeService = "dsh-a") {
+  try {
+    exec(nodeService, ["sh", "-c", `node -e "const fs=require('node:fs'),https=require('node:https');https.get({hostname:'registry-hub',port:5446,path:'/api/v1/heartbeat',ca:fs.readFileSync('/etc/caddy/tls/ca.crt'),servername:'registry-hub',rejectUnauthorized:true},r=>{r.resume();process.exit(r.statusCode>=400&&r.statusCode<500?0:1)}).on('error',()=>process.exit(1))"`]);
     return Promise.resolve(200);
   } catch {
     return Promise.resolve(0);
@@ -418,20 +706,36 @@ const waitFor = async (label, fn, { attempts = 40, intervalMs = 3000 } = {}) => 
   );
 };
 
-const nodeEnv = (dataHome) => ({
+const nodeEnv = (dataHome, name = null) => ({
   DSH_ORBIT_NODE_STATE: `${dataHome}/orbit-node.json`,
   DSH_ORBIT_HUB_URL: NODE_HUB_URL,
-  DSH_ORBIT_NODE_ORBIT_VERSION: "0.3.0",
+  DSH_ORBIT_NODE_CA_CERT: NODE_HUB_CA_PATH,
+  DSH_ORBIT_NODE_ORBIT_VERSION: "0.4.0-rc.1",
   DSH_ORBIT_NODE_ORBIT_REVISION: REVISION,
   DSH_ORBIT_NODE_DSH_VERSION: "0.1.1-rc.2",
   DSH_ORBIT_NODE_DSH_PROFILE: "dsh-0.1.1-rc.2",
   DSH_ORBIT_NODE_HEARTBEAT_SECONDS: String(HEARTBEAT_CADENCE_SECONDS),
+  ...(name === "dsh-a" ? {
+    DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: "9444",
+    DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0",
+    DSH_ORBIT_NODE_ROUTE_DOMAIN: ROUTE_DOMAIN,
+    DSH_ORBIT_NODE_DSH_TARGET: "http://127.0.0.1:3081",
+    DSH_ORBIT_NODE_ROUTE_TLS_KEY: "/etc/caddy/tls/tls.key",
+    DSH_ORBIT_NODE_ROUTE_TLS_CERT: "/etc/caddy/tls/tls.crt",
+  } : name === "dsh-b" ? {
+    DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: "9445",
+    DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0",
+    DSH_ORBIT_NODE_ROUTE_DOMAIN: ROUTE_DOMAIN,
+    DSH_ORBIT_NODE_DSH_TARGET: "http://127.0.0.1:3081",
+    DSH_ORBIT_NODE_ROUTE_TLS_KEY: "/etc/caddy/tls/tls.key",
+    DSH_ORBIT_NODE_ROUTE_TLS_CERT: "/etc/caddy/tls/tls.crt",
+  } : {}),
 });
 
 const nodePidFile = (dataHome) => `${dataHome}/orbit-node.pid`;
 const nodeLogFile = (dataHome) => `${dataHome}/orbit-node.log`;
 
-async function startNode(name, dataHome) {
+async function startNode(name, dataHome, nodeName = name) {
   const pidFile = nodePidFile(dataHome);
   const logFile = nodeLogFile(dataHome);
   exec(name, [
@@ -443,7 +747,7 @@ async function startNode(name, dataHome) {
     pidFile,
     NODE_BIN,
     logFile,
-  ], { env: nodeEnv(dataHome) });
+  ], { env: nodeEnv(dataHome, nodeName) });
   await waitFor(`${name} daemon start`, async () => {
     try {
       exec(name, ["sh", "-c", `pid=$(cat ${pidFile} 2>/dev/null) || exit 1; case "$pid" in ''|*[!0-9]*) exit 1;; esac; test -r /proc/$pid/cmdline; tr '\\0' ' ' < /proc/$pid/cmdline | grep -F -- '${NODE_BIN} run' >/dev/null; printf ready`]);
@@ -508,19 +812,29 @@ exit 4
 
 async function main() {
   const args = process.argv.slice(2);
+  rmSync(RAW_EVIDENCE_PATH, { force: true });
   requireCleanCandidateWorktree();
   rmSync(BROWSER_BOOTSTRAP_CHECKPOINT_PATH, { force: true });
   rmSync(BROWSER_CHECKPOINT_PATH, { force: true });
+  rmSync(BROWSER_NODE_BINDING_PATH, { force: true });
+  rmSync(BROWSER_STOP_PATH, { force: true });
+  rmSync(BROWSER_BRIDGE_LOG_PATH, { force: true });
   ensureDrillCertificate();
   const composeUp = args.includes("--compose-up");
   const waitForBrowser = args.includes("--wait-for-browser");
   const keep = args.includes("--keep");
   let stackStarted = false;
   runCleanup = async () => {
+    try {
+      await stopBrowserBridge();
+    } catch (error) {
+      console.error(`drill cleanup: browser bridge: ${error.message}`);
+    }
     if (keep) return;
     await stopNode("dsh-a", "/data/dsh-a", { strict: false });
     await stopNode("dsh-b", "/data/dsh-b", { strict: false });
     if (stackStarted) sh(`docker compose -f ${COMPOSE} down`, { expect: null });
+    removeDrillProxySecret();
   };
 
   // The drill Hub performs an immediate maintenance pass at startup, so
@@ -544,6 +858,7 @@ async function main() {
   evidence.hubListenPolicy = "127.0.0.1:5445 (loopback; frozen policy intact)";
 
   // --- 1. compose up ---
+  prepareDrillProxySecret();
   if (composeUp || !existsSync(join(REPO, "data", "orbit-drill"))) {
     sh(`docker compose -f ${COMPOSE} up -d --build`);
     stackStarted = true;
@@ -589,7 +904,21 @@ async function main() {
   }
   evidence.steps.push("caddy: real caddy validate -> Valid configuration; TLS certificate mounted");
   await waitFor("hub http", async () => (await hubGetHealth()) === 200);
-  await waitFor("gateway tls", async () => (await gatewayFetch("/")).status === 200);
+  await waitFor("gateway tls", async () => {
+    try {
+      const response = await gatewayFetch("/");
+      if (response.status !== 200) {
+        evidence.gatewayProbe = { status: response.status, bodyPrefix: response.text().slice(0, 120) };
+        return false;
+      }
+      return true;
+    } catch (error) {
+      evidence.gatewayProbe = { error: error.message };
+      return false;
+    }
+  });
+
+  if (waitForBrowser) startBrowserBridge();
 
   // The mounted lifecycle is not final evidence until the real browser
   // walkthrough has proved trusted HTTPS, authentication, session bootstrap,
@@ -617,6 +946,8 @@ async function main() {
 
   const browserHeaders = () => ({ cookie: sessionCookie, "x-csrf-token": csrf, "content-type": "application/json" });
   const nodesApi = async () => (await (await gatewayFetch("/hub/nodes", { headers: browserHeaders() })).json()).nodes;
+  const nodeApi = async (nodeId) => (await (await gatewayFetch(`/hub/nodes/${nodeId}`, { headers: browserHeaders() })).json());
+  const routeTargetApi = async (nodeId) => (await (await gatewayFetch(`/hub/nodes/${nodeId}/route-target`, { headers: browserHeaders() })).json());
   const row = (list, nodeId) => list.find((n) => n.nodeId === nodeId);
   const nodeStateIs = async (nodeId, predicate) => {
     const list = await nodesApi();
@@ -675,7 +1006,7 @@ async function main() {
       await gatewayFetch("/hub/tokens", { method: "POST", headers: browserHeaders(), body: JSON.stringify({ purpose: "enroll" }) })
     ).json();
     const enrolled = exec(name, ["node", NODE_BIN, "enroll"], {
-      env: { ...nodeEnv(dataHome), DSH_ORBIT_ENROLL_TOKEN: plain.token },
+      env: { ...nodeEnv(dataHome, name), DSH_ORBIT_ENROLL_TOKEN: plain.token },
     });
     const nodeId = /enrolled: (node_[0-9a-f]{32})/.exec(enrolled)?.[1];
     if (!nodeId) throw new Error(`${name} enroll failed: ${enrolled}`);
@@ -704,7 +1035,7 @@ async function main() {
       composeOverrideFile: null,
       composeService: name,
       workdir: verificationWorkdir,
-      orbitVersion: "0.3.0",
+      orbitVersion: "0.4.0-rc.1",
       orbitRevision: REVISION,
       dshVersion: "0.1.1-rc.2",
       baselineImage: "mounted-drill",
@@ -719,7 +1050,7 @@ async function main() {
     });
     const report = createCompatibilityReport({
       promotionEvaluated: false,
-      orbit: { version: "0.3.0", revision: REVISION },
+      orbit: { version: "0.4.0-rc.1", revision: REVISION },
       candidate: { dshVersion: "0.1.1-rc.2", profile: "dsh-0.1.1-rc.2" },
       checks,
       snapshot: { reference: null, failure: null },
@@ -734,12 +1065,51 @@ async function main() {
       cwd: REPO, encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" },
     });
     if (cp.status !== 0) throw new Error("docker cp report failed: " + cp.stderr);
-    exec(name, ["node", NODE_BIN, "upload-report"], { env: { ...nodeEnv(dataHome), DSH_ORBIT_REPORT_FILE: `${dataHome}/report-drill.json` } });
-    await startNode(name, dataHome);
+    exec(name, ["node", NODE_BIN, "upload-report"], { env: { ...nodeEnv(dataHome, name), DSH_ORBIT_REPORT_FILE: `${dataHome}/report-drill.json` } });
+    await startNode(name, dataHome, name);
     return nodeId;
   }
   const aNodeId = await deployNode("dsh-a", "/data/dsh-a", "https://127.0.0.1:18443", 18443);
   const bNodeId = await deployNode("dsh-b", "/data/dsh-b", "https://127.0.0.1:18444", 18444);
+  const authorityA = routeAuthority(aNodeId);
+  const authorityB = routeAuthority(bNodeId);
+  const routeTargetA = "https://dsh-a:9444";
+  const routeTargetB = "https://dsh-b:9445";
+  const setRouteTarget = async (nodeId, routeTarget) => {
+    const response = await gatewayFetch(`/hub/nodes/${nodeId}/route-target`, {
+      method: "PUT",
+      headers: browserHeaders(),
+      body: JSON.stringify({ routeTarget }),
+    });
+    if (response.status !== 200) throw new Error(`route target set failed for ${nodeId}: ${response.status}`);
+    return response.json();
+  };
+  await setRouteTarget(aNodeId, routeTargetA);
+  await setRouteTarget(bNodeId, routeTargetB);
+  markMatrix("routeTargetsConfiguredAB");
+  const persistedA = await routeTargetApi(aNodeId);
+  const persistedB = await routeTargetApi(bNodeId);
+  if (persistedA.routeTarget?.origin !== routeTargetA || persistedB.routeTarget?.origin !== routeTargetB) {
+    throw new Error(`mounted route target persistence mismatch: A=${JSON.stringify(persistedA)} B=${JSON.stringify(persistedB)}`);
+  }
+  markMatrix("routeTargetsPersisted");
+  evidence.routeAuthorities = { a: authorityA, b: authorityB };
+  evidence.routeTargets = { a: routeTargetA, b: routeTargetB };
+  if (waitForBrowser) {
+    writeFileSync(
+      BROWSER_NODE_BINDING_PATH,
+      JSON.stringify({
+        runId: RUN_ID,
+        commit: REVISION,
+        nodeIds: [aNodeId, bNodeId],
+        openUrls: { a: `https://${authorityA}/`, b: `https://${authorityB}/` },
+        selectorUrl: `https://${ROUTE_DOMAIN}/`,
+        port: 8443,
+        recordedAt: new Date().toISOString(),
+      }, null, 2) + "\n",
+      { encoding: "utf8", mode: 0o640 },
+    );
+  }
   evidence.aNodeId = aNodeId;
   evidence.bNodeId = bNodeId;
   evidence.steps.push(`nodes: A=${aNodeId} B=${bNodeId} enrolled, running, reports uploaded`);
@@ -759,6 +1129,17 @@ async function main() {
     const root = list.find((n) => n.nodeId === bNodeId);
     return root?.health.registryContact === "fresh";
   });
+  await waitFor("A route eligible", async () => {
+    const node = await nodeApi(aNodeId);
+    return node.state === "active" && node.routeTarget?.origin === routeTargetA && node.health.reachable === "ok" &&
+      node.hubRouteKeys?.some((key) => key.state === "active") && node.health.capabilities?.some((capability) => capability.name === "web.routes");
+  }, { attempts: 40, intervalMs: 1000 });
+  await waitFor("B route eligible", async () => {
+    const node = await nodeApi(bNodeId);
+    return node.state === "active" && node.routeTarget?.origin === routeTargetB && node.health.reachable === "ok" &&
+      node.hubRouteKeys?.some((key) => key.state === "active") && node.health.capabilities?.some((capability) => capability.name === "web.routes");
+  }, { attempts: 40, intervalMs: 1000 });
+  markMatrix("eligibilityAB");
   let view = await nodesApi();
   const aRow = row(view, aNodeId);
   const bRow = row(view, bNodeId);
@@ -774,6 +1155,54 @@ async function main() {
   // Nodes list and at least one node detail before the failure lifecycle.
   await requireBrowserCheckpoint({ wait: waitForBrowser, nodeIds: [aNodeId, bNodeId] });
   evidence.steps.push("browser: trusted HTTPS live Nodes/detail checkpoint accepted");
+
+  const selectorResponse = await gatewayFetch("/hub/selector/nodes", {
+    headers: browserHeaders(),
+    authority: ROUTE_DOMAIN,
+  });
+  const selectorBody = await selectorResponse.json();
+  const selectorA = selectorBody.nodes?.find((node) => node.nodeId === aNodeId);
+  const selectorB = selectorBody.nodes?.find((node) => node.nodeId === bNodeId);
+  if (selectorResponse.status !== 200 || !selectorA?.route?.eligible || !selectorB?.route?.eligible ||
+      selectorA.route.openUrl !== `https://${authorityA}/` || selectorB.route.openUrl !== `https://${authorityB}/`) {
+    throw new Error(`mounted selector matrix mismatch: ${JSON.stringify(selectorBody)}`);
+  }
+  const browserCheckpoint = readCheckpoint(BROWSER_CHECKPOINT_PATH, "browser lifecycle checkpoint");
+  if (browserCheckpoint.selectorOpenAVerified !== true || browserCheckpoint.selectorOpenBVerified !== true) {
+    throw new Error("browser lifecycle checkpoint did not verify Selector Open A/B navigation");
+  }
+  markMatrix("selectorListsAB", "selectorOpenA", "selectorOpenB");
+
+  const routeRootA = await routeFetch("/", authorityA, { headers: { accept: "text/html" } });
+  const routeRootB = await routeFetch("/", authorityB, { headers: { accept: "text/html" } });
+  const routeRootTextA = routeRootA.text();
+  const routeRootTextB = routeRootB.text();
+  if (routeRootA.status !== 200 || routeRootB.status !== 200 ||
+      routeRootA.headers["x-drill-node"] !== "A" || routeRootB.headers["x-drill-node"] !== "B" ||
+      /\bdsh-b(?:\.test)?\b/i.test(routeRootTextA) || /\bdsh-a(?:\.test)?\b/i.test(routeRootTextB)) {
+    throw new Error(`mounted route root isolation failed: A=${routeRootA.status}/${routeRootA.headers["x-drill-node"]} B=${routeRootB.status}/${routeRootB.headers["x-drill-node"]}`);
+  }
+  markMatrix("httpRootA", "httpRootB", "nodeContextIsolation");
+
+  const staticA = await routeFetch("/assets/index-C6eRlFa6.css", authorityA);
+  const staticB = await routeFetch("/assets/index-C6eRlFa6.css", authorityB);
+  if (staticA.status !== 200 || staticB.status !== 200 || staticA.headers["x-drill-node"] !== "A" || staticB.headers["x-drill-node"] !== "B" || staticA.text().length < 100 || staticB.text().length < 100) {
+    throw new Error(`mounted static asset matrix failed: A=${staticA.status} B=${staticB.status}`);
+  }
+  markMatrix("staticAssetA", "staticAssetB");
+  const cookies = [staticA.headers["set-cookie"], staticB.headers["set-cookie"]].flat().filter(Boolean).join(";");
+  if (/domain=/i.test(cookies)) throw new Error("mounted route response leaked Domain cookie attribute");
+  if (browserCheckpoint.cookieIsolationVerified !== true) {
+    throw new Error("browser lifecycle checkpoint did not verify cookie-jar isolation");
+  }
+  markMatrix("cookieIsolation");
+
+  const wsA = await routeWebSocket(authorityA, { expectedNode: "A" });
+  const wsB = await routeWebSocket(authorityB, { expectedNode: "B" });
+  if (wsA.status !== 101 || wsB.status !== 101) throw new Error(`mounted WSS upgrade failed: A=${wsA.status} B=${wsB.status}`);
+  markMatrix("websocketUpgradeA", "websocketUpgradeB");
+  if (!wsA.ping || !wsB.ping) throw new Error("mounted WSS Ping/Pong failed");
+  markMatrix("websocketPingPongA", "websocketPingPongB");
 
   // --- 4. gateway restart drill ---
   const preRestart = await nodesApi();
@@ -801,9 +1230,59 @@ async function main() {
     }
   }
   view = postRestart;
-  evidence.steps.push("gateway: restarted; new session works; live post-restart node state matches pre-restart state");
+  const gatewayRouteA = await routeFetch("/", authorityA, { headers: { accept: "text/html" } });
+  const gatewayRouteB = await routeFetch("/", authorityB, { headers: { accept: "text/html" } });
+  if (gatewayRouteA.status !== 200 || gatewayRouteB.status !== 200) {
+    throw new Error(`gateway restart route recovery failed: A=${gatewayRouteA.status} B=${gatewayRouteB.status}`);
+  }
+  markMatrix("gatewayRestartRecovery");
+  evidence.steps.push("gateway: restarted; new session works; selector and A/B routed HTTP recovered");
 
-  // --- 5. A disconnect: stop its owned run loop; age only A's contact ---
+  // --- 4b. actual Hub process/container restart with persistent registry ---
+  sh(`docker restart ${hubContainer}`);
+  await waitFor("Hub process restart", async () => (await hubGetHealth()) === 200, { attempts: 40, intervalMs: 1000 });
+  // Caddy and machine-ingress share the Hub container's network namespace.
+  // Rebind both owned sidecars after the Hub restart so the private machine
+  // listener and browser gateway are reconstructed before recovery.
+  const machineIngressContainer = sh(`docker compose -f ${COMPOSE} ps -q machine-ingress`).trim().split("\n")[0];
+  if (!machineIngressContainer) throw new Error("machine-ingress container is missing after Hub restart");
+  sh(`docker restart ${machineIngressContainer}`);
+  await waitFor("machine ingress after Hub restart", async () => (await machineIngressGetHealth("dsh-a")) === 200, { attempts: 40, intervalMs: 1000 });
+  sh(`docker restart ${caddyContainer}`);
+  await waitFor("gateway after Hub restart", async () => (await gatewayFetch("/").catch(() => null))?.status === 200, { attempts: 40, intervalMs: 1000 });
+  const postHubSession = await gatewayFetch("/hub/session", { method: "POST" });
+  const postHubSessionBody = await postHubSession.json();
+  if (postHubSession.status !== 200 || typeof postHubSessionBody.csrfToken !== "string") throw new Error("Hub restart session bootstrap failed");
+  const postHubCookie = (Array.isArray(postHubSession.headers["set-cookie"]) ? postHubSession.headers["set-cookie"][0] : postHubSession.headers["set-cookie"]).split(";")[0];
+  sessionCookie = postHubCookie;
+  csrf = postHubSessionBody.csrfToken;
+  const persistedAfterHubRestartA = await routeTargetApi(aNodeId);
+  const persistedAfterHubRestartB = await routeTargetApi(bNodeId);
+  if (persistedAfterHubRestartA.routeTarget?.origin !== routeTargetA || persistedAfterHubRestartB.routeTarget?.origin !== routeTargetB) {
+    throw new Error("Hub restart lost mounted route targets");
+  }
+  const postHubRouteA = await routeFetch("/", authorityA, { headers: { accept: "text/html" } });
+  const postHubRouteB = await routeFetch("/", authorityB, { headers: { accept: "text/html" } });
+  if (postHubRouteA.status !== 200 || postHubRouteB.status !== 200) throw new Error("Hub restart lost A/B route recovery");
+  markMatrix("hubRestartRecovery");
+  evidence.steps.push("Hub: restarted with persistent SQLite; route targets and A/B routed HTTP recovered");
+
+  // --- 5. DSH loss behind live RouteIngress: suspend only DSH web ---
+  const suspendDsh = (service) => exec(service, ["sh", "-c", "pid=$(ps -eo pid,args | awk '/bin.js web/ && !/awk/ {print $1; exit}'); test -n \"$pid\"; kill -STOP \"$pid\""]);
+  const resumeDsh = (service) => exec(service, ["sh", "-c", "pid=$(ps -eo pid,args | awk '/bin.js web/ && !/awk/ {print $1; exit}'); test -n \"$pid\"; kill -CONT \"$pid\""]);
+  suspendDsh("dsh-a");
+  await waitFor("A route unreachable with live ingress", async () => (await nodeApi(aNodeId)).health?.reachable === "unreachable", { attempts: 20, intervalMs: 1000 });
+  const dshLossA = await routeFetch("/", authorityA, { headers: { accept: "application/json" } });
+  const dshLossB = await routeFetch("/", authorityB, { headers: { accept: "text/html" } });
+  if (dshLossA.status !== 503 || dshLossB.status !== 200) throw new Error(`DSH loss isolation failed: A=${dshLossA.status} B=${dshLossB.status}`);
+  markMatrix("nodeAFailClosedOutage", "nodeBHealthyDuringAOutage");
+  resumeDsh("dsh-a");
+  await waitFor("A route recovered after DSH resume", async () => (await nodeApi(aNodeId)).health?.reachable === "ok", { attempts: 30, intervalMs: 1000 });
+  const dshRecoveryA = await routeFetch("/", authorityA, { headers: { accept: "text/html" } });
+  if (dshRecoveryA.status !== 200) throw new Error(`A route did not recover after DSH resume: ${dshRecoveryA.status}`);
+  markMatrix("dshLossAndRecovery");
+
+  // --- 5b. A disconnect: stop its owned run loop; age only A's contact ---
   await stopNode("dsh-a", "/data/dsh-a");
   const disconnectWallClock = new Date();
   const aBeforeAging = row(await nodesApi(), aNodeId);
@@ -863,7 +1342,10 @@ async function main() {
   });
   evidence.steps.push("A reconnect: fresh again, alert flags cleared; B untouched");
 
-  // --- 7. delete A through the browser surface; A denied; B clean ---
+  // --- 7. delete A through the browser surface; old bookmark must fail closed ---
+  const beforeDeleteNode = await nodeApi(aNodeId);
+  const oldHubRouteKeyId = beforeDeleteNode.hubRouteKeys?.find((key) => key.state === "active")?.keyId ?? null;
+  if (!oldHubRouteKeyId) throw new Error("missing active Hub route identity before delete");
   const deleted = await gatewayFetch(`/hub/nodes/${aNodeId}/delete`, {
     method: "POST",
     headers: browserHeaders(),
@@ -882,34 +1364,62 @@ async function main() {
   view = await nodesApi();
   const bAfterDelete = row(view, bNodeId);
   if (bAfterDelete.health.registryContact !== "fresh") throw new Error("B contaminated after delete");
-  evidence.steps.push(`delete A (requestId, explicit result): tombstoned; A local state=revoked (machine denial); B=${bAfterDelete.health.registryContact}`);
+  const oldBookmark = await routeFetch("/", authorityA, { headers: { accept: "application/json" } });
+  if (oldBookmark.status !== 503) throw new Error(`deleted node bookmark did not fail closed: ${oldBookmark.status}`);
+  markMatrix("bookmarkFailClosed");
+  evidence.steps.push(`delete A (requestId, explicit result): tombstoned; A local state=revoked; old bookmark fail-closed; B=${bAfterDelete.health.registryContact}`);
 
-  // --- 8. reenroll A (same nodeId) ---
+  // --- 8. reenroll A (same nodeId, fresh Hub route identity) ---
+  // The revoked daemon remains alive with its RouteIngress listener disabled;
+  // stop that runner-owned process before the one-shot reenroll command so the
+  // recovered daemon can bind the same stable 9444 listener exactly once.
+  await stopNode("dsh-a", "/data/dsh-a");
   const reenrollMint = await (await gatewayFetch(`/hub/nodes/${aNodeId}/reenroll`, { method: "POST", headers: browserHeaders() })).json();
   const reenrolled = exec("dsh-a", ["node", NODE_BIN, "reenroll"], {
     env: { ...nodeEnv("/data/dsh-a"), DSH_ORBIT_REENROLL_TOKEN: reenrollMint.token },
   });
   const restoredId = /re-enrolled: (node_[0-9a-f]{32})/.exec(reenrolled)?.[1];
   if (restoredId !== aNodeId) throw new Error(`reenroll restored ${restoredId} !== ${aNodeId}`);
+  const reenrollReport = exec("dsh-a", ["node", NODE_BIN, "upload-report"], {
+    env: { ...nodeEnv("/data/dsh-a"), DSH_ORBIT_REPORT_FILE: "/data/dsh-a/report-drill.json" },
+  });
+  evidence.steps.push(`reenroll A: current identity report re-uploaded (${reenrollReport.replace(/\s+/g, " ").slice(0, 160)})`);
   await startNode("dsh-a", "/data/dsh-a");
   await waitFor("A active again", async () => nodeStateIs(aNodeId, (node) => node.state === "active"), { attempts: 30, intervalMs: 5000 });
   await waitFor("A fresh after reenroll", async () => nodeStateIs(aNodeId, (node) => node.health.registryContact === "fresh"), {
     attempts: 30,
     intervalMs: 6000,
   });
-  view = await nodesApi();
-  const bFinal = row(view, bNodeId);
+  await waitFor("A active Hub route identity after reenroll", async () => {
+    const node = await nodeApi(aNodeId);
+    return node.hubRouteKeys?.some((key) => key.state === "active") === true;
+  }, { attempts: 30, intervalMs: 1000 });
+  const afterReenrollNode = await nodeApi(aNodeId);
+  const newHubRouteKeyId = afterReenrollNode.hubRouteKeys?.find((key) => key.state === "active")?.keyId ?? null;
+  if (!newHubRouteKeyId || newHubRouteKeyId === oldHubRouteKeyId) throw new Error("reenroll did not create a fresh Hub route identity");
+  await waitFor("A route eligible after reenroll", async () => {
+    const node = await nodeApi(aNodeId);
+    return node.state === "active" && node.routeTarget?.origin === routeTargetA &&
+      node.health?.reachable === "ok" && node.hubRouteKeys?.some((key) => key.state === "active") &&
+      node.health?.capabilities?.some((capability) => capability.name === "web.routes");
+  }, { attempts: 40, intervalMs: 1000 });
+  markMatrix("sameNodeIdReenroll", "freshHubRouteIdentity");
+  const restoredBookmark = await routeFetch("/", authorityA, { headers: { accept: "text/html" } });
+  if (restoredBookmark.status !== 200) throw new Error(`reenrolled bookmark did not recover: ${restoredBookmark.status}`);
+  markMatrix("deleteBookmarkAndReenroll");
+  const bFinal = row(await nodesApi(), bNodeId);
   if (bFinal.health.registryContact !== "fresh") throw new Error("B contaminated at the end");
-  evidence.steps.push(`reenroll A: same nodeId ${aNodeId}, active + fresh; B final=${bFinal.health.registryContact} (healthy throughout)`);
+  evidence.routeIdentity = { beforeDelete: oldHubRouteKeyId, afterReenroll: newHubRouteKeyId };
+  evidence.steps.push(`reenroll A: same nodeId ${aNodeId}, fresh Hub route identity, bookmark recovered; B final=${bFinal.health.registryContact}`);
 
+  assertMatrixComplete();
   evidence.finishedAt = new Date().toISOString();
   evidence.success = true;
 
   await runCleanup();
   evidence.cleanup = keep ? "kept by --keep" : "owned Node daemons stopped; compose down executed";
-  const outPath = join(REPO, "data", "drill-evidence.json");
-  mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, JSON.stringify(evidence, null, 2));
+  mkdirSync(dirname(RAW_EVIDENCE_PATH), { recursive: true });
+  writeFileSync(RAW_EVIDENCE_PATH, JSON.stringify(evidence, null, 2), { encoding: "utf8", mode: 0o640 });
   console.log(JSON.stringify(evidence, null, 2));
 }
 
@@ -922,9 +1432,8 @@ main().then(
     } catch (cleanupError) {
       console.error(`DRILL CLEANUP FAILED: ${cleanupError.stack ?? cleanupError}`);
     }
-    const outPath = join(REPO, "data", "drill-evidence.json");
-    mkdirSync(dirname(outPath), { recursive: true });
-    writeFileSync(outPath, JSON.stringify({ ...evidence, finishedAt: new Date().toISOString(), success: false, error: String(error) }, null, 2));
+    mkdirSync(dirname(RAW_EVIDENCE_PATH), { recursive: true });
+    writeFileSync(RAW_EVIDENCE_PATH, JSON.stringify({ ...evidence, finishedAt: new Date().toISOString(), success: false, error: String(error) }, null, 2), { encoding: "utf8", mode: 0o640 });
     process.exit(1);
   },
 );

@@ -65,16 +65,36 @@ function gitIsAncestor(ancestor, descendant) {
   }
 }
 
-test("Stage 8 release candidate artifact set exists", async () => {
+test("Stage 8 construction candidate artifact set exists", async () => {
   for (const path of requiredDocs) await access(new URL(`../${path}`, import.meta.url));
+  const current = execFileSync("git", ["rev-parse", "HEAD"], { cwd: new URL("../", import.meta.url), encoding: "utf8" }).trim();
+  assert.equal(gitIsAncestor("0dc00ceb3b0574e2a6bd81eb62502fd6c2e233f3", current), true);
   const changelog = await text("CHANGELOG.md");
   assert.match(changelog, /^## Unreleased$/m);
+  assert.match(changelog, /^### 0\.4\.0-rc\.1 candidate - /m);
   assert.match(changelog, /^### 0\.3\.0-rc\.1 candidate - 2026-09-02$/m);
-  assert.doesNotMatch(changelog, /^## 0\.3\.0-rc\.1 - 2026-08-31$/m);
-});
+  });
 
 test("Registry Compose requires an explicit release image tag", async () => {
   const compose = await text("docker-registry/compose.example.yaml");
+  assert.match(compose, /DSH_ORBIT_HUB_ROUTE_DOMAIN:\s*dsh\.example\.local/);
+  assert.match(compose, /DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY:\s*registration\.example\.invalid/);
+  assert.match(compose, /DSH_ORBIT_MACHINE_INGRESS_TLS_KEY|machine-ingress/);
+  assert.match(
+    compose,
+    /healthcheck:[\s\S]*headers:\{host:process\.env\.DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY\}/,
+    "Compose healthcheck must send the configured management authority as Host",
+  );
+  assert.doesNotMatch(
+    compose,
+    /healthcheck:[\s\S]*get\(['"]http:\/\/127\.0\.0\.1:5445\//,
+    "Compose healthcheck must not use the loopback authority",
+  );
+
+  const caddy = await text("docker-registry/Caddyfile.example");
+  assert.match(caddy, /header_up Host \{http\.request\.hostport\}/);
+  assert.match(caddy, /header_up X-DSH-Authenticated-Proxy/);
+  assert.match(caddy, /header_up X-DSH-Operator-Id/);
   const imageLine = /^\s*image:\s+[^\n]+$/m.exec(compose)?.[0] ?? "";
   assert.match(
     imageLine,
@@ -86,7 +106,7 @@ test("Registry Compose requires an explicit release image tag", async () => {
   const config = await text("docs/configuration-reference.md");
   assert.match(config, /`DSH_ORBIT_REGISTRY_TAG`/);
   assert.match(config, /Required.*Default.*Meaning and constraints/s);
-  assert.match(config, /explicitly bound.*v0\.3\.0-rc\.1.*fail closed/s);
+  assert.match(config, /explicitly bound.*v0\.4\.0-rc\.1.*fail closed/s);
   assert.match(config, /v0\.3\.0-s6.*not permitted/s);
 });
 
@@ -140,6 +160,9 @@ test("Operator readiness and release status wording match the implementation", a
   assert.doesNotMatch(operator, /health endpoint|`\/health`/i);
 
   const deployment = await text("docs/registry-deployment.md");
+  const promotion = await text("docs/sop/v0.4-production-promotion-rollback-plan.md");
+  assert.match(promotion, /DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY=orbit-admin\.ikarikore\.top/);
+  assert.match(promotion, /Management Authority.*orbit-admin\.ikarikore\.top/s);
   const stage7 = await text("docs/release-attestations/v0.3-stage7-operational-hardening.md");
   assert.match(deployment, /Stage 7 is\s+complete and accepted/);
   assert.doesNotMatch(deployment, /Stage 7[^\n]*awaiting review/i);

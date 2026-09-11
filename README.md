@@ -6,30 +6,50 @@ The project focuses on secure remote access, upgrade compatibility, and multi-no
 
 > DSH Orbit is an independent community project. It is not affiliated with or endorsed by DeepSeek AI.
 
+**Self-hosted · Multi-node · Security-first · Version-pinned compatibility · Open governance**
+
+New here? Start with the [overview](docs/dsh-orbit-overview.md): what Orbit is, what v0.4 gives you, and who it is for. Then see [how it compares](docs/comparison.md) to tunnels, VPNs, and web terminals.
+
 ## Status
 
-DSH Orbit `0.3.0` targets DeepSeek Harness `0.1.1-rc.2`. The v0.3 Registry
-MVP release candidate is `v0.3.0-rc.1`, awaiting final review; it is not yet
-tagged, published, or promoted.
+DSH Orbit `0.4.0-rc.1` targets DeepSeek Harness `0.1.1-rc.2`. The v0.4 Endpoint
+Selector release candidate is `v0.4.0-rc.1`, released as a pre-release after its
+final review passed; the tag and release notes are published on GitHub.
+Production promotion is not authorized and requires a separate gate.
 
-The v0.3 release provides the deployment and compatibility layer plus the
-implemented private Registry Hub/Node control plane. The DSH configuration
-plane remains behind an authenticated reverse proxy and the Registry machine
-surface remains private.
+The v0.4 release provides the deployment, compatibility, and multi-node routing
+layer:
+
+- **Endpoint Selector**: dynamic multi-node browser routing over dedicated per-node subdomains (`n-<nodeId>.<routeDomain>`) while preserving the selector apex;
+- **Authenticated RouteIngress**: cryptographic hop-by-hop `ORBIT-ROUTE-V1` request signing from Hub to Node, verifying identity without request body buffering;
+- **Per-Node Route Target**: operator-assigned, mutable destination origins for DSH instances with automatic reachability derivation;
+- **Hub Route Identity & Key Rotation**: deterministic Ed25519 route keys with restart-safe rotation overlap and scheduled revocation;
+- **Duplex Routing**: full HTTP and WebSocket duplex streaming with strict capacity limiting, connection tracking, and early abort cleanup;
+- **Deterministic 5-Condition Eligibility**: nodes are routable only when `state=active`, `authenticated=ok`, `dshHealthy=ok`, `orbitCompatible=pass`, and `reachable=ok`;
+- **No Silent Failover**: node outages fail closed without routing crosstalk or automatic redirection to other nodes;
+- **Browser Context Isolation**: strict host-only cookies preventing session leakage across distinct DSH node instances.
+
+> **Reverse-connected nodes are not part of v0.4. They remain a v0.5 scope.**
+> NAT traversal, fleet execution, and reverse tunnels are strictly deferred to future milestones.
 
 Release documentation:
 
+- [Overview](docs/dsh-orbit-overview.md) — start here
+- [Comparison](docs/comparison.md) — tunnels, VPNs, and web terminals
+- [DSH version policy](docs/dsh-version-policy.md)
 - [Architecture](docs/architecture.md)
+- [Security model](docs/security-model.md)
+- [Compatibility](docs/compatibility.md)
 - [Configuration reference](docs/configuration-reference.md)
 - [Operator SOP](docs/sop/v0.3-operator-sop.md)
+- [Selector & Routing SOP](docs/sop/v0.4-selector-operator-sop.md)
 - [Node enrollment SOP](docs/sop/v0.3-node-enrollment-sop.md)
 - [Registry backup/restore SOP](docs/sop/v0.3-registry-backup-restore-sop.md)
 - [Troubleshooting](docs/troubleshooting.md)
-- [v0.3.0-rc.1 attestation](docs/release-attestations/v0.3.0-rc.1.md)
+- [Production Promotion & Rollback Plan](docs/sop/v0.4-production-promotion-rollback-plan.md)
+- [v0.4.0-rc.1 release attestation](docs/release-attestations/v0.4.0-rc.1.md)
 
-The first release provides the deployment and compatibility layer needed to expose the DSH configuration plane behind an authenticated reverse proxy without publishing the DSH service directly.
-
-Future releases are planned to add node discovery, endpoint selection, reverse-connected nodes, and fleet-level workflows. See [Roadmap](docs/roadmap.md).
+Future releases are planned to add reverse-connected nodes (NAT traversal) and fleet-level workflows. See [Roadmap](docs/roadmap.md).
 
 ## Principles
 
@@ -164,6 +184,8 @@ The recommended flow is:
 
 See [Upgrade guide](docs/upgrade.md), [Compatibility](docs/compatibility.md), and [Downstream production deployment](docs/downstream-production.md).
 
+For DSH version selection and compatibility baseline policy, see [DSH version policy](docs/dsh-version-policy.md).
+
 ## Candidate upgrade runner
 
 `npm run upgrade -- <command>` orchestrates the manual upgrade sequence as one explicit, fail-closed command. It never promotes production: the furthest it can go is `CANDIDATE PASSED - ELIGIBLE FOR MANUAL PROMOTION`, and promoting remains an operator action.
@@ -231,6 +253,8 @@ The test suite uses fixtures and temporary directories. It does not require a li
 ## Contributing
 
 Issues and pull requests are welcome. Changes that touch authentication, proxy trust, or privileged DSH RPCs should include negative tests as well as success-path tests.
+
+Use [Discussions](https://github.com/IkariKr/dsh-orbit/discussions) for questions, deployment topologies, and upgrade experiences. Share a running setup in [Show and tell](https://github.com/IkariKr/dsh-orbit/discussions/categories/show-and-tell) — that is where community setups collect, and it is the most useful thing to read if you are deciding whether Orbit fits your machines.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
