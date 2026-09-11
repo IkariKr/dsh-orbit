@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "candidateCommit": "a263e7592d0726dd3c30895e27469a30f94b1768",
+  "executedAt": "2026-09-11T10:19:39.306Z",
+  "mountedRunId": "634cda14-8291-46af-8b4f-4316c83f1331",
+  "mountedEvidenceCandidate": "a263e7592d0726dd3c30895e27469a30f94b1768",
+  "kind": "stage8-migration-acceptance",
+  "execution": "local-file-backed-v3-fixture-tests",
+  "verification": {
+    "command": "node --test test/registry-sqlite.test.mjs test/stage7-hardening.test.mjs",
+    "migrationPath": "v1 -> v2 -> v3 -> v4 -> v5",
+    "tests": 25,
+    "pass": 25,
+    "fail": 0,
+    "skip": 0,
+    "schemaVersion": 5,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "routeTables": [
+      "route_targets",
+      "hub_route_keys"
+    ],
+    "nodeIdentityPreserved": true,
+    "idempotentRerun": true
+  },
+  "result": "PASS"
+}

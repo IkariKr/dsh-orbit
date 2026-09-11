@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "candidateCommit": "a263e7592d0726dd3c30895e27469a30f94b1768",
+  "executedAt": "2026-09-11T10:19:39.306Z",
+  "mountedRunId": "634cda14-8291-46af-8b4f-4316c83f1331",
+  "mountedEvidenceCandidate": "a263e7592d0726dd3c30895e27469a30f94b1768",
+  "kind": "stage8-backup-restore-acceptance",
+  "execution": "local-file-backed-wal-registry-tests",
+  "verification": {
+    "command": "node --test test/registry-backup.test.mjs test/registry-route-target.test.mjs test/stage7-hardening.test.mjs",
+    "tests": 28,
+    "pass": 26,
+    "fail": 0,
+    "skip": 2,
+    "backupMethod": "sqlite-vacuum-into",
+    "restoreMethod": "sqlite-standalone-atomic-restore",
+    "writersQuiesced": true,
+    "walSidecarsQuarantined": true,
+    "privateKeyExposedInStateDigest": false,
+    "routeIdentityRestored": true,
+    "integrityCheck": "ok"
+  },
+  "result": "PASS"
+}
