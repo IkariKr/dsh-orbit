@@ -7,14 +7,18 @@
     }
 }
 
-# Internal, unauthenticated adapter used by the real Node RouteIngress. It
-# stays in the DSH container network namespace and adds only non-secret drill
-# identity headers so the mounted runner can prove A/B isolation and cookie
-# sanitization against the real DSH process.
+# Internal adapter used by the real Node RouteIngress. It stays in the DSH
+# container network namespace and translates the verified public route request
+# into the same authenticated-proxy shape used by the node's browser gateway.
+# The public route authority is not forwarded as DSH's Origin: the DSH trust
+# fence expects its configured public host, while RouteIngress already verified
+# the public ORBIT-ROUTE-V1 proof before reaching this adapter.
 :3081 {
     reverse_proxy 127.0.0.1:3080 {
         header_up Host {$DSH_PUBLIC_HOST}
-        header_up X-Forwarded-Proto http
+        header_up Origin https://{$DSH_PUBLIC_HOST}
+        header_up X-Forwarded-Proto https
+        header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}
         header_down X-Drill-Node {$DSH_DRILL_NODE}
         header_down Set-Cookie "drill_node={$DSH_DRILL_NODE}; Domain=.dsh-orbit.test; Path=/; HttpOnly"
     }

@@ -4,6 +4,7 @@ import test from "node:test";
 
 const DRIVER = new URL("../scripts/registry-drill.mjs", import.meta.url);
 const BRIDGE = new URL("../scripts/registry-drill-firefox-bridge.py", import.meta.url);
+const DSH_CADDY = new URL("../docker-registry/dsh-drill.Caddyfile", import.meta.url);
 
 test("mounted drill requires trusted browser evidence and real compatibility reports", async () => {
   const source = await readFile(DRIVER, "utf8");
@@ -147,6 +148,21 @@ test("runner-owned Firefox bridge requires trusted browser settings and secret-f
   assert.doesNotMatch(source, /plaintext.*write_text|token.*write_text/i);
   assert.doesNotMatch(source, /accept_insecure_certs\s*=\s*True/);
   assert.doesNotMatch(source, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);
+});
+
+test("mounted DSH adapter preserves route and DSH trust boundaries", async () => {
+  const source = await readFile(DSH_CADDY, "utf8");
+  const adapterStart = source.indexOf(":3081 {");
+  const adapterEnd = source.indexOf("\n}\n\nhttps://:9443", adapterStart);
+  assert.ok(adapterStart >= 0 && adapterEnd > adapterStart, "mounted DSH adapter block must exist");
+  const adapter = source.slice(adapterStart, adapterEnd);
+  assert.ok(adapter.includes("header_up Host {$DSH_PUBLIC_HOST}"));
+  assert.ok(adapter.includes("header_up Origin https://{$DSH_PUBLIC_HOST}"));
+  assert.ok(adapter.includes("header_up X-Forwarded-Proto https"));
+  assert.ok(adapter.includes("header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}"));
+  assert.doesNotMatch(adapter, /header_up X-Forwarded-Proto http(?:\s|$)/);
+  assert.ok(adapter.includes("header_down X-Drill-Node {$DSH_DRILL_NODE}"));
+  assert.ok(adapter.includes("header_down Set-Cookie \"drill_node={$DSH_DRILL_NODE}; Domain=.dsh-orbit.test"));
 });
 
 test("mounted evidence emitter is the only PASS artifact producer", async () => {
