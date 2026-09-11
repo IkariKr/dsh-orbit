@@ -1,5 +1,13 @@
 # DSH Version Compatibility Policy
 
+**Current baseline:** Orbit `v0.4.x` → DeepSeek Harness `0.1.1-rc.2`
+(`SUPPORTED`). The machine-readable form is `compatibilityProfiles` in
+`src/compatibility.mjs`, and the release attestation records the upstream commit
+SHA and CLI digest for that baseline.
+
+Related: [Overview](dsh-orbit-overview.md) · [Compatibility](compatibility.md) ·
+[Comparison](comparison.md).
+
 ## Overview
 
 Orbit releases are validated against a selected DSH compatibility baseline.

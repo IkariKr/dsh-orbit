@@ -6,11 +6,16 @@ The project focuses on secure remote access, upgrade compatibility, and multi-no
 
 > DSH Orbit is an independent community project. It is not affiliated with or endorsed by DeepSeek AI.
 
+**Self-hosted · Multi-node · Security-first · Version-pinned compatibility · Open governance**
+
+New here? Start with the [overview](docs/dsh-orbit-overview.md): what Orbit is, what v0.4 gives you, and who it is for. Then see [how it compares](docs/comparison.md) to tunnels, VPNs, and web terminals.
+
 ## Status
 
 DSH Orbit `0.4.0-rc.1` targets DeepSeek Harness `0.1.1-rc.2`. The v0.4 Endpoint
-Selector release candidate is `v0.4.0-rc.1`, awaiting final review; it is not
-yet tagged, published, or promoted.
+Selector release candidate is `v0.4.0-rc.1`, released as a pre-release after its
+final review passed; the tag and release notes are published on GitHub.
+Production promotion is not authorized and requires a separate gate.
 
 The v0.4 release provides the deployment, compatibility, and multi-node routing
 layer:
@@ -29,7 +34,12 @@ layer:
 
 Release documentation:
 
+- [Overview](docs/dsh-orbit-overview.md) — start here
+- [Comparison](docs/comparison.md) — tunnels, VPNs, and web terminals
+- [DSH version policy](docs/dsh-version-policy.md)
 - [Architecture](docs/architecture.md)
+- [Security model](docs/security-model.md)
+- [Compatibility](docs/compatibility.md)
 - [Configuration reference](docs/configuration-reference.md)
 - [Operator SOP](docs/sop/v0.3-operator-sop.md)
 - [Selector & Routing SOP](docs/sop/v0.4-selector-operator-sop.md)
@@ -37,7 +47,7 @@ Release documentation:
 - [Registry backup/restore SOP](docs/sop/v0.3-registry-backup-restore-sop.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Production Promotion & Rollback Plan](docs/sop/v0.4-production-promotion-rollback-plan.md)
-- v0.4.0-rc.1 release attestation will be generated only after the new E7.3-descendant evidence closure
+- [v0.4.0-rc.1 release attestation](docs/release-attestations/v0.4.0-rc.1.md)
 
 Future releases are planned to add reverse-connected nodes (NAT traversal) and fleet-level workflows. See [Roadmap](docs/roadmap.md).
 
@@ -174,9 +184,7 @@ The recommended flow is:
 
 See [Upgrade guide](docs/upgrade.md), [Compatibility](docs/compatibility.md), and [Downstream production deployment](docs/downstream-production.md).
 
-For DSH version selection and compatibility baseline policy, see:
-
-`docs/dsh-version-policy.md`
+For DSH version selection and compatibility baseline policy, see [DSH version policy](docs/dsh-version-policy.md).
 
 ## Candidate upgrade runner
 
@@ -245,6 +253,8 @@ The test suite uses fixtures and temporary directories. It does not require a li
 ## Contributing
 
 Issues and pull requests are welcome. Changes that touch authentication, proxy trust, or privileged DSH RPCs should include negative tests as well as success-path tests.
+
+Use [Discussions](https://github.com/IkariKr/dsh-orbit/discussions) for questions, deployment topologies, and upgrade experiences. Share a running setup in [Show and tell](https://github.com/IkariKr/dsh-orbit/discussions/categories/show-and-tell) — that is where community setups collect, and it is the most useful thing to read if you are deciding whether Orbit fits your machines.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
