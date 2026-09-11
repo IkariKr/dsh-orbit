@@ -1366,6 +1366,10 @@ async function main() {
   evidence.steps.push(`delete A (requestId, explicit result): tombstoned; A local state=revoked; old bookmark fail-closed; B=${bAfterDelete.health.registryContact}`);
 
   // --- 8. reenroll A (same nodeId, fresh Hub route identity) ---
+  // The revoked daemon remains alive with its RouteIngress listener disabled;
+  // stop that runner-owned process before the one-shot reenroll command so the
+  // recovered daemon can bind the same stable 9444 listener exactly once.
+  await stopNode("dsh-a", "/data/dsh-a");
   const reenrollMint = await (await gatewayFetch(`/hub/nodes/${aNodeId}/reenroll`, { method: "POST", headers: browserHeaders() })).json();
   const reenrolled = exec("dsh-a", ["node", NODE_BIN, "reenroll"], {
     env: { ...nodeEnv("/data/dsh-a"), DSH_ORBIT_REENROLL_TOKEN: reenrollMint.token },

@@ -57,6 +57,7 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /dshLossAndRecovery/);
   assert.match(source, /bookmarkFailClosed/);
   assert.match(source, /sameNodeIdReenroll/);
+  assert.match(source, /await stopNode\("dsh-a", "\/data\/dsh-a"\);[\s\S]*?const reenrollMint/);
   assert.match(source, /freshHubRouteIdentity/);
   assert.match(source, /assertMatrixComplete\(\)/);
   assert.match(source, /docker restart \$\{hubContainer\}/);
