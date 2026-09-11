@@ -154,8 +154,15 @@ test("Hub accepts an explicit empty node-scoped aging map in drill mode", async 
     DSH_ORBIT_HUB_DRILL_AGING: "1",
     DSH_ORBIT_HUB_DRILL_AGING_CLOCK: clock,
   }, { stopWhenReady: true });
-  assert.equal(result.code, null);
-  assert.equal(result.signal, "SIGTERM");
+  // The harness stops the Hub with SIGTERM as soon as it reports readiness, and
+  // the Hub shuts down gracefully on that signal. Accept either shape: a
+  // reported SIGTERM, or the clean zero exit the handler produces on platforms
+  // that deliver the signal.
+  assert.equal(
+    result.signal === "SIGTERM" || result.code === 0,
+    true,
+    `unexpected Hub exit: code=${result.code} signal=${result.signal}`,
+  );
   assert.match(result.stdout, /registry listening/);
 });
 

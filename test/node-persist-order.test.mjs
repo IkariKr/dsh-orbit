@@ -6,7 +6,8 @@
 // intent before any network request.
 
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -69,10 +70,13 @@ test("a forced write failure never mutates memory or disk, and no network reques
   assert.equal(client.store.pendingEnrollment, null);
   assert.equal(client.store.updatedAt, null);
 
-  // Disk unchanged: the retry must be able to start from an intact store.
-  const onDisk = await loadNodeStoreAsync(statePath);
-  assert.equal(onDisk.pendingEnrollment, null);
-  assert.equal(onDisk.state, "unenrolled");
+  // Disk unchanged: nothing was created beside the blocker and the blocker is
+  // intact. This is asserted on the filesystem rather than through
+  // loadNodeStoreAsync, because an unreadable parent path reports ENOTDIR on
+  // POSIX while the loader deliberately fails closed for every error other
+  // than ENOENT — reading it back would test the fixture, not the write path.
+  assert.equal(existsSync(statePath), false);
+  assert.equal(await readFile(blocker, "utf8"), "not a directory");
 
   // No network request was made before the intent existed on disk.
   assert.equal(requests.length, 0);
