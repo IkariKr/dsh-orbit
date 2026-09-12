@@ -140,36 +140,19 @@ test("patches and verifies a supported client-connection root", async () => {
   assert.equal(second.client, "ok");
 });
 
-test("patches and verifies the 0.1.2-rc.1 client-connection layout", async () => {
-  const root = await fixture({ serverSource: SERVER_SOURCE_V2 });
-  const options = {
-    root,
-    dshVersion: "0.1.2-rc.1",
-    publicHost: "dsh.example.com",
-    proxyAuthFile: "/run/secrets/dsh_proxy_auth",
-  };
-
-  const result = await patchConnectionRoot(options);
-  assert.equal(result.server, "patched");
-  assert.equal(result.client, "patched");
-
-  const server = await readFile(join(root, "index.js"), "utf8");
-  assert.match(server, /import \{ readFileSync \} from "node:fs";/);
-  assert.match(server, /createHash, createHmac, randomBytes, timingSafeEqual/);
-  assert.doesNotMatch(server, /randomUUID/);
-  assert.match(server, /isDshOrbitAuthenticatedProxyRequest/);
-
-  await verifyConnectionRoot({ root, publicHost: "dsh.example.com" });
+test("keeps the reviewed 0.1.2+ bundle anchor available for the investigation", async () => {
+  // 0.1.2-rc.1 is INVESTIGATION_ONLY, not a baseline, but the byte-exact anchor
+  // discovered for its bundle generation is reviewed knowledge that the 0.1.5
+  // investigation depends on, so losing it would silently discard the finding.
+  const source = await readFile(new URL("../src/remote-settings-patch.mjs", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /"connection-v2": 'import \{ createHash, createHmac, randomBytes, timingSafeEqual \} from "node:crypto";\\n'/,
+  );
 });
 
-test("fails closed when a version's reviewed import anchor is missing", async () => {
-  const root = await fixture({
-    serverSource: SERVER_SOURCE_V2.replace(
-      'import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";\n',
-      "",
-    ),
-  });
-
+test("refuses to patch an investigation-only version", async () => {
+  const root = await fixture({ serverSource: SERVER_SOURCE_V2 });
   await assert.rejects(
     () =>
       patchConnectionRoot({
@@ -178,7 +161,7 @@ test("fails closed when a version's reviewed import anchor is missing", async ()
         publicHost: "dsh.example.com",
         proxyAuthFile: "/run/secrets/dsh_proxy_auth",
       }),
-    /missing client-connection crypto import/,
+    /Unsupported DeepSeek Harness version/,
   );
 });
 
