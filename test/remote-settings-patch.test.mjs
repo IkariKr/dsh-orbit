@@ -40,6 +40,14 @@ const CLIENT_SOURCE = `function isLoopbackHostname(hostname) {
 }
 `;
 
+// 0.1.2-rc.1 rebuilt this bundle: randomUUID is gone and the node:crypto import
+// changed. That single line is the only anchor difference between the reviewed
+// connection-v1 and connection-v2 generations.
+const SERVER_SOURCE_V2 = SERVER_SOURCE.replace(
+  'import { randomUUID } from "node:crypto";',
+  'import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";',
+);
+
 const LEGACY_SERVER_SOURCE = `import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -130,6 +138,48 @@ test("patches and verifies a supported client-connection root", async () => {
   const second = await patchConnectionRoot(options);
   assert.equal(second.server, "ok");
   assert.equal(second.client, "ok");
+});
+
+test("patches and verifies the 0.1.2-rc.1 client-connection layout", async () => {
+  const root = await fixture({ serverSource: SERVER_SOURCE_V2 });
+  const options = {
+    root,
+    dshVersion: "0.1.2-rc.1",
+    publicHost: "dsh.example.com",
+    proxyAuthFile: "/run/secrets/dsh_proxy_auth",
+  };
+
+  const result = await patchConnectionRoot(options);
+  assert.equal(result.server, "patched");
+  assert.equal(result.client, "patched");
+
+  const server = await readFile(join(root, "index.js"), "utf8");
+  assert.match(server, /import \{ readFileSync \} from "node:fs";/);
+  assert.match(server, /createHash, createHmac, randomBytes, timingSafeEqual/);
+  assert.doesNotMatch(server, /randomUUID/);
+  assert.match(server, /isDshOrbitAuthenticatedProxyRequest/);
+
+  await verifyConnectionRoot({ root, publicHost: "dsh.example.com" });
+});
+
+test("fails closed when a version's reviewed import anchor is missing", async () => {
+  const root = await fixture({
+    serverSource: SERVER_SOURCE_V2.replace(
+      'import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";\n',
+      "",
+    ),
+  });
+
+  await assert.rejects(
+    () =>
+      patchConnectionRoot({
+        root,
+        dshVersion: "0.1.2-rc.1",
+        publicHost: "dsh.example.com",
+        proxyAuthFile: "/run/secrets/dsh_proxy_auth",
+      }),
+    /missing client-connection crypto import/,
+  );
 });
 
 test("migrates the pre-Orbit authenticated proxy patch", async () => {

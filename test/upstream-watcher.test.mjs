@@ -66,13 +66,13 @@ test("an unknown published version is recorded without modifying the registry st
       const { code, stdout } = await runWatcher(registry.url, jsonOut);
       assert.equal(code, 0);
       assert.match(stdout, /upstream dsh: 9\.9\.9-future \(unknown\)/);
-      assert.match(stdout, /known compatibility profiles: 0\.1\.1-rc\.2/);
+      assert.match(stdout, /known compatibility profiles: 0\.1\.2-rc\.1, 0\.1\.1-rc\.2/);
       assert.match(stdout, /review required before any support claim/);
 
       const report = JSON.parse(await readFile(jsonOut, "utf8"));
       assert.equal(report.latestVersion, "9.9.9-future");
       assert.equal(report.classification, "unknown");
-      assert.deepEqual(report.knownProfiles, ["0.1.1-rc.2"]);
+      assert.deepEqual(report.knownProfiles, ["0.1.2-rc.1", "0.1.1-rc.2"]);
     } finally {
       registry.close();
     }

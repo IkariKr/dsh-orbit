@@ -4,6 +4,18 @@ import { compatibilityFor } from "./compatibility.mjs";
 const SERVER_MARKER = 'const DSH_ORBIT_PROXY_HEADER = "x-dsh-orbit-authenticated-proxy";';
 const LEGACY_SERVER_MARKER = 'const REMOTE_PROXY_AUTH_HEADER = "x-dsh-authenticated-proxy";';
 
+// Byte-exact import anchors per reviewed patch generation. The runtime auth
+// block needs readFileSync, so the patch injects that import after the anchor.
+// 0.1.2-rc.1 restructured the client-connection bundle and no longer imports
+// randomUUID, so the anchor is selected by the reviewed profile rather than by
+// the version. A missing anchor fails closed instead of producing a silently
+// unpatched client.
+const IMPORT_ANCHORS = Object.freeze({
+  "connection-v1": 'import { randomUUID } from "node:crypto";\n',
+  "connection-v2": 'import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";\n',
+});
+const FS_IMPORT = 'import { readFileSync } from "node:fs";\n';
+
 function replaceExactlyOnce(source, needle, replacement, label) {
   const first = source.indexOf(needle);
   if (first < 0) {
@@ -24,7 +36,7 @@ export function validateHost(publicHost) {
   }
 }
 
-function patchServer(source, { publicHost, proxyAuthFile }) {
+function patchServer(source, { publicHost, proxyAuthFile, connectionPatch }) {
   if (source.includes(SERVER_MARKER)) {
     return { source, changed: false };
   }
@@ -75,10 +87,17 @@ function isDshOrbitAuthenticatedProxyRequest(request, hostUrl) {
     return { source, changed: true };
   }
 
+  const anchor = IMPORT_ANCHORS[connectionPatch];
+  if (anchor === undefined) {
+    throw new Error(
+      `DSH Orbit patch failed: unknown connection patch profile ${JSON.stringify(connectionPatch)}`,
+    );
+  }
+
   source = replaceExactlyOnce(
     source,
-    'import { randomUUID } from "node:crypto";\n',
-    'import { randomUUID } from "node:crypto";\nimport { readFileSync } from "node:fs";\n',
+    anchor,
+    anchor + FS_IMPORT,
     "client-connection crypto import",
   );
 
@@ -127,7 +146,7 @@ export async function patchConnectionRoot({
   proxyAuthFile,
 }) {
   validateHost(publicHost);
-  compatibilityFor(dshVersion);
+  const profile = compatibilityFor(dshVersion);
 
   const serverPath = `${root}/index.js`;
   const clientPath = `${root}/client.js`;
@@ -136,7 +155,11 @@ export async function patchConnectionRoot({
     readFile(clientPath, "utf8"),
   ]);
 
-  const server = patchServer(serverSource, { publicHost, proxyAuthFile });
+  const server = patchServer(serverSource, {
+    publicHost,
+    proxyAuthFile,
+    connectionPatch: profile.connectionPatch,
+  });
   const client = patchClient(clientSource, { publicHost });
 
   if (server.changed) await writeFile(serverPath, server.source, "utf8");
