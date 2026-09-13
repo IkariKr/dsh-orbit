@@ -198,7 +198,10 @@ test("BrowserAuth generation resolves the pre-upgrade session and re-selects its
   ]);
 });
 
-test("BrowserAuth generation falls back to the model catalog default when no selection is recorded", async () => {
+test("BrowserAuth generation fails a historical session whose selection cannot be recovered", async () => {
+  // The deployment-wide default must never stand in for the session's own
+  // recorded selection: losing that projection is precisely the upgrade
+  // continuity failure this smoke exists to catch.
   const result = await withServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
@@ -217,32 +220,12 @@ test("BrowserAuth generation falls back to the model catalog default when no sel
       return;
     }
 
-    if (body.method === "session/modelCatalog") {
-      assert.deepEqual(body.payload, { args: {} });
-      respond(res, body.rpcId, {
-        ok: true,
-        value: { default: { provider: "provider-a", model: "model-a" }, routableProviders: [], groups: [] },
-      });
-      return;
-    }
-
-    if (body.method === "session/selectModel") {
-      assert.deepEqual(body.payload, {
-        args: { request: { sessionId: "session-test", provider: "provider-a", model: "model-a" } },
-      });
-      respond(res, body.rpcId, {
-        ok: true,
-        value: { selected: { provider: "provider-a", model: "model-a" } },
-      });
-      return;
-    }
-
     res.writeHead(404).end();
   }, (baseUrl) => runSmoke(baseUrl, { generation: "connection-browser-auth-v1" }));
 
-  assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /model catalog default: provider-a\/model-a/);
-  assert.match(result.stdout, /sessionResume: pass/);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /carries no recoverable model selection/);
+  assert.match(result.stderr, /deployment-wide default/);
 });
 
 test("BrowserAuth generation fails when the pre-upgrade session is not resolvable", async () => {

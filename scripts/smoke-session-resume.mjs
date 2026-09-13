@@ -100,7 +100,11 @@ try {
     // pre-upgrade session must appear in the candidate's own session listing —
     // that is the resolve step — and its recorded selection is re-selected
     // through session/selectModel, which forces the session to load without
-    // changing the model choice or prompting any business side effect.
+    // changing the model choice or prompting any business side effect. There is
+    // deliberately no fallback to the deployment-wide model catalog: a
+    // historical session whose recorded selection cannot be recovered is
+    // exactly the upgrade-continuity failure this smoke exists to catch, and
+    // selecting the global default would launder it into a pass.
     const list = await rpc("session", "list", { _request: {} });
     const item = list?.items?.find((entry) => entry.sessionId === sessionId);
     if (!item) {
@@ -109,19 +113,17 @@ try {
       );
     }
 
-    let source = "recorded selection";
-    let selection = item.projections?.values?.modelSelection?.next
+    const selection =
+      item.projections?.values?.modelSelection?.next
       ?? item.projections?.values?.modelSelection?.lastUsed;
     if (!selection?.provider || !selection?.model) {
-      const catalog = await rpc("session", "modelCatalog", {});
-      selection = catalog?.default;
-      source = "model catalog default";
-      if (!selection?.provider || !selection?.model) {
-        throw new Error("session model catalog: default model selection is incomplete");
-      }
+      throw new Error(
+        `session list: pre-upgrade session ${JSON.stringify(sessionId)} carries no recoverable model selection; ` +
+          "existing-session continuity cannot be verified against the deployment-wide default",
+      );
     }
 
-    console.log(`session list: ok (${sessionId.slice(0, 8)}…, ${source}: ${formatSelection(selection)})`);
+    console.log(`session list: ok (${sessionId.slice(0, 8)}…, recorded selection: ${formatSelection(selection)})`);
 
     const request = { sessionId, provider: selection.provider, model: selection.model };
     if (selection.reasoningEffort) request.reasoningEffort = selection.reasoningEffort;

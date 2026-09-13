@@ -45,7 +45,7 @@ The container is considered ready only after the profile-local patch has been ap
 
 ### 6. Run smoke tests
 
-The candidate acceptance must state which reviewed connection generation the candidate speaks: the runner requires `DSH_SMOKE_CONNECTION_PATCH`, it must match the generation recorded for the candidate DSH version in `src/compatibility.mjs`, and the smoke suites select their wire vocabulary (endpoint names and payload shape) from it. At minimum verify:
+The candidate acceptance speaks a reviewed connection generation: the runner derives it from the candidate DSH version's profile in `src/compatibility.mjs` (an explicit `DSH_SMOKE_CONNECTION_PATCH` is accepted only when it agrees), and the smoke suites select their wire vocabulary (endpoint names and payload shape) from it. Standalone smoke runs have no version context and must declare the generation themselves. At minimum verify:
 
 - the DSH web UI loads;
 - a lazy-loaded plugin asset or route that uses the upstream browser-trust fence loads through the public host;
@@ -55,7 +55,7 @@ The candidate acceptance must state which reviewed connection generation the can
 - at least one session created before the upgrade can be resumed and can re-select its current model;
 - a request without the internal proxy secret is rejected;
 - a cross-site request is rejected;
-- on the `connection-v1` generation, a local proxy cannot spoof an identity-provider assertion header (the BrowserAuth generation covers proof forging by stripping client-supplied DSH proof headers at the Hub and the Node);
+- a local proxy cannot spoof an identity-provider assertion header: a client-supplied assertion on the local/LAN path is never turned into authenticated traffic (this authorization contract is generation-independent; the generation only decides the probed endpoint and payload shape);
 - WebSocket and long-running agent traffic still work;
 - a sidebar terminal can open a PTY and run `dsh --version`, which also verifies the persisted profile's `node-pty` native binding for the candidate container.
 

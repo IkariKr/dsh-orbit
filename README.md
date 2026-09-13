@@ -160,7 +160,7 @@ DSH_SMOKE_BASIC_PASSWORD='<local-password>' \
 npm run smoke:auth
 ```
 
-Both credential variables are required: the supported auth path for this suite is the gateway's local Basic Auth path. The suite proves the following outcomes against the generation's settings-read endpoint:
+Both credential variables are required: the supported auth path for this suite is the gateway's local Basic Auth path. The suite proves the following outcomes against the generation's settings-read endpoint, for every reviewed connection generation:
 
 | Case | Expected result |
 | --- | --- |
@@ -169,9 +169,9 @@ Both credential variables are required: the supported auth path for this suite i
 | invalid credentials | denied |
 | unexpected `Origin` | denied |
 | `Sec-Fetch-Site: cross-site` | denied |
-| forged `Cf-Access-Jwt-Assertion` on the local path | denied (`connection-v1` only) |
+| forged `Cf-Access-Jwt-Assertion` on the local path | denied |
 
-The last row is a `connection-v1` control only: that generation's reviewed fence extension rejects forged privilege headers on the candidate itself. The BrowserAuth generation (`connection-browser-auth-v1`) decides such a request on its own path — measured on the real patched 0.1.5-rc.2 process, a forged assertion next to a valid Orbit proof is admitted — and a client-supplied DSH proof header is stripped at the Hub and the Node before it can reach DSH, so forging the proof is covered there rather than as a DSH denial case.
+The forged-assertion case is generation-independent: it verifies the documented proxy topology, not raw DSH. A client-supplied identity-provider assertion on the local/LAN path must never be turned into authenticated traffic — the denial is produced by the gateway chain in front of DSH (the local Basic Auth path never honors such a header), while the connection generation only decides which settings endpoint and payload shape the suite probes.
 
 The suite never needs the internal proxy secret — the gateway injects it after authenticating the user, and exposing that secret to a client would itself be a failure. It exits non-zero when any case mismatches, and normal and failure output never include credentials or response bodies.
 
@@ -204,7 +204,7 @@ npm run upgrade -- verify      # verification sequence plus report against a run
 npm run upgrade -- report      # regenerate the report from the run directory
 ```
 
-Configuration comes from the environment. Candidate identity: `DSH_VERSION` (candidate DSH version), `DSH_CANDIDATE_ORBIT_REVISION` (the Orbit revision the candidate is built from), `DSH_CANDIDATE_IMAGE`, `DSH_CANDIDATE_DATA_ROOT`, `DSH_CANDIDATE_WORKSPACE_ROOT`, `DSH_UPGRADE_HOST_PORT` (the isolated loopback port). Baseline identity (the rollback target): `DSH_BASELINE_IMAGE`, `DSH_BASELINE_ORBIT_REVISION`, `DSH_BASELINE_DSH_VERSION`. Gateway and checks: `DSH_PUBLIC_HOST`, `DSH_SMOKE_URL` (the candidate endpoint), `DSH_SMOKE_CONNECTION_PATCH` (the reviewed connection patch generation the candidate speaks; must match the generation recorded for the candidate DSH version in `src/compatibility.mjs`), `DSH_SMOKE_BASIC_USER`/`DSH_SMOKE_BASIC_PASSWORD`, `DSH_SMOKE_SESSION_ID` (a pre-upgrade session), `DSH_SMOKE_ORIGIN` (when the gateway rewrites the Host), `DSH_DATA_ROOT` (production data), `DSH_SNAPSHOT_HOOK`. Optional: `DSH_ORBIT_VERSION`, `DSH_UPGRADE_PROJECT`, `DSH_UPGRADE_COMPOSE`, `DSH_UPGRADE_WORKDIR`, `DSH_SNAPSHOT_TIMEOUT_SECONDS`, `DSH_UPGRADE_GATEWAY_SERVICE` (default `caddy`), `DSH_UPGRADE_GATEWAY_CERT_TARGET` (default `/run/certs/fullchain.pem`, matching the public example compose), `DSH_UPGRADE_GATEWAY_KEY_TARGET` (default `/run/certs/privkey.pem`). Deployments whose gateway reads certificates elsewhere must set the two targets, and the base compose gateway must already mount a certificate at those targets.
+Configuration comes from the environment. Candidate identity: `DSH_VERSION` (candidate DSH version), `DSH_CANDIDATE_ORBIT_REVISION` (the Orbit revision the candidate is built from), `DSH_CANDIDATE_IMAGE`, `DSH_CANDIDATE_DATA_ROOT`, `DSH_CANDIDATE_WORKSPACE_ROOT`, `DSH_UPGRADE_HOST_PORT` (the isolated loopback port). Baseline identity (the rollback target): `DSH_BASELINE_IMAGE`, `DSH_BASELINE_ORBIT_REVISION`, `DSH_BASELINE_DSH_VERSION`. Gateway and checks: `DSH_PUBLIC_HOST`, `DSH_SMOKE_URL` (the candidate endpoint), `DSH_SMOKE_BASIC_USER`/`DSH_SMOKE_BASIC_PASSWORD`, `DSH_SMOKE_SESSION_ID` (a pre-upgrade session), `DSH_SMOKE_ORIGIN` (when the gateway rewrites the Host), `DSH_DATA_ROOT` (production data), `DSH_SNAPSHOT_HOOK`. Optional: `DSH_ORBIT_VERSION`, `DSH_UPGRADE_PROJECT`, `DSH_UPGRADE_COMPOSE`, `DSH_UPGRADE_WORKDIR`, `DSH_SNAPSHOT_TIMEOUT_SECONDS`, `DSH_UPGRADE_GATEWAY_SERVICE` (default `caddy`), `DSH_UPGRADE_GATEWAY_CERT_TARGET` (default `/run/certs/fullchain.pem`, matching the public example compose), `DSH_UPGRADE_GATEWAY_KEY_TARGET` (default `/run/certs/privkey.pem`). Deployments whose gateway reads certificates elsewhere must set the two targets, and the base compose gateway must already mount a certificate at those targets.
 
 Optional terminal fence (legacy third-party compatibility debt, ADR-0001 — freeze-only, no new features, removed once DSH provides a generic trusted-client/authenticated-proxy capability; see `docs/third-party-debt.md`): set `DSH_ORBIT_PATCH_DSH_SSH=1` (also passed into the candidate container) to patch the `@linxin666/dsh-ssh` loopback-only fence so the authenticated Orbit proxy path can open remote PTY terminals. The patch is version-pinned (default `0.3.2`, override with `DSH_SSH_PLUGIN_VERSION`), uses exact source matching, and keeps loopback access plus all other denials intact; `DSH_SSH_PLUGIN_ROOT` overrides the plugin location. With the fence enabled, the candidate verification sequence runs the terminal authorization smoke (`npm run smoke:terminal`) — 6 cases against the live endpoint — and a failed terminal gate blocks promotion eligibility.
 

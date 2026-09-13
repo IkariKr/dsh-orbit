@@ -51,17 +51,18 @@ let session = null;
 before(async () => {
   if (!dshRoot) return;
   const lockPath = await acquireDsh015AcceptanceLock(dshRoot);
-  const identity = assertDsh015Identity(dshRoot);
-
-  const dshHome = await mkdtemp(join(tmpdir(), "orbit-smoke-qual-home-"));
-  const proxyAuthFile = join(dshHome, "orbit-proxy-secret");
-  await writeFile(proxyAuthFile, PROXY_SECRET, "utf8");
-
   let boot = null;
   let pristine = null;
   let bundleDir = null;
   let emulator = null;
+  let dshHome = null;
   try {
+    const identity = assertDsh015Identity(dshRoot);
+
+    dshHome = await mkdtemp(join(tmpdir(), "orbit-smoke-qual-home-"));
+    const proxyAuthFile = join(dshHome, "orbit-proxy-secret");
+    await writeFile(proxyAuthFile, PROXY_SECRET, "utf8");
+
     boot = await startDshWeb({ dshRoot, dshHome, trustedHosts: [PUBLIC_HOST] });
     await boot.stop();
     bundleDir = assertProfileLinksToBuiltBundle(dshHome, dshRoot);
@@ -105,24 +106,38 @@ before(async () => {
       endpoint: `http://127.0.0.1:${emulatorPort}`,
     };
   } catch (error) {
+    // Best-effort teardown: a failed identity assertion must not leave the
+    // acceptance environment patched or the lock held.
     await boot?.stop();
     await emulator?.close();
-    if (bundleDir && pristine) restoreBundleBytes(bundleDir, pristine);
-    await rm(dshHome, { recursive: true, force: true });
-    releaseDsh015AcceptanceLock(lockPath);
+    if (bundleDir && pristine) {
+      try {
+        restoreBundleBytes(bundleDir, pristine);
+      } catch {
+        // Nothing further to do; the digest gate will catch a bad restore.
+      }
+    }
+    if (dshHome) await rm(dshHome, { recursive: true, force: true }).catch(() => {});
     throw error;
+  } finally {
+    // The lock is held only while the acceptance owns the bundle; on success
+    // `after` releases it, on any failure it is released here unconditionally.
+    if (!session) releaseDsh015AcceptanceLock(lockPath);
   }
 });
 
 after(async () => {
   if (!session) return;
-  await session.boot.stop();
-  await session.emulator.close();
-  restoreBundleBytes(session.bundleDir, session.pristine);
-  assertPristineBundle(session.bundleDir);
-  assertBuildArtifacts(session.dshRoot);
-  await rm(session.dshHome, { recursive: true, force: true });
-  releaseDsh015AcceptanceLock(session.lockPath);
+  try {
+    await session.boot.stop();
+    await session.emulator.close();
+    restoreBundleBytes(session.bundleDir, session.pristine);
+    assertPristineBundle(session.bundleDir);
+    assertBuildArtifacts(session.dshRoot);
+    await rm(session.dshHome, { recursive: true, force: true });
+  } finally {
+    releaseDsh015AcceptanceLock(session.lockPath);
+  }
 });
 
 function live(t) {
@@ -168,27 +183,25 @@ test("smoke-auth proves the authorization matrix on the real 0.1.5 process", asy
   if (!live(t)) return;
   const { code, stdout, stderr } = await runSmoke(fileURLToPath(new URL("../scripts/smoke-auth.mjs", import.meta.url)), {});
   assert.equal(code, 0, stderr);
-  assert.match(stdout, new RegExp(`^authorizationSmoke: pass \\(${GENERATION}, 5/5 cases matched\\)$`, "m"));
+  assert.match(stdout, new RegExp(`^authorizationSmoke: pass \\(${GENERATION}, 6/6 cases matched\\)$`, "m"));
 });
 
-test("smoke-session-resume resolves and resumes a session created on the candidate", async (t) => {
-  if (!live(t)) return;
+function qualifyHeaders() {
+  return {
+    authorization: `Basic ${Buffer.from(`${BASIC_USER}:${BASIC_PASSWORD}`).toString("base64")}`,
+    origin: `https://${PUBLIC_HOST}`,
+    "sec-fetch-site": "same-origin",
+    "content-type": "application/json",
+  };
+}
 
-  // Create the session through the deployed chain; it stands in for the
-  // pre-upgrade session that the E9 evidence run takes from copied production
-  // data. The smoke semantics are identical: resolve it on the candidate,
-  // read its selection, re-select it without changing the model choice.
+async function createQualificationSession() {
   const created = await fetch(`${session.endpoint}/api/session/create`, {
     method: "POST",
-    headers: {
-      authorization: `Basic ${Buffer.from(`${BASIC_USER}:${BASIC_PASSWORD}`).toString("base64")}`,
-      origin: `https://${PUBLIC_HOST}`,
-      "sec-fetch-site": "same-origin",
-      "content-type": "application/json",
-    },
+    headers: qualifyHeaders(),
     body: JSON.stringify({
       type: "client-request",
-      rpcId: "orbit-qual-session-create",
+      rpcId: `orbit-qual-session-create-${Date.now()}`,
       method: "session/create",
       payload: { args: { request: {} } },
     }),
@@ -197,13 +210,73 @@ test("smoke-session-resume resolves and resumes a session created on the candida
   const createdBody = await created.json();
   const sessionId = createdBody?.result?.value?.sessionId;
   assert.ok(typeof sessionId === "string" && sessionId.length > 0, "session/create must return a sessionId");
+  return sessionId;
+}
+
+test("smoke-session-resume re-selects a seeded recorded selection on a historical session", async (t) => {
+  if (!live(t)) return;
+
+  // Create the session through the deployed chain; it stands in for the
+  // pre-upgrade session that the E9 evidence run takes from copied production
+  // data. The smoke must recover the session's own recorded selection — never
+  // the deployment-wide default — so the session is seeded with a known model
+  // selection first and the smoke is required to re-select exactly that.
+  const sessionId = await createQualificationSession();
+
+  const seed = await fetch(`${session.endpoint}/api/session/modelCatalog`, {
+    method: "POST",
+    headers: qualifyHeaders(),
+    body: JSON.stringify({
+      type: "client-request",
+      rpcId: "orbit-qual-catalog",
+      method: "session/modelCatalog",
+      payload: { args: {} },
+    }),
+  });
+  assert.equal(seed.status, 200, "the candidate must admit the model catalog read");
+  const catalog = (await seed.json())?.result?.value;
+  const seededSelection = catalog?.default;
+  assert.ok(seededSelection?.provider && seededSelection?.model, "the catalog must publish a default selection");
+
+  const selected = await fetch(`${session.endpoint}/api/session/selectModel`, {
+    method: "POST",
+    headers: qualifyHeaders(),
+    body: JSON.stringify({
+      type: "client-request",
+      rpcId: "orbit-qual-seed-selection",
+      method: "session/selectModel",
+      payload: { args: { request: { sessionId, ...seededSelection } } },
+    }),
+  });
+  assert.equal(selected.status, 200, "seeding the known selection must succeed");
 
   const { code, stdout, stderr } = await runSmoke(
     fileURLToPath(new URL("../scripts/smoke-session-resume.mjs", import.meta.url)),
     { DSH_SMOKE_SESSION_ID: sessionId },
   );
   assert.equal(code, 0, stderr);
+  assert.match(stdout, /recorded selection: /, "the smoke must recover the session's recorded selection");
+  assert.ok(
+    !stdout.includes("model catalog default"),
+    "the deployment-wide default must never stand in for the recorded selection",
+  );
+  assert.match(stdout, new RegExp(`recorded selection: ${seededSelection.provider}/${seededSelection.model}`));
   assert.match(stdout, /^sessionResume: pass \(existing session resumed on the candidate\)$/m);
+});
+
+test("smoke-session-resume fails a historical session with no recoverable selection", async (t) => {
+  if (!live(t)) return;
+
+  // A session without a recorded selection is the failure shape an upgrade or
+  // migration produces when it loses session projections. The smoke must fail
+  // it rather than launder it through the deployment-wide default.
+  const sessionId = await createQualificationSession();
+  const { code, stderr } = await runSmoke(
+    fileURLToPath(new URL("../scripts/smoke-session-resume.mjs", import.meta.url)),
+    { DSH_SMOKE_SESSION_ID: sessionId },
+  );
+  assert.notEqual(code, 0, "a selection-less historical session must fail the resume smoke");
+  assert.match(stderr, /carries no recoverable model selection/);
 });
 
 test("smoke-websocket proves the remote.mux open -> ready handshake on the real process", async (t) => {

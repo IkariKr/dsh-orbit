@@ -12,9 +12,10 @@ const TEST_PASSWORD = "orbit-test-password";
 const VALID_AUTHORIZATION = `Basic ${Buffer.from(`${USER}:${TEST_PASSWORD}`).toString("base64")}`;
 
 // The wire vocabulary each reviewed generation speaks (src/dsh-wire-contract.mjs).
+// The authorization matrix itself is generation-independent: six cases for both.
 const GENERATIONS = {
-  "connection-v1": { method: "settings.describe", payload: {}, cases: 6, forgedHeader: true },
-  "connection-browser-auth-v1": { method: "settings/describe", payload: { args: {} }, cases: 5, forgedHeader: false },
+  "connection-v1": { method: "settings.describe", payload: {}, cases: 6 },
+  "connection-browser-auth-v1": { method: "settings/describe", payload: { args: {} }, cases: 6 },
 };
 
 async function withServer(handler, run) {
@@ -101,15 +102,11 @@ for (const [generation, wire] of Object.entries(GENERATIONS)) {
     assert.match(stdout, /PASS denied: invalid Basic credentials/);
     assert.match(stdout, /PASS denied: unexpected Origin/);
     assert.match(stdout, /PASS denied: Sec-Fetch-Site: cross-site/);
-    assert.match(stdout, new RegExp(`authorizationSmoke: pass \\(${generation}, ${wire.cases}/${wire.cases} cases matched\\)`));
-    if (wire.forgedHeader) {
-      assert.match(stdout, /PASS denied: forged Cf-Access-Jwt-Assertion/);
-    } else {
-      // Measured on the real patched 0.1.5-rc.2 process: the BrowserAuth
-      // generation decides such a request on its own path, so the forged
-      // privilege header is not a DSH denial case for this generation.
-      assert.ok(!stdout.includes("forged Cf-Access-Jwt-Assertion"));
-    }
+    assert.match(stdout, /PASS denied: forged Cf-Access-Jwt-Assertion/);
+    assert.match(
+      stdout,
+      new RegExp(`authorizationSmoke: pass \\(${generation}, ${wire.cases}/${wire.cases} cases matched\\)`),
+    );
     assert.ok(!stdout.includes(TEST_PASSWORD));
     assert.ok(!stdout.includes(VALID_AUTHORIZATION));
   });

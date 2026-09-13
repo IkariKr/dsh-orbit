@@ -161,24 +161,22 @@ const cases = [
   },
 ];
 
-// connection-v1's reviewed fence extension rejects forged privilege headers on
-// the candidate itself. The BrowserAuth generation decides such a request on
-// its own path instead: measured on the real patched 0.1.5-rc.2 process, a
-// forged Cf-Access assertion next to a valid Orbit proof is admitted, and
-// client-supplied DSH proof headers are stripped at the Hub and the Node so a
-// forged proof can never reach DSH through Orbit. Forging the proof is
-// therefore covered there, not as a DSH denial case.
-if (generation === "connection-v1") {
-  cases.push({
-    name: "forged Cf-Access-Jwt-Assertion",
-    expect: "denied",
-    headers: {
-      "cf-access-jwt-assertion": "orbit-auth-smoke-forged-assertion",
-      origin,
-      "sec-fetch-site": "same-origin",
-    },
-  });
-}
+// The forged identity-provider assertion case is generation-independent. It
+// does not test whether raw DSH recognizes a forged header (measured on the
+// real patched 0.1.5-rc.2 process, a forged assertion next to a valid Orbit
+// proof is admitted); it tests the documented proxy topology: a client-supplied
+// assertion on the local/LAN path must never be turned into authenticated
+// traffic, so the denial is produced by the gateway chain in front of DSH. The
+// generation only decides the RPC endpoint and payload shape probed below.
+cases.push({
+  name: "forged Cf-Access-Jwt-Assertion",
+  expect: "denied",
+  headers: {
+    "cf-access-jwt-assertion": "orbit-auth-smoke-forged-assertion",
+    origin,
+    "sec-fetch-site": "same-origin",
+  },
+});
 
 let failures = 0;
 for (const testCase of cases) {

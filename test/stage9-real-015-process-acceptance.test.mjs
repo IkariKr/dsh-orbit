@@ -61,16 +61,17 @@ let session = null;
 before(async () => {
   if (!dshRoot) return;
   const lockPath = await acquireDsh015AcceptanceLock(dshRoot);
-  const identity = assertDsh015Identity(dshRoot);
-
-  const dshHome = await mkdtemp(join(tmpdir(), "orbit-stage9-home-"));
-  const proxyAuthFile = join(dshHome, "orbit-proxy-secret");
-  await writeFile(proxyAuthFile, PROXY_SECRET, "utf8");
-
   let boot = null;
   let pristine = null;
   let bundleDir = null;
+  let dshHome = null;
   try {
+    const identity = assertDsh015Identity(dshRoot);
+
+    dshHome = await mkdtemp(join(tmpdir(), "orbit-stage9-home-"));
+    const proxyAuthFile = join(dshHome, "orbit-proxy-secret");
+    await writeFile(proxyAuthFile, PROXY_SECRET, "utf8");
+
     // Phase 1: bootstrap the profile tree so the connection package is linked.
     boot = await startDshWeb({ dshRoot, dshHome, trustedHosts: [PUBLIC_HOST, OTHER_HOST] });
     await boot.stop();
@@ -101,26 +102,40 @@ before(async () => {
     boot = await startDshWeb({ dshRoot, dshHome, trustedHosts: [PUBLIC_HOST, OTHER_HOST] });
     session = { ...identity, dshRoot, dshHome, bundleDir, pristine, boot, lockPath };
   } catch (error) {
+    // Best-effort teardown: a failed identity assertion must not leave the
+    // acceptance environment patched or the lock held.
     await boot?.stop();
-    if (bundleDir && pristine) restoreBundleBytes(bundleDir, pristine);
-    await rm(dshHome, { recursive: true, force: true });
-    releaseDsh015AcceptanceLock(lockPath);
+    if (bundleDir && pristine) {
+      try {
+        restoreBundleBytes(bundleDir, pristine);
+      } catch {
+        // Nothing further to do; the digest gate will catch a bad restore.
+      }
+    }
+    if (dshHome) await rm(dshHome, { recursive: true, force: true }).catch(() => {});
     throw error;
+  } finally {
+    // The lock is held only while the acceptance owns the bundle; on success
+    // `after` releases it, on any failure it is released here unconditionally.
+    if (!session) releaseDsh015AcceptanceLock(lockPath);
   }
 });
 
 after(async () => {
   if (!session) return;
-  await session.boot.stop();
-  // Restore the upstream build artifact byte for byte, then prove it: the
-  // checkout must not be left carrying an Orbit patch.
-  restoreBundleBytes(session.bundleDir, session.pristine);
-  assertPristineBundle(session.bundleDir);
-  // Byte-level closure: the restored artifact must hash back to the reviewed
-  // digest, so "restored" cannot mean "a different build that lacks the marker".
-  assertBuildArtifacts(session.dshRoot);
-  await rm(session.dshHome, { recursive: true, force: true });
-  releaseDsh015AcceptanceLock(session.lockPath);
+  try {
+    await session.boot.stop();
+    // Restore the upstream build artifact byte for byte, then prove it: the
+    // checkout must not be left carrying an Orbit patch.
+    restoreBundleBytes(session.bundleDir, session.pristine);
+    assertPristineBundle(session.bundleDir);
+    // Byte-level closure: the restored artifact must hash back to the reviewed
+    // digest, so "restored" cannot mean "a different build that lacks the marker".
+    assertBuildArtifacts(session.dshRoot);
+    await rm(session.dshHome, { recursive: true, force: true });
+  } finally {
+    releaseDsh015AcceptanceLock(session.lockPath);
+  }
 });
 
 function live(t) {
