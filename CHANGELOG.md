@@ -6,6 +6,16 @@ The project follows Semantic Versioning once the public API and deployment contr
 
 ## Unreleased
 
+### 0.4.1-rc.1 candidate - 2026-09-13
+
+### Changed
+
+- **Shipping baseline**: this candidate selects DeepSeek Harness `0.1.5-rc.2` as the shipping baseline (qualification status pending the E9 compatibility run). `0.1.1-rc.2` remains a supported legacy profile. Compatibility Refresh Patch Release per `docs/dsh-version-policy.md`.
+- **BrowserAuth compatibility generation**: new `connection-browser-auth-v1` patch generation for the 0.1.2+ transport — HostConnectionService second authentication path, tokenless index admission, slash-separated Remote endpoints over one bidirectional `/api/remote.mux`.
+- **Generation wire contract**: endpoint names, payload shapes, and stream semantics are derived from the reviewed connection generation (`src/dsh-wire-contract.mjs`) in the canonical smokes, the upgrade runner, and the mounted drill — no version-range heuristics.
+- **Node-local DSH compatibility adapter**: shipped wiring in the product compose (shared DSH network namespace, host-loopback publication on 3081) and the RouteIngress default DSH target; adapter-only Orbit proof injection, client-supplied proof headers stripped at the Hub and the Node.
+- **Canonical smokes**: settings, authorization (6/6 matrix for both generations), session resume (pre-upgrade session resolve + recorded selection re-select, fail-closed without a fallback), and remote.mux transport (open → ready) are generation-aware and fail closed on a missing or unreviewed generation declaration.
+
 ### 0.4.0-rc.1 candidate - 2026-09-07
 
 ### Added

@@ -42,7 +42,7 @@ surface and must not be routed through the browser gateway. See
 | `DSH_ORBIT_ENROLL_TOKEN` | for `enroll` | none | One-time plaintext enrollment token; never persisted. |
 | `DSH_ORBIT_REENROLL_TOKEN` | for `reenroll` | none | Tombstone-bound operator token; recovery is explicit, never automatic. |
 | `DSH_ORBIT_NODE_HEARTBEAT_SECONDS` | no | `60` | Heartbeat cadence, bounded to 30–300 seconds. |
-| `DSH_ORBIT_NODE_ORBIT_VERSION` | no | `0.4.0-rc.1` | Runtime identity reported to the Hub. Release candidate must match the deployed Orbit version. |
+| `DSH_ORBIT_NODE_ORBIT_VERSION` | no | `0.4.1-rc.1` | Runtime identity reported to the Hub. Release candidate must match the deployed Orbit version. |
 | `DSH_ORBIT_NODE_ORBIT_REVISION` | no | unset | Orbit revision reported to the Hub. |
 | `DSH_ORBIT_NODE_DSH_VERSION` | no | empty | DSH version reported to the Hub. |
 | `DSH_ORBIT_NODE_DSH_PROFILE` | no | unset | Compatibility profile reported to the Hub. |

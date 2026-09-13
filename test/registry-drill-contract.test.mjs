@@ -107,7 +107,7 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
 
 test("mounted DSH images take their baseline from the drill selection", async () => {
   const compose = await readFile(new URL("../docker-registry/drill.compose.yaml", import.meta.url), "utf8");
-  const buildArgLines = compose.match(/^\s*DSH_VERSION:\s*\$\{DSH_DRILL_DSH_VERSION:-0\.1\.1-rc\.2\}\s*$/gm) ?? [];
+  const buildArgLines = compose.match(/^\s*DSH_VERSION:\s*\$\{DSH_DRILL_DSH_VERSION:-0\.1\.5-rc\.2\}\s*$/gm) ?? [];
   assert.equal(
     buildArgLines.length,
     2,

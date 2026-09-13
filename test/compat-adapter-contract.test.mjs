@@ -104,13 +104,27 @@ test("the adapter is published on the host loopback only, never publicly", async
   const adapterEnd = compose.indexOf("\n  caddy:", adapterStart);
   const adapterBlock = compose.slice(adapterStart, adapterEnd);
   assert.ok(adapterBlock.includes("image:"), "the adapter service block must exist");
-  const portLines = adapterBlock.match(/^\s*-\s*"([^"]+)"\s*$/gm) ?? [];
-  assert.ok(portLines.length > 0, "the adapter must declare its host publication explicitly");
-  for (const line of portLines) {
+  assert.doesNotMatch(
+    adapterBlock,
+    /^\s*ports:/m,
+    // Docker runtime semantics: a container that joins another container's
+    // network namespace (network_mode: service:*) cannot publish ports itself;
+    // the shared namespace's host publications live on the owner service.
+    "the adapter shares the dsh network namespace and must not declare its own ports",
+  );
+  const dshStart = compose.indexOf("\n  dsh:");
+  const dshBlock = compose.slice(dshStart, adapterStart);
+  const adapterPublish = dshBlock.match(/^\s*-\s*"(127\.0\.0\.1:[^"]*3081[^"]*)"\s*$/gm) ?? [];
+  assert.equal(
+    adapterPublish.length,
+    1,
+    "the shared namespace owner (dsh) must publish the adapter on host loopback exactly once",
+  );
+  for (const line of compose.match(/^\s*-\s*"[^"]+"\s*$/gm) ?? []) {
     assert.match(
       line,
-      /127\.0\.0\.1:/,
-      `adapter host publications must be loopback-only: ${line.trim()}`,
+      /"127\.0\.0\.1:/,
+      `every host publication in the product compose must be loopback-only: ${line.trim()}`,
     );
   }
 });

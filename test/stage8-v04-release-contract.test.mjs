@@ -330,38 +330,30 @@ const requiredDocs = [
   "docs/release-attestations/v0.4-stage7-failure-hardening.md",
 ];
 
-test("Stage 8 construction candidate version declarations", async () => {
+test("v0.4.1 candidate release identity declarations", async () => {
   const candidate = currentCommit();
   assertFullCommit(candidate, "construction candidate (current HEAD)");
   assert.equal(gitIsAncestor(STAGE8_E73_BASE, candidate), true, "construction candidate must descend from E7.3");
   assertReleaseTagState();
   const lock = JSON.parse(await text("package-lock.json"));
   assert.equal(lock.lockfileVersion, 3);
-  assert.equal(lock.version, "0.4.0-rc.1");
-  assert.equal(lock.packages?.[""].version, "0.4.0-rc.1");
-  const requiredDocs = [
-    "package.json",
-    "CHANGELOG.md",
-    "README.md",
-    "docs/architecture.md",
-    "docs/roadmap.md",
-    "docs/configuration-reference.md",
-    "docs/sop/v0.4-selector-operator-sop.md",
-    "docs/sop/v0.3-node-enrollment-sop.md",
-    "docs/sop/v0.4-production-promotion-rollback-plan.md",
-    "docs/troubleshooting.md",
-    "docs/release-attestations/v0.4-stage7-failure-hardening.md",
-  ];
+  // The live candidate identity is the v0.4.1 release candidate; the frozen
+  // v0.4.0-rc.1 release contract is validated against its tag below, not here.
+  assert.equal(lock.version, "0.4.1-rc.1");
+  assert.equal(lock.packages?.[""].version, "0.4.1-rc.1");
   for (const path of requiredDocs) await access(new URL(`../${path}`, import.meta.url));
 
   const pkg = JSON.parse(await text("package.json"));
-  assert.equal(pkg.version, "0.4.0-rc.1");
+  assert.equal(pkg.version, "0.4.1-rc.1");
 
   const changelog = await text("CHANGELOG.md");
+  assert.match(changelog, /### 0\.4\.1-rc\.1 candidate/);
   assert.match(changelog, /### 0\.4\.0-rc\.1 candidate/);
 
   const readme = await text("README.md");
-  assert.match(readme, /0\.4\.0-rc\.1/);
+  assert.match(readme, /0\.4\.1-rc\.1/);
+  assert.match(readme, /0\.1\.5-rc\.2/);
+  assert.match(readme, /qualification pending/i, "the selected baseline must not be published as SUPPORTED before E9");
   assert.match(readme, /Reverse-connected nodes are not part of v0\.4/i);
 
   const roadmap = await text("docs/roadmap.md");
@@ -369,12 +361,24 @@ test("Stage 8 construction candidate version declarations", async () => {
   assert.match(roadmap, /Reverse-connected nodes are not part of v0\.4/i);
 
   const architecture = await text("docs/architecture.md");
-  assert.match(architecture, /Implemented v0\.4 Endpoint Selector/);
+  assert.match(architecture, /Implemented v0.4 Endpoint Selector/);
   assert.match(architecture, /Reverse-connected nodes are not part of v0\.4/i);
 
   const config = await text("docs/configuration-reference.md");
-  assert.match(config, /`DSH_ORBIT_NODE_ORBIT_VERSION`.*`0\.4\.0-rc\.1`/s);
+  assert.match(config, /`DSH_ORBIT_NODE_ORBIT_VERSION`.*`0\.4\.1-rc\.1`/s);
   assert.match(config, /`DSH_ORBIT_REGISTRY_TAG`.*`v0\.4\.0-rc\.1`/s);
+
+  // The product defaults must install the selected shipping baseline, not the
+  // legacy profile: the compatibility registry marks 0.1.5-rc.2 as the tested
+  // shipping baseline and 0.1.1-rc.2 as retained legacy.
+  for (const path of [".env.example", "docker/Dockerfile"]) {
+    const source = await text(path);
+    assert.match(source, /0\.1\.5-rc\.2/, `${path} must default to the selected shipping baseline`);
+  }
+  const productCompose = await text("docker/compose.example.yaml");
+  assert.match(productCompose, /\$\{DSH_VERSION:-0\.1\.5-rc\.2\}/);
+  const drill = await text("scripts/registry-drill.mjs");
+  assert.match(drill, /DSH_DRILL_DSH_VERSION \?\? "0\.1\.5-rc\.2"/);
 });
 
 test("Stage 8 v0.4 release provenance contract: candidate vs closure, evidence manifest, and fail-closed gate", async () => {
@@ -799,6 +803,28 @@ test("Stage 8 schema version and route configuration safety", async () => {
   assert.match(configDoc, /DSH_ORBIT_HUB_WS_GLOBAL_LIMIT/);
   assert.match(configDoc, /DSH_ORBIT_HUB_WS_PER_NODE_LIMIT/);
   assert.match(configDoc, /DSH_ORBIT_NODE_WS_LIMIT/);
+});
+
+test("v0.4.1 mounted evidence has its own namespace and can never touch the frozen v0.4.0 closure", async () => {
+  const emitter = await text("scripts/emit-stage8-mounted-evidence.mjs");
+  // The release producer writes into the v0.4.1 namespace only.
+  assert.match(emitter, /RELEASE_EVIDENCE_DIR = "test\/evidence\/v0\.4\.1"/);
+  assert.doesNotMatch(
+    emitter,
+    /"test",\s*"evidence",\s*"stage8"/,
+    "the emitter must not write into the frozen v0.4.0 Stage 8 closure directory",
+  );
+  // Fail-closed identity binding for the v0.4.1 release path.
+  assert.match(emitter, /dshVersion !== "0\.1\.5-rc\.2"/);
+  assert.match(emitter, /raw\.dshConnectionPatch !== "connection-browser-auth-v1"/);
+  assert.match(emitter, /raw\.commit !== currentCandidateCommit/);
+  assert.ok(
+    emitter.includes('0\\.4\\.1-rc\\.\\d+'),
+    "the producer seals only the v0.4.1 candidate version",
+  );
+  // Legacy replay is an explicit diagnostic mode with its own non-frozen output.
+  assert.match(emitter, /DSH_ORBIT_EVIDENCE_LEGACY_REPLAY/);
+  assert.match(emitter, /stage8-legacy-replay/);
 });
 
 test("Stage 8 production promotion and rollback plan constraints", async () => {

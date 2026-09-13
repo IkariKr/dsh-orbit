@@ -35,14 +35,15 @@ import { STREAM_SEMANTICS, rpcEndpoint, rpcPayload, streamPaths, wireContractFor
 import { runVerificationSequence } from "../src/upgrade-runner.mjs";
 import { REQUIRED_MOUNTED_MATRIX_FIELDS, emptyMountedMatrix, assertMountedMatrixShape } from "./stage8-mounted-matrix.mjs";
 
-// The mounted baseline this drill run executes against. A v0.4.1 mounted run
-// explicitly selects the shipping baseline via DSH_DRILL_DSH_VERSION; the
-// connection generation, wire vocabulary, and report identity are then derived
-// from that version's reviewed compatibility profile — never configured
-// independently, and never silently defaulted to a baseline the run did not
-// choose. The frozen Stage 6/8 evidence records are historical artifacts and
-// are not touched by this parameterization.
-const DRILL_DSH_VERSION = process.env.DSH_DRILL_DSH_VERSION ?? "0.1.1-rc.2";
+// The mounted baseline this drill run executes against. It defaults to the
+// shipping baseline recorded in `src/compatibility.mjs` — a run that wants the
+// legacy profile must select it explicitly, so a forgotten environment variable
+// can never silently produce legacy evidence. The connection generation, wire
+// vocabulary, and report identity are then derived from that version's
+// reviewed compatibility profile — never configured independently. The frozen
+// Stage 6/8 evidence records are historical artifacts and are not touched by
+// this parameterization.
+const DRILL_DSH_VERSION = process.env.DSH_DRILL_DSH_VERSION ?? "0.1.5-rc.2";
 const DRILL_PROFILE = `dsh-${DRILL_DSH_VERSION}`;
 const DRILL_CONNECTION_PATCH = compatibilityFor(DRILL_DSH_VERSION).connectionPatch;
 const DRILL_WIRE = wireContractForGeneration(DRILL_CONNECTION_PATCH);
@@ -895,8 +896,53 @@ exit 4
   }
 }
 
+// Selected-baseline mounted preflight: everything that can be validated
+// without starting the stack — the derived generation/wire vocabulary, the
+// resolved compose build args for the selected version, and the candidate
+// worktree state. This is a dry diagnostic; it writes no evidence record and
+// proves nothing about a live mounted run.
+async function runPreflight() {
+  requireCleanCandidateWorktree();
+  const resolved = spawnSync(
+    "docker",
+    ["compose", "-f", COMPOSE, "config"],
+    { cwd: REPO, encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1", DSH_DRILL_DSH_VERSION: DRILL_DSH_VERSION } },
+  );
+  if (resolved.status !== 0) {
+    throw new Error(`mounted preflight: drill compose does not resolve for ${DRILL_DSH_VERSION}: ${resolved.stderr}`);
+  }
+  const buildArgs = [...resolved.stdout.matchAll(/^\s*DSH_VERSION:\s*(\S+)\s*$/gm)].map((m) => m[1]);
+  const wrongBaseline = buildArgs.filter((value) => value !== DRILL_DSH_VERSION);
+  if (buildArgs.length < 2 || wrongBaseline.length > 0) {
+    throw new Error(
+      `mounted preflight: resolved DSH build args ${JSON.stringify(buildArgs)} do not match the selected baseline ${DRILL_DSH_VERSION}`,
+    );
+  }
+  const preflight = {
+    kind: "stage6-mounted-preflight",
+    note: "diagnostic only; not evidence, no PASS artifact",
+    candidateCommit: REVISION,
+    orbitVersion: DRILL_ORBIT_VERSION,
+    selectedBaseline: DRILL_DSH_VERSION,
+    dshProfile: DRILL_PROFILE,
+    connectionPatch: DRILL_CONNECTION_PATCH,
+    streamPaths: [...streamPaths(DRILL_WIRE)],
+    muxMode: DRILL_MUX_MODE,
+    resolvedDshBuildArgs: buildArgs,
+    checks: {
+      candidateWorktreeClean: true,
+      composeResolvesForSelectedBaseline: true,
+    },
+  };
+  console.log(JSON.stringify(preflight, null, 2));
+}
+
 async function main() {
   const args = process.argv.slice(2);
+  if (args.includes("--preflight")) {
+    await runPreflight();
+    return;
+  }
   rmSync(RAW_EVIDENCE_PATH, { force: true });
   requireCleanCandidateWorktree();
   rmSync(BROWSER_BOOTSTRAP_CHECKPOINT_PATH, { force: true });
@@ -1043,6 +1089,13 @@ async function main() {
   };
 
   // --- 3. enroll + run + report for BOTH real DSH nodes ---
+  // Per-endpoint Remote parameter naming on the BrowserAuth generation is part
+  // of the measured upstream descriptor: session/create takes its arguments
+  // inside a `request` field and session/list inside `_request`, while the
+  // legacy generation posts the argument object bare. The wire contract owns
+  // the envelope style; these wrappers implement the descriptor shape.
+  const sessionCreateArgs = DRILL_MUX_MODE ? { request: { agentPreset: "standard" } } : { agentPreset: "standard" };
+  const sessionListArgs = DRILL_MUX_MODE ? { _request: {} } : {};
   async function createHistoricalSession(endpoint, logicalOrigin) {
     const createEndpoint = rpcEndpoint(DRILL_WIRE, "session", "create");
     const rpcId = `drill-session-create-${randomUUID()}`;
@@ -1055,7 +1108,7 @@ async function main() {
         type: "client-request",
         rpcId,
         method: createEndpoint,
-        payload: rpcPayload(DRILL_WIRE, { agentPreset: "standard" }),
+        payload: rpcPayload(DRILL_WIRE, sessionCreateArgs),
       }),
     });
     const body = await response.json();
@@ -1073,7 +1126,7 @@ async function main() {
         type: "client-request",
         rpcId: `drill-session-list-${randomUUID()}`,
         method: listEndpoint,
-        payload: rpcPayload(DRILL_WIRE, {}),
+        payload: rpcPayload(DRILL_WIRE, sessionListArgs),
       }),
     });
     const listedBody = await listed.json();
@@ -1273,10 +1326,22 @@ async function main() {
   }
   markMatrix("httpRootA", "httpRootB", "nodeContextIsolation");
 
-  const staticA = await routeFetch("/assets/index-C6eRlFa6.css", authorityA);
-  const staticB = await routeFetch("/assets/index-C6eRlFa6.css", authorityB);
+  // Discover a real UI static asset from the served index instead of pinning a
+  // build-hash constant: the asset filename changes with every upstream build,
+  // and a pinned hash would silently bind the mounted static matrix to one DSH
+  // baseline. The check stays meaningful across baselines — the route must
+  // serve the actual asset the page references.
+  const discoverAssetPath = (rootText, label) => {
+    const match = rootText.match(/(?:src|href)="(\/assets\/[A-Za-z0-9._/-]+\.(?:css|js))"/);
+    if (!match) throw new Error(`mounted static asset discovery failed on ${label}: no /assets/ reference in the served index`);
+    return match[1];
+  };
+  const assetPathA = discoverAssetPath(routeRootTextA, "A");
+  const assetPathB = discoverAssetPath(routeRootTextB, "B");
+  const staticA = await routeFetch(assetPathA, authorityA);
+  const staticB = await routeFetch(assetPathB, authorityB);
   if (staticA.status !== 200 || staticB.status !== 200 || staticA.headers["x-drill-node"] !== "A" || staticB.headers["x-drill-node"] !== "B" || staticA.text().length < 100 || staticB.text().length < 100) {
-    throw new Error(`mounted static asset matrix failed: A=${staticA.status} B=${staticB.status}`);
+    throw new Error(`mounted static asset matrix failed: A=${assetPathA}:${staticA.status} B=${assetPathB}:${staticB.status}`);
   }
   markMatrix("staticAssetA", "staticAssetB");
   const cookies = [staticA.headers["set-cookie"], staticB.headers["set-cookie"]].flat().filter(Boolean).join(";");

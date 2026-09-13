@@ -4,9 +4,9 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       args:
-        DSH_VERSION: ${DSH_VERSION:-0.1.1-rc.2}
+        DSH_VERSION: ${DSH_VERSION:-0.1.5-rc.2}
         DSH_PUBLIC_HOST: ${DSH_PUBLIC_HOST:?set DSH_PUBLIC_HOST in .env}
-    image: dsh-orbit:${DSH_VERSION:-0.1.1-rc.2}
+    image: dsh-orbit:${DSH_VERSION:-0.1.5-rc.2}
     user: "10001:10001"
     env_file:
       - ../.env
@@ -23,7 +23,12 @@ services:
       - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
       - ../hooks:/opt/dsh-orbit/hooks:ro
     ports:
+      # Both host publications belong to the dsh service: it owns the shared
+      # network namespace (the gateway and the compatibility adapter join it
+      # with network_mode: service:dsh), and Docker forbids a container that
+      # joins another container's namespace from publishing ports itself.
       - "127.0.0.1:${DSH_ORBIT_PORT:-18443}:9443"
+      - "127.0.0.1:${DSH_ORBIT_NODE_DSH_ADAPTER_PORT:-3081}:3081"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=256m
@@ -64,8 +69,6 @@ services:
     volumes:
       - ../proxy/dsh-compat-adapter.Caddyfile:/etc/caddy/dsh-compat-adapter.Caddyfile:ro
       - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
-    ports:
-      - "127.0.0.1:${DSH_ORBIT_NODE_DSH_ADAPTER_PORT:-3081}:3081"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
