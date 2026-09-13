@@ -250,8 +250,15 @@ export function sanitizeClientHeaders(headers) {
       }
       continue;
     }
-    // Strip gateway assertion and principal headers
-    if (lower === "x-dsh-authenticated-proxy" || lower === "x-dsh-operator-id" || lower === "x-csrf-token") {
+    // Strip gateway assertion, principal, and client-supplied DSH compatibility
+    // proof headers. Only the node-local DSH compatibility adapter may present
+    // that proof, and it does so on the node side of this hop.
+    if (
+      lower === "x-dsh-authenticated-proxy" ||
+      lower === "x-dsh-orbit-authenticated-proxy" ||
+      lower === "x-dsh-operator-id" ||
+      lower === "x-csrf-token"
+    ) {
       continue;
     }
     out[key] = val;

@@ -292,7 +292,10 @@ export class RouteIngress {
       return;
     }
 
-    // Strip Orbit route authentication proofs before reaching downstream DSH
+    // Strip Orbit route authentication proofs and any client-supplied DSH
+    // compatibility proof before reaching downstream DSH. The node-local
+    // compatibility adapter is the only component allowed to present that
+    // proof, and it re-injects it on the far side of this hop.
     const forwardHeaders = {};
     for (const [k, v] of Object.entries(req.headers)) {
       const lower = k.toLowerCase();
@@ -300,6 +303,7 @@ export class RouteIngress {
       // Strip management session and gateway assertion headers defensively
       if (
         lower === "x-dsh-authenticated-proxy" ||
+        lower === "x-dsh-orbit-authenticated-proxy" ||
         lower === "x-dsh-operator-id" ||
         lower === "x-csrf-token" ||
         lower === "x-gateway-auth" ||
@@ -440,13 +444,17 @@ export class RouteIngress {
       return;
     }
 
-    // Strip Orbit route authentication proofs and gateway assertions before reaching downstream DSH
+    // Strip Orbit route authentication proofs, gateway assertions, and any
+    // client-supplied DSH compatibility proof before reaching downstream DSH.
+    // The node-local compatibility adapter is the only component allowed to
+    // present that proof, and it re-injects it on the far side of this hop.
     const forwardHeaders = {};
     for (const [k, v] of Object.entries(req.headers)) {
       const lower = k.toLowerCase();
       if (lower.startsWith("x-orbit-route-")) continue;
       if (
         lower === "x-dsh-authenticated-proxy" ||
+        lower === "x-dsh-orbit-authenticated-proxy" ||
         lower === "x-dsh-operator-id" ||
         lower === "x-csrf-token" ||
         lower === "x-gateway-auth" ||

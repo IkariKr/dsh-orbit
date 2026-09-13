@@ -219,6 +219,7 @@ test("Security Boundary: client headers sanitized, proofs stripped, cookies made
     "x-orbit-route-signature": "forged-signature",
     "x-orbit-route-node": "node_forged",
     "x-dsh-authenticated-proxy": "gateway-secret",
+    "x-dsh-orbit-authenticated-proxy": "client-supplied-dsh-proof",
     "x-dsh-operator-id": "operator",
     "x-csrf-token": "csrf-secret",
     cookie: "dsh-orbit-hub-session=sess_abc; dsh_auth=token123",
@@ -228,6 +229,11 @@ test("Security Boundary: client headers sanitized, proofs stripped, cookies made
   assert.equal(typeof sanitizedHeaders["x-orbit-route-signature"], "undefined");
   assert.equal(typeof sanitizedHeaders["x-orbit-route-node"], "undefined");
   assert.equal(typeof sanitizedHeaders["x-dsh-authenticated-proxy"], "undefined");
+  // The DSH compatibility proof is presented by the node-local DSH compatibility
+  // adapter, never by a client, so a client-supplied value must not survive this
+  // hop. Otherwise a forged proof would reach DSH from a request the adapter
+  // never vouched for.
+  assert.equal(typeof sanitizedHeaders["x-dsh-orbit-authenticated-proxy"], "undefined");
   assert.equal(typeof sanitizedHeaders["x-dsh-operator-id"], "undefined");
   assert.equal(typeof sanitizedHeaders["x-csrf-token"], "undefined");
   assert.equal(sanitizedHeaders.cookie, "dsh_auth=token123");
@@ -340,6 +346,7 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
         "content-type": "application/json",
         cookie: "dsh_session=active",
         "x-orbit-route-signature": "browser-forged-signature-must-be-stripped",
+        "x-dsh-orbit-authenticated-proxy": "browser-forged-dsh-proof-must-be-stripped",
       },
       body: postPayload,
     });
@@ -364,6 +371,11 @@ test("HTTP Proxying End-to-End: streaming, exact RAW_TARGET, SSRF denial, canoni
     assert.equal(receivedDshRequest.headers.host, authority);
     assert.equal(typeof receivedDshRequest.headers["x-orbit-route-signature"], "undefined");
     assert.equal(typeof receivedDshRequest.headers["x-orbit-route-key"], "undefined");
+    // The DSH compatibility proof belongs to the node-local compatibility
+    // adapter that sits downstream of this hop: a client-supplied value must be
+    // stripped here so a forged proof can never reach DSH.
+    assert.equal(typeof receivedDshRequest.headers["x-dsh-orbit-authenticated-proxy"], "undefined");
+    assert.equal(typeof receivedDshRequest.headers["x-dsh-authenticated-proxy"], "undefined");
 
     // Test Case A2: Conflicting Host and X-Forwarded-Host fails closed with 400
     const conflictRes = await makeHttpRequest({
