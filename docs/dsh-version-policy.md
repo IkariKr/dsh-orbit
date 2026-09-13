@@ -1,9 +1,10 @@
 # DSH Version Compatibility Policy
 
-**Current baseline:** Orbit `v0.4.x` → DeepSeek Harness `0.1.1-rc.2`
-(`SUPPORTED`). The machine-readable form is `compatibilityProfiles` in
+**Current baseline:** Orbit `v0.4.1` → DeepSeek Harness `0.1.5-rc.2`
+(`SUPPORTED`). `0.1.1-rc.2` is retained as `LEGACY`: it is the historical
+`v0.4.0` baseline. The machine-readable form is `compatibilityProfiles` in
 `src/compatibility.mjs`, and the release attestation records the upstream commit
-SHA and CLI digest for that baseline.
+SHA and artifact digests for the shipping baseline.
 
 Related: [Overview](dsh-orbit-overview.md) · [Compatibility](compatibility.md) ·
 [Comparison](comparison.md).
@@ -30,9 +31,24 @@ Only `SUPPORTED` versions are covered by Orbit release guarantees.
 
 The runtime enforcement point is `compatibilityProfiles` in
 `src/compatibility.mjs`: a version that is absent from that map fails closed,
-and `compatibilityFor()` reports the tested version list. A policy status only
+and `compatibilityFor()` reports the accepted version list. A policy status only
 means something when a matching profile entry exists, so the profile map and
 this table must be updated together.
+
+Each profile carries the policy status in its `status` field:
+
+| `status` | Meaning |
+| --- | --- |
+| `tested` | The shipping baseline. One Orbit release selects exactly one. |
+| `legacy` | A previously validated baseline kept for existing deployments. |
+
+A `legacy` entry stays capability-granted: a node on that version keeps the
+capabilities its compatibility report earns, so an upgrade does not silently
+disable a working deployment. What a release does not do is validate or claim
+that version, so `legacy` never appears in a release guarantee. Withdrawing a
+version is a deliberate policy change, not a side effect of adding a baseline —
+it removes the entry instead, which is what makes `deriveCapabilities()` return
+nothing for it.
 
 ---
 
@@ -43,12 +59,18 @@ Each Orbit minor release is bound to a specific DSH compatibility baseline.
 Example:
 
 ```text
-Orbit v0.4.x
+Orbit v0.4.0-rc.1
     |
-    +-- DSH 0.1.1-rc.2
+    +-- DSH 0.1.1-rc.2        historical, now LEGACY
+
+Orbit v0.4.1
+    |
+    +-- DSH 0.1.5-rc.2        shipping baseline, SUPPORTED
 ```
 
-A new Orbit minor release may adopt a newer DSH baseline.
+A new Orbit minor release may adopt a newer DSH baseline. The previous baseline
+moves to `legacy` rather than disappearing, so the earlier release's evidence
+and the previous generation's regression coverage stay reproducible.
 
 Orbit does not follow every DSH release candidate automatically.
 
@@ -92,7 +114,7 @@ Example:
 
 ```yaml
 dsh:
-  version: 0.1.1-rc.2
+  version: 0.1.5-rc.2
 
 capabilities:
   - sessions.resume
@@ -145,13 +167,16 @@ Every Orbit release should declare:
 Example:
 
 ```text
-Orbit: v0.4.x
+Orbit: v0.4.1
 
 DSH:
-0.1.1-rc.2
+0.1.5-rc.2
 
 Status:
 SUPPORTED
+
+Retained:
+0.1.1-rc.2 (LEGACY)
 ```
 
 ---

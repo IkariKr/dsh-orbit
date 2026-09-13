@@ -102,15 +102,17 @@ requirements.
 
 ## Compatibility posture
 
-- **One pinned baseline per release.** Orbit `v0.4.x` targets DSH `0.1.1-rc.2`,
-  and the release attestation records the upstream commit SHA and CLI digest.
+- **One pinned baseline per release.** Orbit `v0.4.1` targets DSH `0.1.5-rc.2`,
+  and the release attestation records the upstream commit SHA and artifact
+  digests. `0.1.1-rc.2` — the `v0.4.0` baseline — is retained as legacy so
+  existing deployments keep working across the change.
 - **Capability binding, not just version matching.** Compatibility is version
   *and* validated capabilities, defined by `CAPABILITY_EVIDENCE` in
   `src/registry/capabilities.mjs`.
 - **Orbit does not chase every DSH release candidate.** Adoption is an explicit,
   validated decision — see [DSH version policy](dsh-version-policy.md).
 - **New upstream releases are classified, not adopted.** A scheduled workflow
-  checks the published DSH package and classifies it as `supported` or
+  checks the published DSH package and classifies it as `tested`, `legacy`, or
   `unknown`; it never changes a registry or a deployment on its own.
 - **Some capabilities are never claimed.** `terminal.pty` and `agents.run` have
   no automated runtime evidence and are not claimable.

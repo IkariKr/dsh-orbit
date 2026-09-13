@@ -22,7 +22,10 @@ async function latestVersion() {
 try {
   const version = await latestVersion();
   const knownProfiles = Object.keys(compatibilityProfiles);
-  const classification = compatibilityProfiles[version] ? "supported" : "unknown";
+  // Classify by the profile's reviewed status, so a retained legacy baseline is
+  // never reported as the version this release supports.
+  const profile = compatibilityProfiles[version];
+  const classification = profile === undefined ? "unknown" : profile.status;
   const report = {
     schemaVersion: 1,
     checkedAt: new Date().toISOString(),
@@ -41,8 +44,10 @@ try {
       "::warning title=Unknown upstream DSH release::A newly published DSH version is absent from the compatibility registry. Review it before any support claim; see docs/compatibility.md.",
     );
     console.log("review required before any support claim; see docs/compatibility.md");
+  } else if (classification === "tested") {
+    console.log("no action required: this is the shipping baseline");
   } else {
-    console.log("no action required");
+    console.log(`known but not claimed by this release (${classification}); no update action`);
   }
 } catch (error) {
   console.error(`upstream dsh watch failed: ${error instanceof Error ? error.message : String(error)}`);

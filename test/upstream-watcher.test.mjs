@@ -45,13 +45,26 @@ async function runWatcher(registryUrl, jsonOut) {
   return { code, stdout, stderr };
 }
 
-test("a published version already in the registry is classified as supported", async () => {
+test("the shipping baseline is classified as tested", async () => {
+  const registry = await withRegistry({ version: "0.1.5-rc.2" });
+  try {
+    const { code, stdout } = await runWatcher(registry.url);
+    assert.equal(code, 0);
+    assert.match(stdout, /upstream dsh: 0\.1\.5-rc\.2 \(tested\)/);
+    assert.match(stdout, /no action required: this is the shipping baseline/);
+  } finally {
+    registry.close();
+  }
+});
+
+test("a retained legacy baseline is classified as legacy, not as supported", async () => {
   const registry = await withRegistry({ version: "0.1.1-rc.2" });
   try {
     const { code, stdout } = await runWatcher(registry.url);
     assert.equal(code, 0);
-    assert.match(stdout, /upstream dsh: 0\.1\.1-rc\.2 \(supported\)/);
-    assert.match(stdout, /no action required/);
+    assert.match(stdout, /upstream dsh: 0\.1\.1-rc\.2 \(legacy\)/);
+    assert.match(stdout, /known but not claimed by this release \(legacy\)/);
+    assert.doesNotMatch(stdout, /no action required: this is the shipping baseline/);
   } finally {
     registry.close();
   }
@@ -66,13 +79,13 @@ test("an unknown published version is recorded without modifying the registry st
       const { code, stdout } = await runWatcher(registry.url, jsonOut);
       assert.equal(code, 0);
       assert.match(stdout, /upstream dsh: 9\.9\.9-future \(unknown\)/);
-      assert.match(stdout, /known compatibility profiles: 0\.1\.1-rc\.2/);
+      assert.match(stdout, /known compatibility profiles: 0\.1\.5-rc\.2, 0\.1\.1-rc\.2/);
       assert.match(stdout, /review required before any support claim/);
 
       const report = JSON.parse(await readFile(jsonOut, "utf8"));
       assert.equal(report.latestVersion, "9.9.9-future");
       assert.equal(report.classification, "unknown");
-      assert.deepEqual(report.knownProfiles, ["0.1.1-rc.2"]);
+      assert.deepEqual(report.knownProfiles, ["0.1.5-rc.2", "0.1.1-rc.2"]);
     } finally {
       registry.close();
     }
@@ -87,7 +100,7 @@ test("registry failures fail the check without emitting a classification", async
     const { code, stdout, stderr } = await runWatcher(registry.url);
     assert.equal(code, 2);
     assert.match(stderr, /registry returned HTTP 503/);
-    assert.ok(!stdout.includes("supported"));
+    assert.ok(!stdout.includes("tested"));
   } finally {
     registry.close();
   }
