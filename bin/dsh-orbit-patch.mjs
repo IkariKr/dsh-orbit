@@ -3,6 +3,7 @@
 import { access } from "node:fs/promises";
 import process from "node:process";
 import {
+  connectionPatchFor,
   patchConnectionRoot,
   readDshVersion,
   verifyConnectionRoot,
@@ -42,11 +43,13 @@ async function exists(path) {
 async function main() {
   const mode = process.argv[2] || "--check";
   const dshVersion = await readDshVersion(`${GLOBAL_DSH_ROOT}/package.json`);
+  const connectionPatch = connectionPatchFor(dshVersion);
   const common = {
     dshVersion,
     publicHost: PUBLIC_HOST,
     proxyAuthFile: PROXY_AUTH_FILE,
   };
+  const verify = (root) => verifyConnectionRoot({ root, publicHost: PUBLIC_HOST, connectionPatch });
 
   const sshPatch = async (apply) => {
     if (!SSH_PATCH_ENABLED) {
@@ -69,7 +72,7 @@ async function main() {
   if (mode === "--build") {
     results = [
       await patchConnectionRoot({ root: GLOBAL_CONNECTION_ROOT, ...common }),
-      await verifyConnectionRoot({ root: GLOBAL_CONNECTION_ROOT, publicHost: PUBLIC_HOST }),
+      await verify(GLOBAL_CONNECTION_ROOT),
     ];
   } else if (mode === "--runtime") {
     if (!(await exists(`${PROFILE_CONNECTION_ROOT}/index.js`))) {
@@ -77,16 +80,16 @@ async function main() {
     }
     results = [
       await patchConnectionRoot({ root: PROFILE_CONNECTION_ROOT, ...common }),
-      await verifyConnectionRoot({ root: PROFILE_CONNECTION_ROOT, publicHost: PUBLIC_HOST }),
+      await verify(PROFILE_CONNECTION_ROOT),
     ];
     if (SSH_PATCH_ENABLED) {
       const sshResult = await sshPatch(true);
       results.push(sshResult);
     }
   } else if (mode === "--check") {
-    results.push(await verifyConnectionRoot({ root: GLOBAL_CONNECTION_ROOT, publicHost: PUBLIC_HOST }));
+    results.push(await verify(GLOBAL_CONNECTION_ROOT));
     if (await exists(`${PROFILE_CONNECTION_ROOT}/index.js`)) {
-      results.push(await verifyConnectionRoot({ root: PROFILE_CONNECTION_ROOT, publicHost: PUBLIC_HOST }));
+      results.push(await verify(PROFILE_CONNECTION_ROOT));
     }
     if (!SSH_PATCH_ENABLED) {
       console.log("DSH Orbit dsh-ssh patch: disabled (set DSH_ORBIT_PATCH_DSH_SSH=1 to enable)");
