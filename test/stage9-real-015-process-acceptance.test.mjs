@@ -34,6 +34,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { patchConnectionRootForGeneration, verifyConnectionRoot } from "../src/remote-settings-patch.mjs";
 import {
+  assertBuildArtifacts,
   assertDsh015Identity,
   assertPristineBundle,
   assertProfileLinksToBuiltBundle,
@@ -41,6 +42,7 @@ import {
   readBundleBytes,
   resolveDsh015Checkout,
   restoreBundleBytes,
+  sanitizedEnv,
   startDshWeb,
 } from "./helpers/dsh-015-acceptance-fixture.mjs";
 
@@ -94,7 +96,7 @@ before(async () => {
 
     // Phase 3: serve the patched bundle.
     boot = await startDshWeb({ dshRoot, dshHome, trustedHosts: [PUBLIC_HOST, OTHER_HOST] });
-    session = { ...identity, dshHome, bundleDir, pristine, boot };
+    session = { ...identity, dshRoot, dshHome, bundleDir, pristine, boot };
   } catch (error) {
     await boot?.stop();
     if (bundleDir && pristine) restoreBundleBytes(bundleDir, pristine);
@@ -110,6 +112,9 @@ after(async () => {
   // checkout must not be left carrying an Orbit patch.
   restoreBundleBytes(session.bundleDir, session.pristine);
   assertPristineBundle(session.bundleDir);
+  // Byte-level closure: the restored artifact must hash back to the reviewed
+  // digest, so "restored" cannot mean "a different build that lacks the marker".
+  assertBuildArtifacts(session.dshRoot);
   await rm(session.dshHome, { recursive: true, force: true });
 });
 
@@ -363,6 +368,31 @@ test("acceptance process boots the pinned upstream identity with the patched adm
   assertAdmitted(response, "booted process Orbit proof");
 });
 
+test("the dsh web child environment is sanitized", () => {
+  // A pure check that does not need the checkout, so it guards the acceptance on
+  // every run: operator leftovers must not be able to influence the evidence.
+  const poisoned = {
+    PATH: "/usr/bin",
+    SystemRoot: "C:\Windows",
+    NODE_OPTIONS: "--inspect",
+    NODE_PATH: "/tmp/modules",
+    TSX_WATCH: "1",
+    DSH_PUBLIC_HOST: "attacker.example.com",
+    DSH_PROXY_AUTH_FILE: "/tmp/other-secret",
+    DEEPSEEK_API_KEY: "unused",
+  };
+  const env = sanitizedEnv({ DSH_HOME: "/tmp/home", DSH_TELEMETRY_DISABLED: "1", NO_COLOR: "1" }, poisoned);
+
+  assert.equal(env.PATH, "/usr/bin", "platform essentials must survive");
+  assert.equal(env.SystemRoot, "C:\Windows");
+  assert.equal(env.DSH_HOME, "/tmp/home", "the acceptance's own variables must be applied");
+
+  for (const name of Object.keys(poisoned)) {
+    if (name === "PATH" || name === "SystemRoot") continue;
+    assert.equal(name in env, false, `${name} must not be inherited by the booted process`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 2. Native BrowserAuth on the real process
 // ---------------------------------------------------------------------------
@@ -487,6 +517,26 @@ test("real /api/remote.mux upgrades only for an admitted request", async (t) => 
   const trusted = await upgradeWebSocket({ port: boot.port, headers: proofHeaders() });
   assert.equal(trusted.response.status, 101, "a valid proof must upgrade");
   assert.equal(trusted.validAccept, true, "the upgrade must carry a correct Sec-WebSocket-Accept");
+
+  // Native token -> native cookie -> mux upgrade: the other authenticated path
+  // the real process must still accept on this exact route. The cookie is minted
+  // here rather than reused so the case stands on its own.
+  const exchange = await request(boot, {
+    path: `/?token=${encodeURIComponent(boot.launchToken)}`,
+    host: PUBLIC_HOST,
+  });
+  assert.equal(exchange.status, 303, "the native exchange must still mint a cookie");
+  const nativeUpgrade = await upgradeWebSocket({
+    port: boot.port,
+    headers: { host: PUBLIC_HOST, cookie: cookiePair(exchange) },
+  });
+  assert.equal(nativeUpgrade.response.status, 101, "a native cookie must upgrade the mux");
+  assert.equal(
+    nativeUpgrade.validAccept,
+    true,
+    "the native-cookie upgrade must carry a correct Sec-WebSocket-Accept",
+  );
+  nativeUpgrade.destroy();
 
   // Physical transport check on the live process.
   trusted.sendPing("orbit-stage9-ping");

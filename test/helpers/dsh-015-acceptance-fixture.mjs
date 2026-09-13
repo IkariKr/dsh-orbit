@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -18,7 +19,70 @@ export const DSH_015_VERSION = "0.1.5-rc.2";
 export const DSH_015_COMMIT = "fb2c4b9e698e30edb738bca4cf0618587db7d203";
 export const DSH_015_TAG = "dsh-v0.1.5-rc.2";
 
+// Reviewed SHA-256 of the gitignored build artifacts that actually run. A
+// correct HEAD and tag do not by themselves prove the built files came from that
+// commit, so the acceptance pins the artifacts it loads. The v0.4 baseline
+// already bound its CLI digest this way; v0.4.1 must not lower that bar.
+export const DSH_015_BUILD_ARTIFACTS = Object.freeze({
+  "apps/cli/lib/bin.js": "0ff7f1d72c4e0cbe14001709c81e20a04b70464118a7f78568952988e28f2ac5",
+  "packages/client/connection/lib/index.js": "bbe7c9aa6d82a7a4ec657aa8bc51064e12bb091be0465526d0b9f5e031f540f7",
+  "packages/client/connection/lib/client.js": "319cc46762af6ccb7ac74c9bab37ab8377be212dad9de4dba1f892b7e5b4d8a1",
+  "packages/api/gateway/lib/index.js": "ee3b7ee01e87638813d0f304a8f7527d79e8e42990247116fa67086eb268e699",
+});
+
 export const DSH_015_ROOT_ENV = "DSH_015_ACCEPTANCE_ROOT";
+
+/** SHA-256 of one file, lowercase hex. */
+export function fileSha256(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+/**
+ * Assert every pinned build artifact still carries its reviewed digest. This runs
+ * before the patch and again after the restore, so a drifted or unrecovered
+ * build cannot pass unnoticed.
+ * @param dshRoot - resolved checkout root.
+ * @returns the measured digests, for evidence.
+ */
+export function assertBuildArtifacts(dshRoot) {
+  const measured = {};
+  for (const [relative, expected] of Object.entries(DSH_015_BUILD_ARTIFACTS)) {
+    const path = join(dshRoot, relative);
+    assert.ok(existsSync(path), `pinned build artifact is missing: ${relative}`);
+    measured[relative] = fileSha256(path);
+    assert.equal(
+      measured[relative],
+      expected,
+      `${relative} does not match the reviewed artifact digest; rebuild the pinned checkout`,
+    );
+  }
+  return measured;
+}
+
+// Minimal child environment. Acceptance evidence must not be influenced by an
+// operator's DSH_*, DEEPSEEK_*, NODE_OPTIONS, NODE_PATH, or TSX_* leftovers, so
+// only the variables a booted Node process needs on this platform are inherited.
+const INHERITED_ENV_ALLOWLIST = Object.freeze([
+  "PATH", "PATHEXT", "COMSPEC", "SystemRoot", "windir", "SystemDrive",
+  "TEMP", "TMP", "TMPDIR",
+  "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
+  "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "PROCESSOR_IDENTIFIER", "OS",
+  "HOME", "SHELL", "USER", "LOGNAME", "LANG", "LC_ALL", "TZ",
+]);
+
+/**
+ * Build the child process environment from an explicit allowlist.
+ * @param extra - variables this acceptance adds deliberately.
+ * @param source - the environment to read from; defaults to the current process.
+ * @returns the sanitized environment.
+ */
+export function sanitizedEnv(extra = {}, source = process.env) {
+  const env = {};
+  for (const name of INHERITED_ENV_ALLOWLIST) {
+    if (source[name] !== undefined) env[name] = source[name];
+  }
+  return { ...env, ...extra };
+}
 
 /**
  * Resolve the DSH 0.1.5-rc.2 checkout.
@@ -68,7 +132,16 @@ export function assertDsh015Identity(dshRoot) {
     `DSH checkout at ${dshRoot} has no built CLI artifacts (missing ${binFile}); build the DSH checkout first`,
   );
 
-  return { version: DSH_015_VERSION, commitSha: DSH_015_COMMIT, tag: DSH_015_TAG, versionBanner: manifest.version };
+  // Pin what actually executes, not just what Git says.
+  const buildArtifacts = assertBuildArtifacts(dshRoot);
+
+  return {
+    version: DSH_015_VERSION,
+    commitSha: DSH_015_COMMIT,
+    tag: DSH_015_TAG,
+    versionBanner: manifest.version,
+    buildArtifacts,
+  };
 }
 
 /** Absolute path of the connection bundle a booted profile resolves. */
@@ -143,7 +216,7 @@ export async function startDshWeb({ dshRoot, dshHome, trustedHosts = [], timeout
 
   const child = spawn(process.execPath, args, {
     cwd: dshRoot,
-    env: { ...process.env, DSH_HOME: dshHome, DSH_TELEMETRY_DISABLED: "1", NO_COLOR: "1" },
+    env: sanitizedEnv({ DSH_HOME: dshHome, DSH_TELEMETRY_DISABLED: "1", NO_COLOR: "1" }),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
