@@ -18,6 +18,15 @@ const TRUSTED_AUTHORITY_GATE =
   "\tif (!isLoopbackHostname(hostUrl.hostname) && !isTrustedAuthority(hostUrl, trustedHosts)) return false;\n";
 const TRUST_FENCE_REJECTION = "\t\tif (!isTrustedApiRequest(request, this.trustedHosts)) return 403;\n";
 const BROWSER_AUTH_DELEGATE = "\t\treturn this.browserAuth.authorizeIndex(request, response);\n";
+const NATIVE_COOKIE_REJECTION = "\t\treturn this.browserAuth.isAuthenticated(request) ? void 0 : 401;\n";
+
+// Wiring shared by patchServer() and verifyConnectionRoot() so the verifier
+// cannot drift from what the patch installs.
+const HELPER_NAME = "isDshOrbitAuthenticatedProxyRequest";
+const FENCE_PROXY_GATE = `\tif (${HELPER_NAME}(request, hostUrl)) return true;\n`;
+const REJECTION_PROOF_ADMISSION = `\t\tif (${HELPER_NAME}(request)) return void 0;\n`;
+const INDEX_PROOF_ADMISSION =
+  `url.searchParams.getAll(TOKEN_QUERY).length === 0 && ${HELPER_NAME}(request)) return true;`;
 
 // Reviewed patch generations. `install` names the shape of the reviewed edit:
 //
@@ -65,15 +74,32 @@ const CONNECTION_GENERATIONS = Object.freeze({
   }),
 });
 
-function replaceExactlyOnce(source, needle, replacement, label) {
-  const first = source.indexOf(needle);
+// A reviewed fragment must appear exactly once: a missing one means the bundle
+// moved, and a duplicated one means the edit could land on the wrong copy.
+function requireExactlyOnce(source, fragment, label) {
+  const first = source.indexOf(fragment);
   if (first < 0) {
     throw new Error(`DSH Orbit patch failed: missing ${label}`);
   }
-  if (source.indexOf(needle, first + needle.length) >= 0) {
+  if (source.indexOf(fragment, first + fragment.length) >= 0) {
     throw new Error(`DSH Orbit patch failed: ${label} is not unique`);
   }
-  return source.slice(0, first) + replacement + source.slice(first + needle.length);
+  return first;
+}
+
+function countOccurrences(source, fragment) {
+  let count = 0;
+  let at = source.indexOf(fragment);
+  while (at >= 0) {
+    count += 1;
+    at = source.indexOf(fragment, at + fragment.length);
+  }
+  return count;
+}
+
+function replaceExactlyOnce(source, fragment, replacement, label) {
+  const first = requireExactlyOnce(source, fragment, label);
+  return source.slice(0, first) + replacement + source.slice(first + fragment.length);
 }
 
 export function validateHost(publicHost) {
@@ -98,8 +124,8 @@ export function connectionPatchFor(dshVersion) {
 function orbitAuthBlock({ publicHost, proxyAuthFile, headerHelper, resolveHost }) {
   const header = (name) => `${headerHelper}(request.headers, ${name})`;
   const signature = resolveHost
-    ? "function isDshOrbitAuthenticatedProxyRequest(request) {"
-    : "function isDshOrbitAuthenticatedProxyRequest(request, hostUrl) {";
+    ? `function ${HELPER_NAME}(request) {`
+    : `function ${HELPER_NAME}(request, hostUrl) {`;
   const resolveLines = resolveHost
     ? `\tconst host = ${header('"host"')};\n` +
       "\tif (host === void 0) return false;\n" +
@@ -141,8 +167,7 @@ function installHostConnectionPath(source) {
   source = replaceExactlyOnce(
     source,
     TRUST_FENCE_REJECTION,
-    TRUST_FENCE_REJECTION +
-      "\t\tif (isDshOrbitAuthenticatedProxyRequest(request)) return void 0;\n",
+    TRUST_FENCE_REJECTION + REJECTION_PROOF_ADMISSION,
     "requestRejection trust fence",
   );
 
@@ -153,7 +178,7 @@ function installHostConnectionPath(source) {
     source,
     BROWSER_AUTH_DELEGATE,
     "\t\tconst url = new URL(request.url ?? \"/\", \"http://dsh.invalid\");\n" +
-      "\t\tif (url.searchParams.getAll(TOKEN_QUERY).length === 0 && isDshOrbitAuthenticatedProxyRequest(request)) return true;\n" +
+      `\t\tif (${INDEX_PROOF_ADMISSION}\n` +
       BROWSER_AUTH_DELEGATE,
     "authorizeIndex BrowserAuth delegate",
   );
@@ -187,7 +212,7 @@ function patchServer(source, { publicHost, proxyAuthFile, connectionPatch }) {
     source = replaceExactlyOnce(
       source,
       "\tif (isAuthenticatedReverseProxyRequest(request, hostUrl)) return true;\n",
-      "\tif (isDshOrbitAuthenticatedProxyRequest(request, hostUrl)) return true;\n",
+      FENCE_PROXY_GATE,
       "legacy authenticated proxy gate",
     );
     return { source, changed: true };
@@ -206,11 +231,7 @@ function patchServer(source, { publicHost, proxyAuthFile, connectionPatch }) {
     );
   }
   for (const required of generation.requires) {
-    if (!source.includes(required)) {
-      throw new Error(
-        `DSH Orbit patch failed: missing ${JSON.stringify(required)} required by ${connectionPatch}`,
-      );
-    }
+    requireExactlyOnce(source, required, `declaration ${JSON.stringify(required)} required by ${connectionPatch}`);
   }
 
   const generationAuthBlock = orbitAuthBlock({
@@ -238,7 +259,7 @@ function patchServer(source, { publicHost, proxyAuthFile, connectionPatch }) {
     source = replaceExactlyOnce(
       source,
       TRUSTED_AUTHORITY_GATE,
-      "\tif (isDshOrbitAuthenticatedProxyRequest(request, hostUrl)) return true;\n" + TRUSTED_AUTHORITY_GATE,
+      FENCE_PROXY_GATE + TRUSTED_AUTHORITY_GATE,
       "trusted authority gate",
     );
   } else {
@@ -312,8 +333,33 @@ export async function patchConnectionRootForGeneration({ root, connectionPatch, 
   return applyConnectionPatch({ root, connectionPatch, publicHost, proxyAuthFile });
 }
 
-export async function verifyConnectionRoot({ root, publicHost, connectionPatch }) {
+// Verify a patched root, not just for the presence of the marker but for the
+// exact security semantics the reviewed generation installs. The expected
+// helper is regenerated from the same builder the patch uses, so a tampered
+// predicate — a dropped secret check, a removed Origin fence, a helper replaced
+// by `return true` — cannot report ok. That matters because `--check` is the
+// release and runtime verification gate, so a false ok is a false release claim.
+export async function verifyConnectionRoot({ root, publicHost, proxyAuthFile, connectionPatch }) {
   validateHost(publicHost);
+  if (connectionPatch === undefined) {
+    throw new Error("DSH Orbit verification failed: connectionPatch is required");
+  }
+  const generation = CONNECTION_GENERATIONS[connectionPatch];
+  if (generation === undefined) {
+    throw new Error(
+      `DSH Orbit verification failed for ${root}: unknown connection patch profile ${JSON.stringify(connectionPatch)}`,
+    );
+  }
+  if (generation.install === null) {
+    throw new Error(
+      `DSH Orbit verification failed for ${root}: connection patch profile ${JSON.stringify(connectionPatch)} ` +
+        "records a reviewed bundle layout only and has no reviewed install shape",
+    );
+  }
+  if (typeof proxyAuthFile !== "string" || proxyAuthFile === "") {
+    throw new Error("DSH Orbit verification failed: proxyAuthFile is required");
+  }
+
   const [server, client] = await Promise.all([
     readFile(`${root}/index.js`, "utf8"),
     readFile(`${root}/client.js`, "utf8"),
@@ -327,31 +373,45 @@ export async function verifyConnectionRoot({ root, publicHost, connectionPatch }
   if (!client.includes(`hostname === ${JSON.stringify(publicHost)}`)) {
     problems.push("client public host missing");
   }
-  // When the generation is known, also prove the admission path is wired into
-  // the expected decision points and that native BrowserAuth survives the edit.
-  if (connectionPatch !== undefined) {
-    const generation = CONNECTION_GENERATIONS[connectionPatch];
-    if (generation === undefined) {
-      problems.push(`unknown connection patch profile ${JSON.stringify(connectionPatch)}`);
-    } else if (generation.install === "host-connection") {
-      if (!server.includes("\t\tif (isDshOrbitAuthenticatedProxyRequest(request)) return void 0;\n")) {
-        problems.push("requestRejection does not admit the authenticated proxy proof");
-      }
-      if (
-        !server.includes(
-          "url.searchParams.getAll(TOKEN_QUERY).length === 0 && isDshOrbitAuthenticatedProxyRequest(request)) return true;",
-        )
-      ) {
-        problems.push("authorizeIndex does not admit the tokenless authenticated proxy proof");
-      }
-      if (!server.includes(BROWSER_AUTH_DELEGATE)) {
-        problems.push("authorizeIndex no longer delegates to native BrowserAuth");
-      }
-      if (!server.includes("\t\treturn this.browserAuth.isAuthenticated(request) ? void 0 : 401;\n")) {
-        problems.push("requestRejection no longer enforces native BrowserAuth");
-      }
-    }
+
+  // The helper must be byte-identical to the reviewed one for this generation,
+  // this public host, and this proxy auth file.
+  const expectedHelper = orbitAuthBlock({
+    publicHost,
+    proxyAuthFile,
+    headerHelper: generation.headerHelper,
+    resolveHost: generation.resolveHost,
+  });
+  const helperCount = countOccurrences(server, expectedHelper);
+  if (helperCount === 0) problems.push("Orbit admission helper mismatch");
+  if (helperCount > 1) problems.push("Orbit admission helper is duplicated");
+
+  // The admitted decision points, and nothing else, may reference the helper.
+  // A second declaration would win at runtime even while the reviewed helper is
+  // still present, so the identifier count is pinned to declaration + call sites.
+  const expectedReferences = 1 + (generation.install === "host-connection" ? 2 : 1);
+  const references = countOccurrences(server, HELPER_NAME);
+  if (references !== expectedReferences) {
+    problems.push(`Orbit admission helper is referenced ${references} times, expected ${expectedReferences}`);
   }
+
+  if (generation.install === "host-connection") {
+    if (!server.includes(REJECTION_PROOF_ADMISSION)) {
+      problems.push("requestRejection does not admit the authenticated proxy proof");
+    }
+    if (!server.includes(INDEX_PROOF_ADMISSION)) {
+      problems.push("authorizeIndex does not admit the tokenless authenticated proxy proof");
+    }
+    if (!server.includes(BROWSER_AUTH_DELEGATE)) {
+      problems.push("authorizeIndex no longer delegates to native BrowserAuth");
+    }
+    if (!server.includes(NATIVE_COOKIE_REJECTION)) {
+      problems.push("requestRejection no longer enforces native BrowserAuth");
+    }
+  } else if (!server.includes(FENCE_PROXY_GATE)) {
+    problems.push("isTrustedApiRequest does not admit the authenticated proxy proof");
+  }
+
   if (problems.length) {
     throw new Error(`DSH Orbit verification failed for ${root}: ${problems.join(", ")}`);
   }

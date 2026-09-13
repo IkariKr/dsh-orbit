@@ -49,7 +49,8 @@ async function main() {
     publicHost: PUBLIC_HOST,
     proxyAuthFile: PROXY_AUTH_FILE,
   };
-  const verify = (root) => verifyConnectionRoot({ root, publicHost: PUBLIC_HOST, connectionPatch });
+  const verify = (root) =>
+    verifyConnectionRoot({ root, publicHost: PUBLIC_HOST, proxyAuthFile: PROXY_AUTH_FILE, connectionPatch });
 
   const sshPatch = async (apply) => {
     if (!SSH_PATCH_ENABLED) {

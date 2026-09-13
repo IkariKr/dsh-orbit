@@ -258,7 +258,12 @@ test("patches and verifies a supported client-connection root", async () => {
   assert.match(server, /isDshOrbitAuthenticatedProxyRequest/);
   assert.match(client, /hostname === "dsh\.example\.com"/);
 
-  await verifyConnectionRoot({ root, publicHost: "dsh.example.com" });
+  await verifyConnectionRoot({
+    root,
+    publicHost: "dsh.example.com",
+    proxyAuthFile: "/run/secrets/dsh_proxy_auth",
+    connectionPatch: "connection-v1",
+  });
 
   const second = await patchConnectionRoot(options);
   assert.equal(second.server, "ok");
@@ -324,7 +329,12 @@ test("migrates the pre-Orbit authenticated proxy patch", async () => {
   assert.match(server, /x-dsh-orbit-authenticated-proxy/);
   assert.doesNotMatch(server, /REMOTE_PROXY_AUTH_HEADER/);
   assert.doesNotMatch(server, /isAuthenticatedReverseProxyRequest/);
-  await verifyConnectionRoot({ root, publicHost: "legacy.example.com" });
+  await verifyConnectionRoot({
+    root,
+    publicHost: "legacy.example.com",
+    proxyAuthFile: "/run/secrets/dsh_proxy_auth",
+    connectionPatch: "connection-v1",
+  });
 });
 
 test("rejects an unsupported upstream version", async () => {
@@ -456,6 +466,7 @@ test("adds a second authentication path without removing native BrowserAuth", as
   await verifyConnectionRoot({
     root,
     publicHost: "dsh.example.com",
+    proxyAuthFile,
     connectionPatch: "connection-browser-auth-v1",
   });
 
@@ -678,8 +689,159 @@ test("verification rejects a tree patched for a different generation", async () 
     verifyConnectionRoot({
       root,
       publicHost: "dsh.example.com",
+      proxyAuthFile: "/run/secrets/dsh_proxy_auth",
       connectionPatch: "connection-browser-auth-v1",
     }),
     /requestRejection does not admit the authenticated proxy proof/,
+  );
+});
+
+test("requires every reviewed declaration exactly once", async () => {
+  const duplicated = BROWSER_AUTH_SERVER_SOURCE.replace(
+    "function header$1(headers, name) {",
+    "function header$1(headers, name) {\n\treturn undefined;\n}\nfunction header$1(headers, name) {",
+  );
+  assert.notEqual(duplicated, BROWSER_AUTH_SERVER_SOURCE);
+  const root = await fixture({ serverSource: duplicated });
+  const proxyAuthFile = join(root, "proxy-auth");
+  await writeFile(proxyAuthFile, PROXY_SECRET, "utf8");
+  await assert.rejects(
+    patchConnectionRootForGeneration({
+      root,
+      connectionPatch: "connection-browser-auth-v1",
+      publicHost: "dsh.example.com",
+      proxyAuthFile,
+    }),
+    /required by connection-browser-auth-v1 is not unique/,
+  );
+  assert.equal(await readFile(join(root, "index.js"), "utf8"), duplicated);
+});
+
+// ---------------------------------------------------------------------------
+// Verification must prove the security semantics, not the marker.
+//
+// `--check` is the release and runtime verification gate, so a tree whose
+// admission helper lost a predicate must not verify. Each case below patches a
+// fixture, tampers one reviewed element, and expects verifyConnectionRoot() to
+// refuse the result.
+// ---------------------------------------------------------------------------
+
+const VERIFY_OPTIONS = { publicHost: "dsh.example.com", connectionPatch: "connection-browser-auth-v1" };
+
+async function expectVerificationFailure(label, tamper, expected) {
+  const { root, proxyAuthFile } = await patchBrowserAuthGeneration();
+  const serverPath = join(root, "index.js");
+  const patched = await readFile(serverPath, "utf8");
+  const tampered = tamper(patched);
+  assert.notEqual(tampered, patched, `${label}: tamper must change the patched tree`);
+  await writeFile(serverPath, tampered, "utf8");
+  await assert.rejects(
+    verifyConnectionRoot({ root, ...VERIFY_OPTIONS, proxyAuthFile }),
+    expected,
+    `${label}: verification must refuse the tampered tree`,
+  );
+}
+
+test("verification rejects an admission helper that lost its security predicates", async () => {
+  const removals = [
+    ["proxy secret", "\tif (dshOrbitProxySecret === \"\") return false;\n"],
+    ["x-forwarded-proto", '\tif (header$1(request.headers, "x-forwarded-proto") !== DSH_ORBIT_PROXY_PROTO) return false;\n'],
+    ["shared secret", "\tif (header$1(request.headers, DSH_ORBIT_PROXY_HEADER) !== dshOrbitProxySecret) return false;\n"],
+    ["cross-site rejection", '\tif (header$1(request.headers, "sec-fetch-site") === "cross-site") return false;\n'],
+    ["origin fence", '\tconst origin = header$1(request.headers, "origin");\n\tif (origin === void 0) return true;\n'],
+    ["origin comparison", '\t\treturn new URL(origin).host === hostUrl.host;\n'],
+    ["public host check", "\tif (hostUrl.hostname !== DSH_ORBIT_PROXY_HOST) return false;\n"],
+    ["authority parse", "\tconst hostUrl = parseAuthority(host);\n\tif (hostUrl === void 0) return false;\n"],
+    ["host header read", '\tconst host = header$1(request.headers, "host");\n\tif (host === void 0) return false;\n'],
+  ];
+
+  for (const [label, needle] of removals) {
+    await expectVerificationFailure(label, (source) => source.replace(needle, ""), /Orbit admission helper mismatch/);
+  }
+});
+
+test("verification rejects a helper replaced by a permissive stub", async () => {
+  await expectVerificationFailure(
+    "permissive stub",
+    (source) =>
+      source.replace(
+        "function isDshOrbitAuthenticatedProxyRequest(request) {",
+        "function isDshOrbitAuthenticatedProxyRequest(request) {\n\treturn true;\n}\nfunction unusedOriginal(request) {",
+      ),
+    /Orbit admission helper mismatch/,
+  );
+});
+
+test("verification rejects a second helper declaration that would win at runtime", async () => {
+  // A later declaration of the same name shadows the reviewed one even though
+  // the reviewed helper is still byte-identical in the file.
+  await expectVerificationFailure(
+    "duplicate declaration",
+    (source) =>
+      source +
+      "\nfunction isDshOrbitAuthenticatedProxyRequest(request) {\n\treturn true;\n}\n",
+    /Orbit admission helper is referenced 4 times, expected 3/,
+  );
+});
+
+test("verification rejects a mismatched public host or proxy auth file", async () => {
+  const { root, proxyAuthFile } = await patchBrowserAuthGeneration();
+
+  await assert.rejects(
+    verifyConnectionRoot({ root, ...VERIFY_OPTIONS, publicHost: "other.example.com", proxyAuthFile }),
+    /Orbit admission helper mismatch/,
+  );
+  await assert.rejects(
+    verifyConnectionRoot({ root, ...VERIFY_OPTIONS, proxyAuthFile: join(root, "other-proxy-auth") }),
+    /Orbit admission helper mismatch/,
+  );
+  // The unmodified tree still verifies, so the failures above are caused by the
+  // mismatch and not by the tree being unverifiable.
+  await verifyConnectionRoot({ root, ...VERIFY_OPTIONS, proxyAuthFile });
+});
+
+test("verification requires the generation and the proxy auth file", async () => {
+  const { root, proxyAuthFile } = await patchBrowserAuthGeneration();
+
+  await assert.rejects(
+    verifyConnectionRoot({ root, publicHost: "dsh.example.com", proxyAuthFile }),
+    /connectionPatch is required/,
+  );
+  await assert.rejects(
+    verifyConnectionRoot({ root, ...VERIFY_OPTIONS, proxyAuthFile: "" }),
+    /proxyAuthFile is required/,
+  );
+  await assert.rejects(
+    verifyConnectionRoot({ root, publicHost: "dsh.example.com", proxyAuthFile, connectionPatch: "connection-nope" }),
+    /unknown connection patch profile/,
+  );
+});
+
+test("verification rejects a tampered fence generation", async () => {
+  // The released baseline uses the fence generation, so it gets the same
+  // exact-semantics treatment as the new one.
+  const root = await fixture();
+  await patchConnectionRoot({
+    root,
+    dshVersion: "0.1.1-rc.2",
+    publicHost: "dsh.example.com",
+    proxyAuthFile: "/run/secrets/dsh_proxy_auth",
+  });
+  const fenceOptions = {
+    publicHost: "dsh.example.com",
+    proxyAuthFile: "/run/secrets/dsh_proxy_auth",
+    connectionPatch: "connection-v1",
+  };
+  await verifyConnectionRoot({ root, ...fenceOptions });
+
+  const serverPath = join(root, "index.js");
+  const tampered = (await readFile(serverPath, "utf8")).replace(
+    "\tif (isDshOrbitAuthenticatedProxyRequest(request, hostUrl)) return true;\n",
+    "",
+  );
+  await writeFile(serverPath, tampered, "utf8");
+  await assert.rejects(
+    verifyConnectionRoot({ root, ...fenceOptions }),
+    /Orbit admission helper mismatch|isTrustedApiRequest does not admit the authenticated proxy proof/,
   );
 });
