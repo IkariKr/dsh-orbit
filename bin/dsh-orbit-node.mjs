@@ -25,7 +25,7 @@
 //   DSH_ORBIT_NODE_ROUTE_INGRESS_PORT route-ingress listen port (default 0; use a fixed port for persistent route targets)
 //   DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN route-ingress listen address (default 127.0.0.1)
 //   DSH_ORBIT_NODE_ROUTE_DOMAIN       deterministic v0.4 route domain (default localhost)
-//   DSH_ORBIT_NODE_DSH_TARGET         node-local DSH transport target (default http://127.0.0.1:3080)
+//   DSH_ORBIT_NODE_DSH_TARGET         node-local DSH transport target (default http://127.0.0.1:3081, the DSH compatibility adapter)
 //   DSH_ORBIT_NODE_ROUTE_TLS_KEY/CERT optional TLS PEM values or file paths; both are required together
 
 import { existsSync, readFileSync } from "node:fs";
@@ -175,7 +175,11 @@ switch (command) {
     const ingressPort = Number(process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_PORT ?? "0");
     const ingressListen = process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN ?? "127.0.0.1";
     const routeDomain = process.env.DSH_ORBIT_NODE_ROUTE_DOMAIN ?? "localhost";
-    const dshTarget = process.env.DSH_ORBIT_NODE_DSH_TARGET ?? "http://127.0.0.1:3080";
+    // The default DSH transport is the node-local DSH compatibility adapter
+    // (RFC-0003/RFC-0010), not DSH directly: the supported DSH versions admit
+    // route traffic only through the Orbit proof, which the adapter presents.
+    // DSH itself never listens on 3081.
+    const dshTarget = process.env.DSH_ORBIT_NODE_DSH_TARGET ?? "http://127.0.0.1:3081";
     if (!Number.isInteger(ingressPort) || ingressPort < 0 || ingressPort > 65535) {
       console.error("dsh-orbit-node: DSH_ORBIT_NODE_ROUTE_INGRESS_PORT must be an integer from 0 to 65535");
       process.exit(2);

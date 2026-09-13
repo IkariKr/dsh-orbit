@@ -41,6 +41,41 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # Node-local DSH compatibility adapter (RFC-0003/RFC-0010). It shares the DSH
+  # container's network namespace and presents the Orbit proof to DSH on behalf
+  # of verified route traffic. Published on the host loopback only, so the
+  # Node's RouteIngress (a host process) reaches it through its default target
+  # http://127.0.0.1:3081; never published on a public interface. DSH itself
+  # never listens on 3081.
+  dsh-compat-adapter:
+    image: caddy:2-alpine
+    user: "1000:1000"
+    network_mode: service:dsh
+    depends_on:
+      dsh:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - 'export DSH_PROXY_AUTH="$$(cat /run/secrets/dsh_proxy_auth)"; exec caddy run --config /etc/caddy/dsh-compat-adapter.Caddyfile --adapter caddyfile'
+    environment:
+      DSH_PUBLIC_HOST: ${DSH_PUBLIC_HOST:?set DSH_PUBLIC_HOST in .env}
+      DSH_COMPAT_ADAPTER_PORT: "3081"
+    volumes:
+      - ../proxy/dsh-compat-adapter.Caddyfile:/etc/caddy/dsh-compat-adapter.Caddyfile:ro
+      - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+    ports:
+      - "127.0.0.1:${DSH_ORBIT_NODE_DSH_ADAPTER_PORT:-3081}:3081"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    restart: unless-stopped
+
   caddy:
     image: caddy:2-alpine
     user: "1000:1000"

@@ -13,7 +13,11 @@
 #
 # The mounted drill uses the same contract in docker-registry/dsh-drill.Caddyfile,
 # and the browser gateway example (proxy/Caddyfile.example) applies the same
-# proof-injection contract on the browser path.
+# proof-injection contract on the browser path. In the product compose
+# (docker/compose.example.yaml) this file is loaded by the dsh-compat-adapter
+# service, which shares the DSH network namespace and publishes 3081 on the
+# host loopback only — the RouteIngress default target (http://127.0.0.1:3081)
+# is this adapter, never DSH directly.
 {
 	auto_https off
 	admin off

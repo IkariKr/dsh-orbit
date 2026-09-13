@@ -77,7 +77,10 @@ export class RouteIngress {
     routeDomain = "localhost",
     getTrustKeys = () => [],
     getNodeState = () => "active",
-    dshTarget = "http://127.0.0.1:3080",
+    // Defaults to the node-local DSH compatibility adapter port (RFC-0010):
+    // route traffic must reach DSH carrying the adapter's Orbit proof, and
+    // DSH never listens on 3081 itself.
+    dshTarget = "http://127.0.0.1:3081",
     tls = null,
     nonceCache = new RouteNonceCache(),
     now = () => Date.now(),

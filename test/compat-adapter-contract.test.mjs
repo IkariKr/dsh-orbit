@@ -78,3 +78,51 @@ test("one secret configuration feeds DSH and the adapter", async () => {
     "the adapter receives the same secret value, not a second credential",
   );
 });
+
+test("the product compose actually loads the canonical adapter", async () => {
+  const compose = await read(COMPOSE_EXAMPLE);
+  assert.match(
+    compose,
+    /\n  dsh-compat-adapter:/,
+    "the product compose must run the node-local DSH compatibility adapter service",
+  );
+  assert.match(
+    compose,
+    /\/etc\/caddy\/dsh-compat-adapter\.Caddyfile/,
+    "the adapter service must load proxy/dsh-compat-adapter.Caddyfile, not a hand-written copy",
+  );
+  assert.match(
+    compose,
+    /network_mode:\s*service:dsh/,
+    "the adapter must share the DSH container network namespace",
+  );
+});
+
+test("the adapter is published on the host loopback only, never publicly", async () => {
+  const compose = await read(COMPOSE_EXAMPLE);
+  const adapterStart = compose.indexOf("\n  dsh-compat-adapter:");
+  const adapterEnd = compose.indexOf("\n  caddy:", adapterStart);
+  const adapterBlock = compose.slice(adapterStart, adapterEnd);
+  assert.ok(adapterBlock.includes("image:"), "the adapter service block must exist");
+  const portLines = adapterBlock.match(/^\s*-\s*"([^"]+)"\s*$/gm) ?? [];
+  assert.ok(portLines.length > 0, "the adapter must declare its host publication explicitly");
+  for (const line of portLines) {
+    assert.match(
+      line,
+      /127\.0\.0\.1:/,
+      `adapter host publications must be loopback-only: ${line.trim()}`,
+    );
+  }
+});
+
+test("the RouteIngress default target is the adapter, not DSH directly", async () => {
+  const nodeBin = await read(new URL("../bin/dsh-orbit-node.mjs", import.meta.url));
+  const routeIngress = await read(ROUTE_INGRESS);
+  // The supported DSH versions admit route traffic only through the Orbit
+  // proof, which the adapter presents; a default of DSH directly would ship a
+  // broken product path for the shipping baseline.
+  assert.match(nodeBin, /DSH_ORBIT_NODE_DSH_TARGET \?\? "http:\/\/127\.0\.0\.1:3081"/);
+  assert.match(routeIngress, /dshTarget = "http:\/\/127\.0\.0\.1:3081"/);
+  assert.doesNotMatch(nodeBin, /127\.0\.0\.1:3080/);
+  assert.doesNotMatch(routeIngress, /127\.0\.0\.1:3080/);
+});
