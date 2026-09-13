@@ -80,6 +80,13 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /Caddy and machine-ingress share the Hub container's network namespace/);
   assert.match(source, /suspendDsh/);
   assert.match(source, /routeWebSocket\(/);
+  // The drill must take its transport vocabulary from the shared wire contract
+  // for the generation the mounted stack runs, not from a local constant.
+  assert.match(source, /wireContractForGeneration\("connection-v1"\)/);
+  assert.match(source, /rpcEndpoint\(DRILL_WIRE/);
+  assert.match(source, /rpcPayload\(DRILL_WIRE/);
+  assert.doesNotMatch(source, /path\s*=\s*"\/api\/events\.mux"/);
+  assert.doesNotMatch(source, /method:\s*"session\.(create|list)"/);
   assert.match(source, /runningImageEvidence\(/);
   assert.match(source, /aging reset healed A without heartbeat/);
   assert.doesNotMatch(source, /rejectUnauthorized:\s*false/);

@@ -30,8 +30,16 @@ import tls from "node:tls";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCompatibilityReport } from "../src/compatibility-report.mjs";
+import { rpcEndpoint, rpcPayload, streamPaths, wireContractForGeneration } from "../src/dsh-wire-contract.mjs";
 import { runVerificationSequence } from "../src/upgrade-runner.mjs";
 import { REQUIRED_MOUNTED_MATRIX_FIELDS, emptyMountedMatrix, assertMountedMatrixShape } from "./stage8-mounted-matrix.mjs";
+
+// The mounted v0.4 stack runs the legacy production baseline, so the drill
+// speaks the connection-v1 generation — but the vocabulary itself (stream path,
+// endpoint names, payload shapes) must come from the shared wire contract, not
+// from a local constant that can drift from the reviewed generations.
+const DRILL_WIRE = wireContractForGeneration("connection-v1");
+const DRILL_STREAM_PATH = streamPaths(DRILL_WIRE)[0];
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const COMPOSE = "docker-registry/drill.compose.yaml";
@@ -569,7 +577,7 @@ function decodeWsFrame(buffer) {
   return { opcode, payload, totalLength: offset + length };
 }
 
-async function routeWebSocket(authority, { path = "/api/events.mux", pingPayload = "orbit-mounted-ping", expectedNode = null } = {}) {
+async function routeWebSocket(authority, { path = DRILL_STREAM_PATH, pingPayload = "orbit-mounted-ping", expectedNode = null } = {}) {
   const socket = await connectRouteTls(authority);
   const secKey = randomBytes(16).toString("base64");
   socket.write([
@@ -957,8 +965,9 @@ async function main() {
 
   // --- 3. enroll + run + report for BOTH real DSH nodes ---
   async function createHistoricalSession(endpoint, logicalOrigin) {
+    const createEndpoint = rpcEndpoint(DRILL_WIRE, "session", "create");
     const rpcId = `drill-session-create-${randomUUID()}`;
-    const response = await gatewayFetch("/api/session.create", {
+    const response = await gatewayFetch(`/api/${createEndpoint}`, {
       method: "POST",
       baseUrl: endpoint,
       origin: logicalOrigin,
@@ -966,16 +975,17 @@ async function main() {
       body: JSON.stringify({
         type: "client-request",
         rpcId,
-        method: "session.create",
-        payload: { agentPreset: "standard" },
+        method: createEndpoint,
+        payload: rpcPayload(DRILL_WIRE, { agentPreset: "standard" }),
       }),
     });
     const body = await response.json();
     const sessionId = body?.result?.value?.sessionId;
     if (response.status !== 200 || body?.rpcId !== rpcId || typeof sessionId !== "string" || sessionId.length === 0) {
-      throw new Error(`real DSH session.create failed at ${endpoint}: HTTP ${response.status} ${JSON.stringify(body)}`);
+      throw new Error(`real DSH session create failed at ${endpoint}: HTTP ${response.status} ${JSON.stringify(body)}`);
     }
-    const listed = await gatewayFetch("/api/session.list", {
+    const listEndpoint = rpcEndpoint(DRILL_WIRE, "session", "list");
+    const listed = await gatewayFetch(`/api/${listEndpoint}`, {
       method: "POST",
       baseUrl: endpoint,
       origin: logicalOrigin,
@@ -983,8 +993,8 @@ async function main() {
       body: JSON.stringify({
         type: "client-request",
         rpcId: `drill-session-list-${randomUUID()}`,
-        method: "session.list",
-        payload: {},
+        method: listEndpoint,
+        payload: rpcPayload(DRILL_WIRE, {}),
       }),
     });
     const listedBody = await listed.json();
