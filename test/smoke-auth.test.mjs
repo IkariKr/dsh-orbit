@@ -11,6 +11,12 @@ const USER = "orbit-test-user";
 const TEST_PASSWORD = "orbit-test-password";
 const VALID_AUTHORIZATION = `Basic ${Buffer.from(`${USER}:${TEST_PASSWORD}`).toString("base64")}`;
 
+// The wire vocabulary each reviewed generation speaks (src/dsh-wire-contract.mjs).
+const GENERATIONS = {
+  "connection-v1": { method: "settings.describe", payload: {}, cases: 6, forgedHeader: true },
+  "connection-browser-auth-v1": { method: "settings/describe", payload: { args: {} }, cases: 5, forgedHeader: false },
+};
+
 async function withServer(handler, run) {
   const server = http.createServer(handler);
   server.listen(0, "127.0.0.1");
@@ -24,8 +30,8 @@ async function withServer(handler, run) {
   }
 }
 
-async function runSmoke(baseUrl, { withCredentials = true, extraEnv = {} } = {}) {
-  const env = { ...process.env, DSH_SMOKE_URL: baseUrl, ...extraEnv };
+async function runSmoke(baseUrl, { withCredentials = true, extraEnv = {}, generation = "connection-v1" } = {}) {
+  const env = { ...process.env, DSH_SMOKE_URL: baseUrl, DSH_SMOKE_CONNECTION_PATCH: generation, ...extraEnv };
   if (withCredentials) {
     env.DSH_SMOKE_BASIC_USER = USER;
     env.DSH_SMOKE_BASIC_PASSWORD = TEST_PASSWORD;
@@ -82,36 +88,47 @@ function fenceHandler(captured, originMode = "host") {
   };
 }
 
-test("proves the full authorization matrix against a compliant deployment", async () => {
-  const captured = [];
-  const { code, stdout, stderr } = await withServer(fenceHandler(captured), (baseUrl) => runSmoke(baseUrl));
-  assert.equal(code, 0);
-  assert.equal(stderr, "");
-  assert.match(stdout, /PASS allowed: authenticated same-origin settings\.describe/);
-  assert.match(stdout, /PASS denied: unauthenticated privileged RPC/);
-  assert.match(stdout, /PASS denied: invalid Basic credentials/);
-  assert.match(stdout, /PASS denied: unexpected Origin/);
-  assert.match(stdout, /PASS denied: Sec-Fetch-Site: cross-site/);
-  assert.match(stdout, /PASS denied: forged Cf-Access-Jwt-Assertion/);
-  assert.match(stdout, /authorization smoke: PASS \(6\/6 cases matched\)/);
-  assert.ok(!stdout.includes(TEST_PASSWORD));
-  assert.ok(!stdout.includes(VALID_AUTHORIZATION));
-});
+for (const [generation, wire] of Object.entries(GENERATIONS)) {
+  test(`proves the full authorization matrix against a compliant deployment (${generation})`, async () => {
+    const captured = [];
+    const { code, stdout, stderr } = await withServer(fenceHandler(captured), (baseUrl) =>
+      runSmoke(baseUrl, { generation }),
+    );
+    assert.equal(code, 0);
+    assert.equal(stderr, "");
+    assert.match(stdout, /PASS allowed: authenticated same-origin settings describe/);
+    assert.match(stdout, /PASS denied: unauthenticated privileged RPC/);
+    assert.match(stdout, /PASS denied: invalid Basic credentials/);
+    assert.match(stdout, /PASS denied: unexpected Origin/);
+    assert.match(stdout, /PASS denied: Sec-Fetch-Site: cross-site/);
+    assert.match(stdout, new RegExp(`authorizationSmoke: pass \\(${generation}, ${wire.cases}/${wire.cases} cases matched\\)`));
+    if (wire.forgedHeader) {
+      assert.match(stdout, /PASS denied: forged Cf-Access-Jwt-Assertion/);
+    } else {
+      // Measured on the real patched 0.1.5-rc.2 process: the BrowserAuth
+      // generation decides such a request on its own path, so the forged
+      // privilege header is not a DSH denial case for this generation.
+      assert.ok(!stdout.includes("forged Cf-Access-Jwt-Assertion"));
+    }
+    assert.ok(!stdout.includes(TEST_PASSWORD));
+    assert.ok(!stdout.includes(VALID_AUTHORIZATION));
+  });
 
-test("constructs authenticated same-origin requests for the positive control", async () => {
-  const captured = [];
-  const { code } = await withServer(fenceHandler(captured), (baseUrl) => runSmoke(baseUrl));
-  assert.equal(code, 0);
-  const positive = captured.find((entry) => entry.headers.authorization === VALID_AUTHORIZATION);
-  assert.ok(positive, "positive control request was not captured");
-  assert.equal(positive.body.type, "client-request");
-  assert.equal(positive.body.method, "settings.describe");
-  assert.deepEqual(positive.body.payload, {});
-  assert.match(positive.body.rpcId, /^orbit-auth-smoke-/);
-  assert.equal(positive.headers["content-type"], "application/json");
-  assert.equal(positive.headers.origin, `http://${positive.headers.host}`);
-  assert.equal(positive.headers["sec-fetch-site"], "same-origin");
-});
+  test(`constructs generation-correct requests for the positive control (${generation})`, async () => {
+    const captured = [];
+    const { code } = await withServer(fenceHandler(captured), (baseUrl) => runSmoke(baseUrl, { generation }));
+    assert.equal(code, 0);
+    const positive = captured.find((entry) => entry.headers.authorization === VALID_AUTHORIZATION);
+    assert.ok(positive, "positive control request was not captured");
+    assert.equal(positive.body.type, "client-request");
+    assert.equal(positive.body.method, wire.method);
+    assert.deepEqual(positive.body.payload, wire.payload);
+    assert.match(positive.body.rpcId, /^orbit-auth-smoke-/);
+    assert.equal(positive.headers["content-type"], "application/json");
+    assert.equal(positive.headers.origin, `http://${positive.headers.host}`);
+    assert.equal(positive.headers["sec-fetch-site"], "same-origin");
+  });
+}
 
 test("fails closed when a negative case is accepted", async () => {
   const { code, stdout, stderr } = await withServer(
@@ -127,7 +144,7 @@ test("fails closed when a negative case is accepted", async () => {
   assert.match(stderr, /FAIL unexpected Origin/);
   assert.match(stderr, /FAIL Sec-Fetch-Site: cross-site/);
   assert.match(stderr, /FAIL forged Cf-Access-Jwt-Assertion/);
-  assert.match(stdout, /PASS allowed: authenticated same-origin settings\.describe/);
+  assert.match(stdout, /PASS allowed: authenticated same-origin settings describe/);
   assert.match(stderr, /authorization smoke: FAIL/);
 });
 
@@ -140,7 +157,7 @@ test("fails when the positive control is rejected", async () => {
     (baseUrl) => runSmoke(baseUrl),
   );
   assert.equal(code, 1);
-  assert.match(stderr, /FAIL authenticated same-origin settings\.describe: expected allowed, got denied \(HTTP 401\)/);
+  assert.match(stderr, /FAIL authenticated same-origin settings describe: expected allowed, got denied \(HTTP 401\)/);
   assert.match(stderr, /authorization smoke: FAIL/);
 });
 
@@ -191,7 +208,7 @@ test("a server error is a failed case, not a denied case", async () => {
     (baseUrl) => runSmoke(baseUrl),
   );
   assert.equal(code, 1);
-  assert.match(stderr, /FAIL authenticated same-origin settings\.describe: request error, expected allowed \(HTTP 503 server error\)/);
+  assert.match(stderr, /FAIL authenticated same-origin settings describe: request error, expected allowed \(HTTP 503 server error\)/);
   assert.match(stderr, /FAIL unauthenticated privileged RPC: request error, expected denied \(HTTP 503 server error\)/);
   assert.ok(!stderr.includes("got denied (HTTP 503"), "server errors must not count as authorization denials");
 });
@@ -202,7 +219,7 @@ test("honors DSH_SMOKE_ORIGIN when the gateway rewrites the Host", async () => {
     runSmoke(baseUrl, { extraEnv: { DSH_SMOKE_ORIGIN: "https://dsh.example.com" } }),
   );
   assert.equal(code, 0);
-  assert.match(stdout, /authorization smoke: PASS \(6\/6 cases matched\)/);
+  assert.match(stdout, /authorizationSmoke: pass \(connection-v1, 6\/6 cases matched\)/);
   const positive = captured.find((entry) => entry.headers.authorization === VALID_AUTHORIZATION);
   assert.equal(positive.headers.origin, "https://dsh.example.com");
 });
@@ -231,4 +248,28 @@ test("requires the Basic Auth credentials for the supported auth path", async ()
   );
   assert.equal(code, 2);
   assert.match(stderr, /DSH_SMOKE_BASIC_USER and DSH_SMOKE_BASIC_PASSWORD are required/);
+});
+
+test("fails closed without a declared connection generation", async () => {
+  const { code, stderr } = await withServer(
+    async (req, res) => {
+      const request = await readRequest(req);
+      respond(res, request.body.rpcId, { ok: true, value: {} });
+    },
+    (baseUrl) => runSmoke(baseUrl, { extraEnv: { DSH_SMOKE_CONNECTION_PATCH: "" } }),
+  );
+  assert.equal(code, 2);
+  assert.match(stderr, /DSH_SMOKE_CONNECTION_PATCH is required/);
+});
+
+test("rejects an unreviewed connection generation", async () => {
+  const { code, stderr } = await withServer(
+    async (req, res) => {
+      const request = await readRequest(req);
+      respond(res, request.body.rpcId, { ok: true, value: {} });
+    },
+    (baseUrl) => runSmoke(baseUrl, { generation: "connection-v99" }),
+  );
+  assert.equal(code, 2);
+  assert.match(stderr, /no reviewed wire contract for connection patch "connection-v99"/);
 });

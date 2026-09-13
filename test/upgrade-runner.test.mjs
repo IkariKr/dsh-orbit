@@ -53,6 +53,7 @@ function fixtureConfig(workdir, overrides = {}) {
     candidateHostPort: 18444,
     productionDataRoot: "/srv/dsh-production/data",
     candidateEndpoint: "https://dsh.example.com:9443",
+    connectionPatch: "connection-v1",
     publicHost: "dsh.example.com",
     basicUser: "admin",
     basicPassword: "orbit-candidate-value",
@@ -156,8 +157,8 @@ function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessio
       return {
         code: settingsMutateOk ? 0 : 1,
         stdout: settingsMutateOk
-          ? "settings.describe: ok (26 namespaces)\nsettings.mutate: ok (agent-default-model, no-op)\n"
-          : "settings.describe: ok (26 namespaces)\n",
+          ? "settingsRead: pass (describe returned 26 namespaces)\nsettingsNoopWrite: pass (no-op mutate on agent-default-model accepted)\n"
+          : "settingsRead: pass (describe returned 26 namespaces)\n",
         stderr: "",
       };
     }
@@ -165,7 +166,7 @@ function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessio
       events.push("command:auth");
       return {
         code: authCode,
-        stdout: "",
+        stdout: authCode === 0 ? "authorizationSmoke: pass (connection-v1, 6/6 cases matched)\n" : "",
         stderr: authCode === 0 ? "" : "FAIL unexpected Origin: expected denied, got allowed",
       };
     }
@@ -728,6 +729,64 @@ test("loadUpgradeConfig reports missing environment configuration", () => {
   assert.ok(missing.includes("DSH_BASELINE_ORBIT_REVISION (production Orbit revision)"));
   assert.ok(missing.includes("DSH_UPGRADE_HOST_PORT (candidate loopback port)"));
   assert.ok(missing.includes("DSH_SNAPSHOT_HOOK (snapshot capability)"));
+  assert.ok(
+    missing.includes("DSH_SMOKE_CONNECTION_PATCH (reviewed connection patch generation)"),
+    "the smoke generation must be a required part of the upgrade configuration",
+  );
   assert.equal(config.candidateImage, undefined);
   assert.ok(config.workdir.endsWith(".upgrade-run"));
+});
+
+function completeUpgradeEnv(overrides = {}) {
+  return {
+    DSH_VERSION: "0.1.1-rc.2",
+    DSH_PUBLIC_HOST: "dsh.example.com",
+    DSH_CANDIDATE_ORBIT_REVISION: "386e4d1aa825c41446e2e5eebb67bfe7570564b1",
+    DSH_BASELINE_IMAGE: "dsh-orbit:0.1.1-rc.2-production.4",
+    DSH_BASELINE_ORBIT_REVISION: "8f3094e6d09c9337569f5cc1f965f8bd3d01e7d9",
+    DSH_BASELINE_DSH_VERSION: "0.1.1-rc.2",
+    DSH_CANDIDATE_IMAGE: "dsh-orbit:0.1.1-rc.2",
+    DSH_CANDIDATE_DATA_ROOT: "/srv/dsh-candidate/data",
+    DSH_CANDIDATE_WORKSPACE_ROOT: "/srv/dsh-candidate/workspace",
+    DSH_UPGRADE_HOST_PORT: "18444",
+    DSH_DATA_ROOT: "/srv/dsh-production/data",
+    DSH_SMOKE_URL: "https://dsh.example.com:9443",
+    DSH_SMOKE_CONNECTION_PATCH: "connection-v1",
+    DSH_SMOKE_BASIC_USER: "admin",
+    DSH_SMOKE_BASIC_PASSWORD: "orbit-candidate-value",
+    DSH_SMOKE_SESSION_ID: "session-historical",
+    DSH_SNAPSHOT_HOOK: "/opt/dsh-orbit/hooks/snapshot.sh",
+    ...overrides,
+  };
+}
+
+test("loadUpgradeConfig rejects an unreviewed connection generation", () => {
+  const { missing } = loadUpgradeConfig(
+    completeUpgradeEnv({ DSH_SMOKE_CONNECTION_PATCH: "connection-v99" }),
+  );
+  assert.ok(
+    missing.includes(
+      "DSH_SMOKE_CONNECTION_PATCH is not a reviewed connection patch generation (connection-v1 or connection-browser-auth-v1)",
+    ),
+  );
+});
+
+test("loadUpgradeConfig rejects a generation that contradicts the candidate profile", () => {
+  const { missing } = loadUpgradeConfig(
+    completeUpgradeEnv({ DSH_SMOKE_CONNECTION_PATCH: "connection-browser-auth-v1" }),
+  );
+  assert.ok(
+    missing.some((entry) =>
+      entry.startsWith(
+        "DSH_SMOKE_CONNECTION_PATCH (connection-browser-auth-v1) does not match the generation reviewed for DSH 0.1.1-rc.2 (connection-v1)",
+      ),
+    ),
+    "a smoke generation that the candidate does not speak must fail closed",
+  );
+});
+
+test("loadUpgradeConfig accepts the generation matching the candidate profile", () => {
+  const { missing, config } = loadUpgradeConfig(completeUpgradeEnv());
+  assert.deepEqual(missing, []);
+  assert.equal(config.connectionPatch, "connection-v1");
 });

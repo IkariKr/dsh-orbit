@@ -1,5 +1,6 @@
 import process from "node:process";
 import { randomUUID } from "node:crypto";
+import { rpcEndpoint, rpcPayload, wireContractForGeneration } from "../src/dsh-wire-contract.mjs";
 
 const baseUrl = process.env.DSH_SMOKE_URL;
 const user = process.env.DSH_SMOKE_BASIC_USER;
@@ -15,6 +16,28 @@ if (!user || !basicPassword) {
   );
   process.exit(2);
 }
+
+// The smoke must be told which reviewed connection generation the candidate
+// speaks; the probed endpoint and payload shape follow from that generation's
+// wire contract — never from a version comparison.
+const generation = process.env.DSH_SMOKE_CONNECTION_PATCH;
+if (!generation) {
+  console.error(
+    "DSH_SMOKE_CONNECTION_PATCH is required: set it to the candidate's reviewed connection patch generation " +
+      "(connection-v1 or connection-browser-auth-v1)",
+  );
+  process.exit(2);
+}
+let contract;
+try {
+  contract = wireContractForGeneration(generation);
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}
+
+const endpoint = rpcEndpoint(contract, "settings", "describe");
+const payload = rpcPayload(contract, {});
 
 const invalidPassword = `${basicPassword}-orbit-smoke-invalid`;
 const validCredentials = `${user}:${basicPassword}`;
@@ -43,14 +66,14 @@ async function probe(headers) {
   const rpcId = `orbit-auth-smoke-${randomUUID()}`;
   let response;
   try {
-    response = await fetch(new URL("/api/settings.describe", baseUrl), {
+    response = await fetch(new URL(`/api/${endpoint}`, baseUrl), {
       method: "POST",
       headers: { "content-type": "application/json", connection: "close", ...headers },
       body: JSON.stringify({
         type: "client-request",
         rpcId,
-        method: "settings.describe",
-        payload: {},
+        method: endpoint,
+        payload,
       }),
     });
   } catch (error) {
@@ -93,7 +116,7 @@ if (originOverride) {
 
 const cases = [
   {
-    name: "authenticated same-origin settings.describe",
+    name: "authenticated same-origin settings describe",
     expect: "allowed",
     headers: {
       authorization: basicAuth(validCredentials),
@@ -136,7 +159,17 @@ const cases = [
       "sec-fetch-site": "cross-site",
     },
   },
-  {
+];
+
+// connection-v1's reviewed fence extension rejects forged privilege headers on
+// the candidate itself. The BrowserAuth generation decides such a request on
+// its own path instead: measured on the real patched 0.1.5-rc.2 process, a
+// forged Cf-Access assertion next to a valid Orbit proof is admitted, and
+// client-supplied DSH proof headers are stripped at the Hub and the Node so a
+// forged proof can never reach DSH through Orbit. Forging the proof is
+// therefore covered there, not as a DSH denial case.
+if (generation === "connection-v1") {
+  cases.push({
     name: "forged Cf-Access-Jwt-Assertion",
     expect: "denied",
     headers: {
@@ -144,8 +177,8 @@ const cases = [
       origin,
       "sec-fetch-site": "same-origin",
     },
-  },
-];
+  });
+}
 
 let failures = 0;
 for (const testCase of cases) {
@@ -165,5 +198,5 @@ if (failures > 0) {
   console.error(`authorization smoke: FAIL (${failures} of ${cases.length} cases mismatched)`);
   process.exitCode = 1;
 } else {
-  console.log(`authorization smoke: PASS (${cases.length}/${cases.length} cases matched)`);
+  console.log(`authorizationSmoke: pass (${generation}, ${cases.length}/${cases.length} cases matched)`);
 }

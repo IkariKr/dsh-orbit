@@ -8,6 +8,7 @@ import https from "node:https";
 import tls from "node:tls";
 
 import { compatibilityFor } from "./compatibility.mjs";
+import { wireContractForGeneration } from "./dsh-wire-contract.mjs";
 import { validateHost } from "./remote-settings-patch.mjs";
 import { runSnapshotHook } from "./snapshot-contract.mjs";
 import {
@@ -215,12 +216,36 @@ export function loadUpgradeConfig(env) {
     "DSH_UPGRADE_HOST_PORT (candidate loopback port)": env.DSH_UPGRADE_HOST_PORT,
     "DSH_DATA_ROOT (production data root)": env.DSH_DATA_ROOT,
     "DSH_SMOKE_URL (candidate endpoint)": env.DSH_SMOKE_URL,
+    "DSH_SMOKE_CONNECTION_PATCH (reviewed connection patch generation)": env.DSH_SMOKE_CONNECTION_PATCH,
     "DSH_SMOKE_BASIC_USER": env.DSH_SMOKE_BASIC_USER,
     "DSH_SMOKE_BASIC_PASSWORD": env.DSH_SMOKE_BASIC_PASSWORD,
     "DSH_SMOKE_SESSION_ID (historical session)": env.DSH_SMOKE_SESSION_ID,
     "DSH_SNAPSHOT_HOOK (snapshot capability)": env.DSH_SNAPSHOT_HOOK,
   };
   const missing = Object.keys(required).filter((name) => !required[name]);
+
+  // The smoke vocabulary must be declared, reviewed, and consistent with the
+  // candidate's own compatibility profile — a mismatch means the operator aimed
+  // the acceptance at a wire contract the candidate does not speak.
+  if (env.DSH_SMOKE_CONNECTION_PATCH) {
+    try {
+      wireContractForGeneration(env.DSH_SMOKE_CONNECTION_PATCH);
+    } catch {
+      missing.push(
+        "DSH_SMOKE_CONNECTION_PATCH is not a reviewed connection patch generation (connection-v1 or connection-browser-auth-v1)",
+      );
+    }
+    try {
+      const profilePatch = compatibilityFor(env.DSH_VERSION).connectionPatch;
+      if (profilePatch !== env.DSH_SMOKE_CONNECTION_PATCH) {
+        missing.push(
+          `DSH_SMOKE_CONNECTION_PATCH (${env.DSH_SMOKE_CONNECTION_PATCH}) does not match the generation reviewed for DSH ${env.DSH_VERSION} (${profilePatch})`,
+        );
+      }
+    } catch {
+      // An unknown candidate version is rejected later by the patch checks.
+    }
+  }
 
   return {
     missing,
@@ -237,6 +262,7 @@ export function loadUpgradeConfig(env) {
       candidateHostPort: env.DSH_UPGRADE_HOST_PORT ? Number(env.DSH_UPGRADE_HOST_PORT) : null,
       productionDataRoot: env.DSH_DATA_ROOT,
       candidateEndpoint: env.DSH_SMOKE_URL,
+      connectionPatch: env.DSH_SMOKE_CONNECTION_PATCH,
       publicHost: env.DSH_PUBLIC_HOST,
       basicUser: env.DSH_SMOKE_BASIC_USER,
       basicPassword: env.DSH_SMOKE_BASIC_PASSWORD,
@@ -534,6 +560,7 @@ export async function runVerificationSequence({
 
   const smokeEnv = (extra = {}) => ({
     DSH_SMOKE_URL: config.candidateEndpoint,
+    DSH_SMOKE_CONNECTION_PATCH: config.connectionPatch,
     DSH_SMOKE_BASIC_USER: config.basicUser,
     DSH_SMOKE_BASIC_PASSWORD: config.basicPassword,
     ...(config.smokeOrigin ? { DSH_SMOKE_ORIGIN: config.smokeOrigin } : {}),
@@ -592,10 +619,16 @@ export async function runVerificationSequence({
         const settings = await runCommand(process.execPath, [SMOKE_SETTINGS], {
           env: smokeEnv(),
         });
-        const describeOk = settings.stdout.includes("settings.describe: ok");
-        const mutateOk = settings.code === 0 && settings.stdout.includes("settings.mutate: ok");
-        record("settingsRead", describeOk ? "pass" : "fail", describeOk ? "settings.describe: ok" : failDetail(settings.stderr, `exit ${settings.code}`));
-        record("settingsNoopWrite", mutateOk ? "pass" : "fail", mutateOk ? "settings.mutate: ok (no-op)" : "no-op settings.mutate did not succeed");
+        // Consume only the smoke's stable Orbit-owned result lines; endpoint
+        // names belong to the generation, not to this parser.
+        const readLine = settings.stdout.match(/^settingsRead: pass.*$/m)?.[0];
+        const noopLine = settings.stdout.match(/^settingsNoopWrite: pass.*$/m)?.[0];
+        record("settingsRead", readLine ? "pass" : "fail", readLine ?? failDetail(settings.stderr, `exit ${settings.code}`));
+        record(
+          "settingsNoopWrite",
+          settings.code === 0 && noopLine ? "pass" : "fail",
+          settings.code === 0 && noopLine ? noopLine : "the no-op settings mutate was not accepted",
+        );
       },
     },
     {
@@ -603,7 +636,12 @@ export async function runVerificationSequence({
       required: true,
       run: async () => {
         const auth = await runCommand(process.execPath, [SMOKE_AUTH], { env: smokeEnv() });
-        record("authorizationSmoke", auth.code === 0 ? "pass" : "fail", auth.code === 0 ? "6/6 authorization cases matched" : failDetail(auth.stderr, `exit ${auth.code}`));
+        const authLine = auth.stdout.match(/^authorizationSmoke: pass .*$/m)?.[0];
+        record(
+          "authorizationSmoke",
+          auth.code === 0 && authLine ? "pass" : "fail",
+          authLine ?? failDetail(auth.stderr, `exit ${auth.code}`),
+        );
       },
     },
     {

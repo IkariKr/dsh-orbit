@@ -45,17 +45,17 @@ The container is considered ready only after the profile-local patch has been ap
 
 ### 6. Run smoke tests
 
-At minimum verify:
+The candidate acceptance must state which reviewed connection generation the candidate speaks: the runner requires `DSH_SMOKE_CONNECTION_PATCH`, it must match the generation recorded for the candidate DSH version in `src/compatibility.mjs`, and the smoke suites select their wire vocabulary (endpoint names and payload shape) from it. At minimum verify:
 
 - the DSH web UI loads;
 - a lazy-loaded plugin asset or route that uses the upstream browser-trust fence loads through the public host;
-- `settings.describe` succeeds through the authenticated gateway;
+- a settings read succeeds through the authenticated gateway;
 - the response reports a writable settings provider when expected;
-- a no-op `settings.mutate` succeeds on a safe namespace;
+- a no-op settings mutate succeeds on a safe namespace;
 - at least one session created before the upgrade can be resumed and can re-select its current model;
 - a request without the internal proxy secret is rejected;
 - a cross-site request is rejected;
-- a local proxy cannot spoof an identity-provider assertion header;
+- on the `connection-v1` generation, a local proxy cannot spoof an identity-provider assertion header (the BrowserAuth generation covers proof forging by stripping client-supplied DSH proof headers at the Hub and the Node);
 - WebSocket and long-running agent traffic still work;
 - a sidebar terminal can open a PTY and run `dsh --version`, which also verifies the persisted profile's `node-pty` native binding for the candidate container.
 

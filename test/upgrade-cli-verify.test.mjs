@@ -44,6 +44,7 @@ function fixtureConfig(workdir, port, overrides = {}) {
     candidateHostPort: port,
     productionDataRoot: join(workdir, "production-data"),
     candidateEndpoint: `https://127.0.0.1:${port}`,
+    connectionPatch: "connection-v1",
     publicHost: "dsh.example.com",
     basicUser: "admin",
     basicPassword: "orbit-verify-value",
@@ -316,7 +317,10 @@ test("verify propagates the per-run CA to the runner checks and the smoke suites
         result.report.checks.runtimeReadiness.detail,
         /GET \/ with authenticated gateway headers -> HTTP 200/,
       );
-      assert.match(result.report.checks.authorizationSmoke.detail, /6\/6 authorization cases matched/);
+      assert.match(
+        result.report.checks.authorizationSmoke.detail,
+        /authorizationSmoke: pass \(connection-v1, 6\/6 cases matched\)/,
+      );
       assert.equal(result.report.checks.terminalFence.status, "pass");
       assert.equal(result.report.checks.terminalPtty.status, "not_run");
       assert.match(result.report.checks.sessionResume.detail, /existing session resumed/);
@@ -414,6 +418,7 @@ test("the verify CLI reports promotion readiness as not evaluated", async () => 
       DSH_UPGRADE_HOST_PORT: "18444",
       DSH_DATA_ROOT: join(workdir, "production-data"),
       DSH_SMOKE_URL: "https://127.0.0.1:18444",
+      DSH_SMOKE_CONNECTION_PATCH: "connection-v1",
       DSH_SMOKE_BASIC_USER: "admin",
       DSH_SMOKE_BASIC_PASSWORD: "orbit-verify-value",
       DSH_SMOKE_SESSION_ID: "session-historical",
