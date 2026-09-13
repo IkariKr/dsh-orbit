@@ -1,8 +1,14 @@
 # DSH Version Compatibility Policy
 
-**Current baseline:** Orbit `v0.4.1` → DeepSeek Harness `0.1.5-rc.2`
-(`SUPPORTED`). `0.1.1-rc.2` is retained as `LEGACY`: it is the historical
-`v0.4.0` baseline. The machine-readable form is `compatibilityProfiles` in
+**Current selected shipping baseline:** Orbit `v0.4.1` → DeepSeek Harness
+`0.1.5-rc.2`.
+
+**Qualification status:** pending release compatibility evidence. `0.1.5-rc.2` is
+the selected shipping baseline, not yet a published `SUPPORTED` version — see
+[Baseline Selection and Release Qualification](#baseline-selection-and-release-qualification).
+
+`0.1.1-rc.2` is retained as `LEGACY`: it is the historical `v0.4.0` baseline.
+The machine-readable form is `compatibilityProfiles` in
 `src/compatibility.mjs`, and the release attestation records the upstream commit
 SHA and artifact digests for the shipping baseline.
 
@@ -54,6 +60,28 @@ for it.
 
 ---
 
+## Baseline Selection and Release Qualification
+
+Selecting a baseline and qualifying it are separate steps, and this policy keeps
+them apart:
+
+```text
+Stage 9   transport and authentication compatibility proven
+C9        shipping baseline selected
+E9        full release compatibility qualification
+Release   SUPPORTED claim published
+```
+
+A release declares its selected baseline as soon as the reviewed profile exists,
+because the runtime must recognize the exact profile before the qualification run
+can execute against it. Until that run passes every required check in the
+compatibility policy — including settings reads and writes, the authorization
+smoke, and the existing-session resume check — the baseline is documented as
+*selected*, never as `SUPPORTED`. Publication of the support claim is the last
+step, not the first.
+
+---
+
 ## Release Baseline Policy
 
 Each Orbit release is bound to a specific DSH compatibility baseline. A minor
@@ -69,7 +97,7 @@ Orbit v0.4.0-rc.1
 
 Orbit v0.4.1
     |
-    +-- DSH 0.1.5-rc.2        shipping baseline, SUPPORTED
+    +-- DSH 0.1.5-rc.2        selected shipping baseline (qualification pending)
 ```
 
 A new Orbit minor release may adopt a newer DSH baseline, and a patch release
@@ -194,7 +222,7 @@ DSH:
 0.1.5-rc.2
 
 Status:
-SUPPORTED
+qualification pending
 
 Retained:
 0.1.1-rc.2 (LEGACY)

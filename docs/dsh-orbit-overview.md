@@ -102,10 +102,12 @@ requirements.
 
 ## Compatibility posture
 
-- **One pinned baseline per release.** Orbit `v0.4.1` targets DSH `0.1.5-rc.2`,
+- **One pinned baseline per release.** Orbit `v0.4.1` selects DSH `0.1.5-rc.2`,
   and the release attestation records the upstream commit SHA and artifact
-  digests. `0.1.1-rc.2` — the `v0.4.0` baseline — is retained as legacy so
-  existing deployments keep working across the change.
+  digests. Selection and qualification are separate steps: the baseline is
+  published as `SUPPORTED` only once its full release compatibility
+  qualification passes. `0.1.1-rc.2` — the `v0.4.0` baseline — is retained as
+  legacy so existing deployments keep working across the change.
 - **Capability binding, not just version matching.** Compatibility is version
   *and* validated capabilities, defined by `CAPABILITY_EVIDENCE` in
   `src/registry/capabilities.mjs`.
@@ -179,7 +181,7 @@ instead.
 | [Architecture](architecture.md) | Component boundaries and the implemented v0.3/v0.4 topology. |
 | [Security model](security-model.md) | Trust boundary and deployment requirements. |
 | [Registry deployment](registry-deployment.md) | Topology, startup/shutdown, restart drills, isolation contract. |
-| [Compatibility](compatibility.md) | Tested DSH versions and what "supported" requires. |
+| [Compatibility](compatibility.md) | Selected, legacy, and qualified DSH versions, and what "supported" requires. |
 | [DSH version policy](dsh-version-policy.md) | Long-term baseline, patch/minor update rules, capability binding. |
 | [Comparison](comparison.md) | How Orbit relates to tunnels, VPNs, and web terminals. |
 | [Configuration reference](configuration-reference.md) | Every environment variable. |

@@ -1,30 +1,41 @@
 # Compatibility
 
-DSH Orbit only claims compatibility with DeepSeek Harness versions that have been tested against the patcher and deployment contract.
+DSH Orbit separates the baseline a release **selects** from the baseline it has
+**qualified**. Selecting a version means the patcher recognizes its exact source
+layout and the runtime can boot against it; qualifying it means every check in
+the compatibility policy below has passed against real DSH. Only a qualified
+baseline is published as `SUPPORTED`.
 
-| DeepSeek Harness | DSH Orbit | Role | Connection patch generation | Status |
+| DeepSeek Harness | DSH Orbit | Role | Connection patch generation | Release status |
 | --- | --- | --- | --- | --- |
-| `0.1.5-rc.2` | `v0.4.1` | Shipping baseline | `connection-browser-auth-v1` | Tested |
+| `0.1.5-rc.2` | `v0.4.1` | Selected shipping baseline | `connection-browser-auth-v1` | Qualification pending |
 | `0.1.1-rc.2` | `v0.4.0-rc.1` | Retained legacy | `connection-v1` | Legacy |
 
-`Tested` is the shipping baseline of the current release — exactly one per
-release — and the version its guarantees are written against. `Legacy` is a
-previously validated baseline retained so existing deployments stay
-capability-granted and regression-checked for upgrade continuity; it is not the
-shipping baseline and is not covered by the current release's baseline
-guarantee. See [DSH version policy](dsh-version-policy.md) for the status
-definitions.
+The machine profile status and the published release status are two layers:
 
-The table names the reviewed connection patch generation for each baseline. What
-each baseline has actually been accepted against — the settings plane, the
-session-resume path, and the transport — is recorded by that release's
-attestation, not by this table.
+| Layer | `0.1.5-rc.2` | `0.1.1-rc.2` |
+| --- | --- | --- |
+| Profile `status` in `src/compatibility.mjs` | `tested` | `legacy` |
+| Published release status | qualification pending | `LEGACY` |
+
+`tested` means the release *selected* this baseline and the runtime recognizes
+its exact profile. It is not yet a published `SUPPORTED` claim: `SUPPORTED` is
+published only after the whole qualification list below passes for this
+baseline. What has been proven so far is transport and authentication
+compatibility — the browser-trust fence, BrowserAuth admission, and the
+`/api/remote.mux` event stream — against a real DSH process.
+
+`Legacy` is a previously validated baseline retained so existing deployments
+stay capability-granted and regression-checked for upgrade continuity; it is not
+the shipping baseline and is not covered by the current release's baseline
+guarantee. See [DSH version policy](dsh-version-policy.md) for the definitions.
 
 ## Compatibility policy
 
 An upstream version is not supported merely because it builds.
 
-A version becomes supported when:
+The selected shipping baseline becomes a published `SUPPORTED` version only when
+all of the following pass for it:
 
 1. its source layout matches a reviewed compatibility profile;
 2. the patcher applies and verifies both required client-connection copies;
