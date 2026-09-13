@@ -17,15 +17,16 @@ export const compatibilityProfiles = Object.freeze({
 // baselines, so nothing about them may be claimed as supported until a real
 // runtime acceptance passes.
 //
-// 0.1.2-rc.1 opened the BrowserAuth + /api/remote.mux transport generation: the
-// legacy two downlink-only WebSockets (/api/events.mux, /api/events.host) are
-// gone and replaced by one multiplexed /api/remote.mux, and an authenticated
-// browser session (or an accepted proxy proof) is now required ahead of
-// endpoint dispatch. The previous Orbit acceptance still targeted the legacy
-// contract, so it failed for a generation-level reason, not a transport defect.
-// The version stays investigation-only until that authentication and transport
-// contract is validated; 0.1.5-rc.2 shares the same generation and is the
-// compatibility candidate.
+// 0.1.2-rc.1 introduced the BrowserAuth + /api/remote.mux transport generation.
+// The legacy two downlink-only WebSockets (/api/events.mux, /api/events.host)
+// are gone, replaced by one multiplexed /api/remote.mux, and native traffic
+// must pass an authenticated browser session ahead of endpoint dispatch. Orbit
+// therefore needs a separately validated authenticated-proxy admission path for
+// this generation (connection-browser-auth-v1), which is not yet accepted at
+// runtime: extending the api-request-trust fence alone is insufficient because
+// BrowserAuth still rejects the request. The version stays investigation-only
+// until that authentication and transport contract is validated; 0.1.5-rc.2
+// shares the generation and is the compatibility candidate.
 export const INVESTIGATION_ONLY_DSH_VERSIONS = Object.freeze(["0.1.2-rc.1"]);
 
 export function compatibilityFor(version) {
