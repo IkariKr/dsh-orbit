@@ -34,6 +34,7 @@ import { compatibilityFor } from "../src/compatibility.mjs";
 import { STREAM_SEMANTICS, rpcEndpoint, rpcPayload, streamPaths, wireContractForGeneration } from "../src/dsh-wire-contract.mjs";
 import { runVerificationSequence } from "../src/upgrade-runner.mjs";
 import { REQUIRED_MOUNTED_MATRIX_FIELDS, emptyMountedMatrix, assertMountedMatrixShape } from "./stage8-mounted-matrix.mjs";
+import { discoverMountedAssetPath } from "./mounted-asset-discovery.mjs";
 
 // The mounted baseline this drill run executes against. It defaults to the
 // shipping baseline recorded in `src/compatibility.mjs` — a run that wants the
@@ -1329,15 +1330,11 @@ async function main() {
   // Discover a real UI static asset from the served index instead of pinning a
   // build-hash constant: the asset filename changes with every upstream build,
   // and a pinned hash would silently bind the mounted static matrix to one DSH
-  // baseline. The check stays meaningful across baselines — the route must
-  // serve the actual asset the page references.
-  const discoverAssetPath = (rootText, label) => {
-    const match = rootText.match(/(?:src|href)="(\/assets\/[A-Za-z0-9._/-]+\.(?:css|js))"/);
-    if (!match) throw new Error(`mounted static asset discovery failed on ${label}: no /assets/ reference in the served index`);
-    return match[1];
-  };
-  const assetPathA = discoverAssetPath(routeRootTextA, "A");
-  const assetPathB = discoverAssetPath(routeRootTextB, "B");
+  // baseline. The discovery handles both measured index shapes — the legacy
+  // absolute "/assets/…" references and the 0.1.5 relative "./assets/…"
+  // references — and normalizes to the absolute route path.
+  const assetPathA = discoverMountedAssetPath(routeRootTextA, "A");
+  const assetPathB = discoverMountedAssetPath(routeRootTextB, "B");
   const staticA = await routeFetch(assetPathA, authorityA);
   const staticB = await routeFetch(assetPathB, authorityB);
   if (staticA.status !== 200 || staticB.status !== 200 || staticA.headers["x-drill-node"] !== "A" || staticB.headers["x-drill-node"] !== "B" || staticA.text().length < 100 || staticB.text().length < 100) {

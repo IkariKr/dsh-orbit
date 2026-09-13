@@ -90,7 +90,7 @@ real deployment appear healthy.
 - **No silent failover**: an outage on Node A will NEVER redirect browser traffic to Node B.
 
 ### Stale compatibility & capability withdrawal
-- Unsupported DSH version (or version not matching `0.1.1-rc.2`) causes immediate withholding of `web.routes`.
+- A DSH version absent from `compatibilityProfiles` in `src/compatibility.mjs` is unsupported and causes immediate withholding of `web.routes`. Both accepted profiles (`0.1.5-rc.2` tested, `0.1.1-rc.2` retained LEGACY) are capability-eligible from report evidence.
 - Missing or failing `webSocketTransport` check withdraws `web.routes`.
 - When `web.routes` is withdrawn, `orbitCompatible` fails or becomes stale, blocking selector navigation.
 
