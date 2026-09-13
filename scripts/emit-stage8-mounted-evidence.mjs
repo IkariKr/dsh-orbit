@@ -27,6 +27,25 @@ if (!raw.cleanup || /not executed|failed/i.test(String(raw.cleanup))) fail("raw 
 assertMountedMatrixShape(raw.requiredMatrix, { requirePass: true });
 if (!Array.isArray(raw.nodeIds ?? [raw.aNodeId, raw.bNodeId]) && (!raw.aNodeId || !raw.bNodeId)) fail("raw current node binding is missing");
 
+// Pinned upstream identity per mounted baseline. The sealed evidence must bind
+// the DSH identity the run actually executed, so an unreviewed baseline (or a
+// raw record missing its version) fails closed instead of inheriting a stale
+// literal. These digests mirror test/helpers/dsh-015-acceptance-fixture.mjs and
+// the release attestations; a new baseline adds its own reviewed entry.
+const DSH_PINNED_IDENTITIES = {
+  "0.1.1-rc.2": {
+    commitSha: "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    cliSha256: "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62",
+  },
+  "0.1.5-rc.2": {
+    commitSha: "fb2c4b9e698e30edb738bca4cf0618587db7d203",
+    cliSha256: "0ff7f1d72c4e0cbe14001709c81e20a04b70464118a7f78568952988e28f2ac5",
+  },
+};
+const dshVersion = raw.dshVersion;
+const pinnedDsh = DSH_PINNED_IDENTITIES[dshVersion];
+if (!pinnedDsh) fail(`raw evidence carries no pinned identity for mounted baseline ${JSON.stringify(dshVersion)}`);
+
 const executedAt = raw.finishedAt ?? raw.startedAt;
 if (!executedAt || Number.isNaN(new Date(executedAt).getTime())) fail("raw execution timestamp is invalid");
 const rawSha256 = createHash("sha256").update(rawBuffer).digest("hex");
@@ -64,9 +83,9 @@ const smoke = {
     cleanup: raw.cleanup,
   },
   dsh: {
-    version: raw.dshVersion ?? "0.1.1-rc.2",
-    commitSha: "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
-    cliSha256: "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62",
+    version: dshVersion,
+    commitSha: pinnedDsh.commitSha,
+    cliSha256: pinnedDsh.cliSha256,
   },
 };
 mkdirSync(dirname(outputPath), { recursive: true });

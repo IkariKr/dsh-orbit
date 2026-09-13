@@ -81,12 +81,20 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /suspendDsh/);
   assert.match(source, /routeWebSocket\(/);
   // The drill must take its transport vocabulary from the shared wire contract
-  // for the generation the mounted stack runs, not from a local constant.
-  assert.match(source, /wireContractForGeneration\("connection-v1"\)/);
+  // for the generation the mounted baseline's reviewed profile derives — a
+  // v0.4.1 run selects the shipping baseline via DSH_DRILL_DSH_VERSION, and the
+  // mux generation is probed with the real open -> ready logical handshake.
+  assert.match(source, /DSH_DRILL_DSH_VERSION/);
+  assert.match(source, /compatibilityFor\(DRILL_DSH_VERSION\)\.connectionPatch/);
+  assert.match(source, /wireContractForGeneration\(DRILL_CONNECTION_PATCH\)/);
   assert.match(source, /rpcEndpoint\(DRILL_WIRE/);
   assert.match(source, /rpcPayload\(DRILL_WIRE/);
+  assert.match(source, /DRILL_MUX_MODE/);
+  assert.match(source, /\$events open/);
+  assert.doesNotMatch(source, /wireContractForGeneration\("connection-v1"\)/);
   assert.doesNotMatch(source, /path\s*=\s*"\/api\/events\.mux"/);
   assert.doesNotMatch(source, /method:\s*"session\.(create|list)"/);
+  assert.doesNotMatch(source, /dshVersion:\s*"0\.1\.1-rc\.2"/);
   assert.match(source, /runningImageEvidence\(/);
   assert.match(source, /aging reset healed A without heartbeat/);
   assert.doesNotMatch(source, /rejectUnauthorized:\s*false/);
@@ -95,6 +103,16 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.doesNotMatch(source, /NODE_TLS_REJECT_UNAUTHORIZED/);
   assert.doesNotMatch(source, /--ignore-certificate-errors/);
   assert.doesNotMatch(source, /requiredMatrix\s*=\s*\{[^}]*PASS/s);
+});
+
+test("mounted DSH images take their baseline from the drill selection", async () => {
+  const compose = await readFile(new URL("../docker-registry/drill.compose.yaml", import.meta.url), "utf8");
+  const buildArgLines = compose.match(/^\s*DSH_VERSION:\s*\$\{DSH_DRILL_DSH_VERSION:-0\.1\.1-rc\.2\}\s*$/gm) ?? [];
+  assert.equal(
+    buildArgLines.length,
+    2,
+    "both mounted DSH nodes must build from the explicitly selected drill baseline",
+  );
 });
 
 test("runner-owned Firefox bridge requires trusted browser settings and secret-free checkpoints", async () => {

@@ -30,16 +30,24 @@ import tls from "node:tls";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCompatibilityReport } from "../src/compatibility-report.mjs";
-import { rpcEndpoint, rpcPayload, streamPaths, wireContractForGeneration } from "../src/dsh-wire-contract.mjs";
+import { compatibilityFor } from "../src/compatibility.mjs";
+import { STREAM_SEMANTICS, rpcEndpoint, rpcPayload, streamPaths, wireContractForGeneration } from "../src/dsh-wire-contract.mjs";
 import { runVerificationSequence } from "../src/upgrade-runner.mjs";
 import { REQUIRED_MOUNTED_MATRIX_FIELDS, emptyMountedMatrix, assertMountedMatrixShape } from "./stage8-mounted-matrix.mjs";
 
-// The mounted v0.4 stack runs the legacy production baseline, so the drill
-// speaks the connection-v1 generation — but the vocabulary itself (stream path,
-// endpoint names, payload shapes) must come from the shared wire contract, not
-// from a local constant that can drift from the reviewed generations.
-const DRILL_WIRE = wireContractForGeneration("connection-v1");
+// The mounted baseline this drill run executes against. A v0.4.1 mounted run
+// explicitly selects the shipping baseline via DSH_DRILL_DSH_VERSION; the
+// connection generation, wire vocabulary, and report identity are then derived
+// from that version's reviewed compatibility profile — never configured
+// independently, and never silently defaulted to a baseline the run did not
+// choose. The frozen Stage 6/8 evidence records are historical artifacts and
+// are not touched by this parameterization.
+const DRILL_DSH_VERSION = process.env.DSH_DRILL_DSH_VERSION ?? "0.1.1-rc.2";
+const DRILL_PROFILE = `dsh-${DRILL_DSH_VERSION}`;
+const DRILL_CONNECTION_PATCH = compatibilityFor(DRILL_DSH_VERSION).connectionPatch;
+const DRILL_WIRE = wireContractForGeneration(DRILL_CONNECTION_PATCH);
 const DRILL_STREAM_PATH = streamPaths(DRILL_WIRE)[0];
+const DRILL_MUX_MODE = DRILL_WIRE.stream.semantics === STREAM_SEMANTICS.remoteMux;
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const COMPOSE = "docker-registry/drill.compose.yaml";
@@ -58,6 +66,9 @@ const DRILL_PROXY_SECRET = "drill-proxy-secret";
 const DRILL_PROXY_SECRET_PATH = join(REPO, "secrets", "dsh_proxy_auth");
 const NODE_BIN = "/usr/local/lib/dsh-orbit/bin/dsh-orbit-node.mjs";
 const REVISION = execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO }).toString().trim();
+// The mounted node identity must bind to the running candidate, not a stale
+// literal, so the reported Orbit version follows the repository package.
+const DRILL_ORBIT_VERSION = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")).version;
 const HEARTBEAT_CADENCE_SECONDS = 60;
 const HEARTBEAT_MISSED_BEATS = 3;
 const HEARTBEAT_LOST_MS = 24 * 60 * 60 * 1000;
@@ -577,6 +588,45 @@ function decodeWsFrame(buffer) {
   return { opcode, payload, totalLength: offset + length };
 }
 
+const WS_FRAME_TIMEOUT_MS = 20000;
+
+function readWsFrames(socket, initial) {
+  let pending = initial;
+  return () => {
+    const pump = () => {
+      let frame;
+      while ((frame = decodeWsFrame(pending)) !== null) {
+        pending = pending.slice(frame.totalLength);
+        return frame;
+      }
+      return null;
+    };
+    const immediate = pump();
+    if (immediate) return Promise.resolve(immediate);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        socket.removeListener("data", onData);
+        socket.removeListener("error", onError);
+        reject(new Error(`mounted WSS timed out after ${WS_FRAME_TIMEOUT_MS}ms waiting for a frame`));
+      }, WS_FRAME_TIMEOUT_MS);
+      const settle = (fn) => (value) => {
+        clearTimeout(timer);
+        socket.removeListener("data", onData);
+        socket.removeListener("error", onError);
+        fn(value);
+      };
+      const onData = (chunk) => {
+        pending = Buffer.concat([pending, chunk]);
+        const frame = pump();
+        if (frame) settle(resolve)(frame);
+      };
+      const onError = settle(reject);
+      socket.on("data", onData);
+      socket.on("error", onError);
+    });
+  };
+}
+
 async function routeWebSocket(authority, { path = DRILL_STREAM_PATH, pingPayload = "orbit-mounted-ping", expectedNode = null } = {}) {
   const socket = await connectRouteTls(authority);
   const secKey = randomBytes(16).toString("base64");
@@ -613,22 +663,49 @@ async function routeWebSocket(authority, { path = DRILL_STREAM_PATH, pingPayload
   if (expectedNode && response.headers["x-drill-node"] !== expectedNode) throw new Error(`mounted WSS reached wrong node: expected ${expectedNode}, got ${response.headers["x-drill-node"]}`);
   const expected = createHash("sha1").update(secKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
   if (response.headers["sec-websocket-accept"] !== expected) throw new Error("mounted WSS Sec-WebSocket-Accept mismatch");
+
+  const nextFrame = readWsFrames(socket, response.remaining);
+
+  // Physical transport check, identical for both generations.
   socket.write(encodeWsFrame(pingPayload, { opcode: 0x09 }));
-  const pong = await new Promise((resolve, reject) => {
-    let pending = response.remaining;
-    const onData = (chunk) => {
-      pending = Buffer.concat([pending, chunk]);
-      let frame;
-      while ((frame = decodeWsFrame(pending)) !== null) {
-        pending = pending.slice(frame.totalLength);
-        if (frame.opcode === 0x0a) { socket.removeListener("data", onData); resolve(frame.payload.toString("utf8")); return; }
-      }
-    };
-    socket.on("data", onData);
-    socket.on("error", reject);
-  });
+  for (;;) {
+    const frame = await nextFrame();
+    if (frame.opcode === 0x8) {
+      const code = frame.payload.length >= 2 ? frame.payload.readUInt16BE(0) : 1005;
+      throw new Error(`mounted WSS closed before Pong at ${authority} (close code ${code})`);
+    }
+    if (frame.opcode !== 0x0a) continue;
+    if (frame.payload.toString("utf8") !== pingPayload) {
+      throw new Error(`mounted WSS Pong payload mismatch at ${authority}`);
+    }
+    break;
+  }
+  const result = { ...response, ping: true };
+
+  // Application-layer check for the BrowserAuth generation: a bidirectional mux
+  // must carry a real logical stream — open $events and require the ready item
+  // on the same streamId. The legacy downlink-only streams must not be probed
+  // this way (a client frame is a protocol violation there).
+  if (DRILL_MUX_MODE) {
+    const streamId = "orbit-drill-events";
+    socket.write(encodeWsFrame(
+      JSON.stringify({ type: "open", streamId, endpoint: "$events", payload: { args: {} } }),
+      { opcode: 0x01 },
+    ));
+    for (;;) {
+      const frame = await nextFrame();
+      if (frame.opcode !== 0x1) continue;
+      let message = null;
+      try { message = JSON.parse(frame.payload.toString("utf8")); } catch { continue; }
+      if (message?.type !== "item" || message.streamId !== streamId) continue;
+      if (message.value?.type !== "ready") continue;
+      result.ready = true;
+      break;
+    }
+  }
+
   socket.destroy();
-  return { ...response, ping: pong === pingPayload };
+  return result;
 }
 
 function gatewayFetch(path, { method = "GET", headers = {}, body, cookie = null, authenticate = true, origin = null, baseUrl = GATEWAY_URL, authority = null } = {}) {
@@ -718,10 +795,10 @@ const nodeEnv = (dataHome, name = null) => ({
   DSH_ORBIT_NODE_STATE: `${dataHome}/orbit-node.json`,
   DSH_ORBIT_HUB_URL: NODE_HUB_URL,
   DSH_ORBIT_NODE_CA_CERT: NODE_HUB_CA_PATH,
-  DSH_ORBIT_NODE_ORBIT_VERSION: "0.4.0-rc.1",
+  DSH_ORBIT_NODE_ORBIT_VERSION: DRILL_ORBIT_VERSION,
   DSH_ORBIT_NODE_ORBIT_REVISION: REVISION,
-  DSH_ORBIT_NODE_DSH_VERSION: "0.1.1-rc.2",
-  DSH_ORBIT_NODE_DSH_PROFILE: "dsh-0.1.1-rc.2",
+  DSH_ORBIT_NODE_DSH_VERSION: DRILL_DSH_VERSION,
+  DSH_ORBIT_NODE_DSH_PROFILE: DRILL_PROFILE,
   DSH_ORBIT_NODE_HEARTBEAT_SECONDS: String(HEARTBEAT_CADENCE_SECONDS),
   ...(name === "dsh-a" ? {
     DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: "9444",
@@ -862,7 +939,9 @@ async function main() {
 
   // --- 0. versions/build provenance ---
   const runDocker = (args) => spawnSync("docker", args, { cwd: REPO, encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" } }).stdout.trim();
-  evidence.dshVersion = "0.1.1-rc.2";
+  evidence.dshVersion = DRILL_DSH_VERSION;
+  evidence.dshProfile = DRILL_PROFILE;
+  evidence.dshConnectionPatch = DRILL_CONNECTION_PATCH;
   evidence.hubListenPolicy = "127.0.0.1:5445 (loopback; frozen policy intact)";
 
   // --- 1. compose up ---
@@ -1045,12 +1124,12 @@ async function main() {
       composeOverrideFile: null,
       composeService: name,
       workdir: verificationWorkdir,
-      orbitVersion: "0.4.0-rc.1",
+      orbitVersion: DRILL_ORBIT_VERSION,
       orbitRevision: REVISION,
-      dshVersion: "0.1.1-rc.2",
+      dshVersion: DRILL_DSH_VERSION,
       baselineImage: "mounted-drill",
       baselineOrbitRevision: REVISION,
-      baselineDshVersion: "0.1.1-rc.2",
+      baselineDshVersion: DRILL_DSH_VERSION,
     };
     mkdirSync(verificationWorkdir, { recursive: true });
     const { checks } = await runVerificationSequence({
@@ -1060,8 +1139,8 @@ async function main() {
     });
     const report = createCompatibilityReport({
       promotionEvaluated: false,
-      orbit: { version: "0.4.0-rc.1", revision: REVISION },
-      candidate: { dshVersion: "0.1.1-rc.2", profile: "dsh-0.1.1-rc.2" },
+      orbit: { version: DRILL_ORBIT_VERSION, revision: REVISION },
+      candidate: { dshVersion: DRILL_DSH_VERSION, profile: DRILL_PROFILE },
       checks,
       snapshot: { reference: null, failure: null },
     });
@@ -1213,6 +1292,9 @@ async function main() {
   markMatrix("websocketUpgradeA", "websocketUpgradeB");
   if (!wsA.ping || !wsB.ping) throw new Error("mounted WSS Ping/Pong failed");
   markMatrix("websocketPingPongA", "websocketPingPongB");
+  if (DRILL_MUX_MODE && (!wsA.ready || !wsB.ready)) {
+    throw new Error("mounted WSS $events open -> ready handshake failed on the mux generation");
+  }
 
   // --- 4. gateway restart drill ---
   const preRestart = await nodesApi();
