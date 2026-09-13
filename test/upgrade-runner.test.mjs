@@ -729,10 +729,7 @@ test("loadUpgradeConfig reports missing environment configuration", () => {
   assert.ok(missing.includes("DSH_BASELINE_ORBIT_REVISION (production Orbit revision)"));
   assert.ok(missing.includes("DSH_UPGRADE_HOST_PORT (candidate loopback port)"));
   assert.ok(missing.includes("DSH_SNAPSHOT_HOOK (snapshot capability)"));
-  assert.ok(
-    missing.includes("DSH_SMOKE_CONNECTION_PATCH (reviewed connection patch generation)"),
-    "the smoke generation must be a required part of the upgrade configuration",
-  );
+  assert.equal(config.connectionPatch, "connection-v1", "the generation is derived from the candidate profile, not configured");
   assert.equal(config.candidateImage, undefined);
   assert.ok(config.workdir.endsWith(".upgrade-run"));
 });
@@ -751,7 +748,6 @@ function completeUpgradeEnv(overrides = {}) {
     DSH_UPGRADE_HOST_PORT: "18444",
     DSH_DATA_ROOT: "/srv/dsh-production/data",
     DSH_SMOKE_URL: "https://dsh.example.com:9443",
-    DSH_SMOKE_CONNECTION_PATCH: "connection-v1",
     DSH_SMOKE_BASIC_USER: "admin",
     DSH_SMOKE_BASIC_PASSWORD: "orbit-candidate-value",
     DSH_SMOKE_SESSION_ID: "session-historical",
@@ -760,18 +756,9 @@ function completeUpgradeEnv(overrides = {}) {
   };
 }
 
-test("loadUpgradeConfig rejects an unreviewed connection generation", () => {
-  const { missing } = loadUpgradeConfig(
-    completeUpgradeEnv({ DSH_SMOKE_CONNECTION_PATCH: "connection-v99" }),
-  );
-  assert.ok(
-    missing.includes(
-      "DSH_SMOKE_CONNECTION_PATCH is not a reviewed connection patch generation (connection-v1 or connection-browser-auth-v1)",
-    ),
-  );
-});
-
-test("loadUpgradeConfig rejects a generation that contradicts the candidate profile", () => {
+test("loadUpgradeConfig rejects an explicit generation that contradicts the candidate profile", () => {
+  // The runner derives the generation from DSH_VERSION; an explicit override
+  // may only confirm it, never aim the acceptance at another wire contract.
   const { missing } = loadUpgradeConfig(
     completeUpgradeEnv({ DSH_SMOKE_CONNECTION_PATCH: "connection-browser-auth-v1" }),
   );
@@ -785,8 +772,23 @@ test("loadUpgradeConfig rejects a generation that contradicts the candidate prof
   );
 });
 
-test("loadUpgradeConfig accepts the generation matching the candidate profile", () => {
-  const { missing, config } = loadUpgradeConfig(completeUpgradeEnv());
+test("loadUpgradeConfig rejects an unreviewed explicit generation", () => {
+  const { missing } = loadUpgradeConfig(
+    completeUpgradeEnv({ DSH_SMOKE_CONNECTION_PATCH: "connection-v99" }),
+  );
+  assert.ok(
+    missing.some((entry) =>
+      entry.startsWith(
+        "DSH_SMOKE_CONNECTION_PATCH (connection-v99) does not match the generation reviewed for DSH 0.1.1-rc.2 (connection-v1)",
+      ),
+    ),
+  );
+});
+
+test("loadUpgradeConfig accepts an explicit generation that matches the candidate profile", () => {
+  const { missing, config } = loadUpgradeConfig(
+    completeUpgradeEnv({ DSH_SMOKE_CONNECTION_PATCH: "connection-v1" }),
+  );
   assert.deepEqual(missing, []);
   assert.equal(config.connectionPatch, "connection-v1");
 });

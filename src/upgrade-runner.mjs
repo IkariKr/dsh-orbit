@@ -8,7 +8,6 @@ import https from "node:https";
 import tls from "node:tls";
 
 import { compatibilityFor } from "./compatibility.mjs";
-import { wireContractForGeneration } from "./dsh-wire-contract.mjs";
 import { validateHost } from "./remote-settings-patch.mjs";
 import { runSnapshotHook } from "./snapshot-contract.mjs";
 import {
@@ -216,7 +215,6 @@ export function loadUpgradeConfig(env) {
     "DSH_UPGRADE_HOST_PORT (candidate loopback port)": env.DSH_UPGRADE_HOST_PORT,
     "DSH_DATA_ROOT (production data root)": env.DSH_DATA_ROOT,
     "DSH_SMOKE_URL (candidate endpoint)": env.DSH_SMOKE_URL,
-    "DSH_SMOKE_CONNECTION_PATCH (reviewed connection patch generation)": env.DSH_SMOKE_CONNECTION_PATCH,
     "DSH_SMOKE_BASIC_USER": env.DSH_SMOKE_BASIC_USER,
     "DSH_SMOKE_BASIC_PASSWORD": env.DSH_SMOKE_BASIC_PASSWORD,
     "DSH_SMOKE_SESSION_ID (historical session)": env.DSH_SMOKE_SESSION_ID,
@@ -224,27 +222,23 @@ export function loadUpgradeConfig(env) {
   };
   const missing = Object.keys(required).filter((name) => !required[name]);
 
-  // The smoke vocabulary must be declared, reviewed, and consistent with the
-  // candidate's own compatibility profile — a mismatch means the operator aimed
-  // the acceptance at a wire contract the candidate does not speak.
-  if (env.DSH_SMOKE_CONNECTION_PATCH) {
-    try {
-      wireContractForGeneration(env.DSH_SMOKE_CONNECTION_PATCH);
-    } catch {
-      missing.push(
-        "DSH_SMOKE_CONNECTION_PATCH is not a reviewed connection patch generation (connection-v1 or connection-browser-auth-v1)",
-      );
-    }
-    try {
-      const profilePatch = compatibilityFor(env.DSH_VERSION).connectionPatch;
-      if (profilePatch !== env.DSH_SMOKE_CONNECTION_PATCH) {
-        missing.push(
-          `DSH_SMOKE_CONNECTION_PATCH (${env.DSH_SMOKE_CONNECTION_PATCH}) does not match the generation reviewed for DSH ${env.DSH_VERSION} (${profilePatch})`,
-        );
-      }
-    } catch {
-      // An unknown candidate version is rejected later by the patch checks.
-    }
+  // The smoke generation is not a second configuration source: the runner
+  // derives it from the candidate version's reviewed compatibility profile —
+  // the same single source of truth the patcher uses. An explicit
+  // DSH_SMOKE_CONNECTION_PATCH is accepted only when it agrees with that
+  // profile, so a stale override cannot aim the acceptance at a wire contract
+  // the candidate does not speak.
+  let connectionPatch = null;
+  try {
+    connectionPatch = compatibilityFor(env.DSH_VERSION).connectionPatch;
+  } catch {
+    // An unknown candidate version is rejected later by the patch checks; the
+    // smokes also fail closed when handed no reviewed generation.
+  }
+  if (env.DSH_SMOKE_CONNECTION_PATCH && env.DSH_SMOKE_CONNECTION_PATCH !== connectionPatch) {
+    missing.push(
+      `DSH_SMOKE_CONNECTION_PATCH (${env.DSH_SMOKE_CONNECTION_PATCH}) does not match the generation reviewed for DSH ${env.DSH_VERSION} (${connectionPatch})`,
+    );
   }
 
   return {
@@ -262,7 +256,7 @@ export function loadUpgradeConfig(env) {
       candidateHostPort: env.DSH_UPGRADE_HOST_PORT ? Number(env.DSH_UPGRADE_HOST_PORT) : null,
       productionDataRoot: env.DSH_DATA_ROOT,
       candidateEndpoint: env.DSH_SMOKE_URL,
-      connectionPatch: env.DSH_SMOKE_CONNECTION_PATCH,
+      connectionPatch,
       publicHost: env.DSH_PUBLIC_HOST,
       basicUser: env.DSH_SMOKE_BASIC_USER,
       basicPassword: env.DSH_SMOKE_BASIC_PASSWORD,
