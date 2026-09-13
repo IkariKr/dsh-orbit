@@ -24,7 +24,7 @@ Each Orbit release declares its supported DSH baseline and validated capabilitie
 | Status | Description |
 | --- | --- |
 | SUPPORTED | Validated through required tests and integration checks |
-| LEGACY | May continue to work but is not actively validated |
+| LEGACY | Previously validated baseline retained and regression-checked for upgrade continuity, but not the shipping baseline and not covered by the current release's baseline guarantee |
 | UNSUPPORTED | Not tested or incompatible |
 
 Only `SUPPORTED` versions are covered by Orbit release guarantees.
@@ -44,17 +44,21 @@ Each profile carries the policy status in its `status` field:
 
 A `legacy` entry stays capability-granted: a node on that version keeps the
 capabilities its compatibility report earns, so an upgrade does not silently
-disable a working deployment. What a release does not do is validate or claim
-that version, so `legacy` never appears in a release guarantee. Withdrawing a
-version is a deliberate policy change, not a side effect of adding a baseline —
-it removes the entry instead, which is what makes `deriveCapabilities()` return
-nothing for it.
+disable a working deployment. A release does keep a regression check on that
+path — the legacy generation's real-process acceptance stays in the suite — but
+it does not requalify the version or claim it as the shipping baseline, so
+`legacy` never appears in a release guarantee. Withdrawing a version is a
+deliberate policy change, not a side effect of adding a baseline — it removes
+the entry instead, which is what makes `deriveCapabilities()` return nothing
+for it.
 
 ---
 
 ## Release Baseline Policy
 
-Each Orbit minor release is bound to a specific DSH compatibility baseline.
+Each Orbit release is bound to a specific DSH compatibility baseline. A minor
+release may adopt a new one; a patch release may do so only as an explicit
+compatibility refresh, defined under [Version Update Rules](#patch-release).
 
 Example:
 
@@ -68,9 +72,10 @@ Orbit v0.4.1
     +-- DSH 0.1.5-rc.2        shipping baseline, SUPPORTED
 ```
 
-A new Orbit minor release may adopt a newer DSH baseline. The previous baseline
-moves to `legacy` rather than disappearing, so the earlier release's evidence
-and the previous generation's regression coverage stay reproducible.
+A new Orbit minor release may adopt a newer DSH baseline, and a patch release
+may do so as a compatibility refresh. The previous baseline moves to `legacy`
+rather than disappearing, so the earlier release's evidence and the previous
+generation's regression coverage stay reproducible.
 
 Orbit does not follow every DSH release candidate automatically.
 
@@ -88,10 +93,26 @@ Allowed:
 - Security fixes
 - Documentation updates
 - Internal improvements
+- A compatibility refresh (see below), when explicitly scoped as one
 
 Not allowed:
 
-- Changing the supported DSH baseline
+- Changing the supported DSH baseline other than through a compatibility refresh
+
+#### Compatibility Refresh Patch Release
+
+A patch release may adopt a new DSH shipping baseline only when the release is
+explicitly scoped as a compatibility refresh and:
+
+- introduces no new Orbit product feature or schema contract;
+- completes the required real-DSH compatibility acceptance;
+- preserves or explicitly withdraws prior legacy compatibility;
+- records the new pinned upstream identity and evidence.
+
+The prior baseline moves to `legacy` under this policy, so an existing
+deployment on it keeps working instead of going dark on upgrade. A compatibility
+refresh is a baseline change and nothing else: if the work needs new product
+surface, it is a minor release, not a refresh.
 
 ### Minor Release
 

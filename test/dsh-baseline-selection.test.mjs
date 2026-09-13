@@ -65,6 +65,14 @@ test("the shipping baseline earns web.routes from a passing report", () => {
     names(SHIPPING_BASELINE).includes("web.routes"),
     "the promoted baseline must be capability-granted, or the promotion changes nothing at runtime",
   );
+  // The other half of the design decision: retaining 0.1.1-rc.2 as legacy is
+  // specifically meant to keep an existing deployment working across the
+  // baseline change, so the contract must lock the capability in directly
+  // rather than only asserting that its patch generation still resolves.
+  assert.ok(
+    names(HISTORICAL_BASELINE).includes("web.routes"),
+    "a retained legacy baseline must stay capability-granted across the promotion",
+  );
   // An investigated-but-unadopted version stays ineligible even with perfect
   // evidence, which is the whole point of keeping it out of the profile map.
   assert.deepEqual(names("0.1.2-rc.1"), []);

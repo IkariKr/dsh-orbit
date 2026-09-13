@@ -2,9 +2,23 @@
 
 DSH Orbit only claims compatibility with DeepSeek Harness versions that have been tested against the patcher and deployment contract.
 
-| DeepSeek Harness | DSH Orbit | Remote settings | Profile-local patch | Status |
+| DeepSeek Harness | DSH Orbit | Role | Connection patch generation | Status |
 | --- | --- | --- | --- | --- |
-| `0.1.1-rc.2` | `0.4.0-rc.1` | Supported | Required and verified | Tested |
+| `0.1.5-rc.2` | `v0.4.1` | Shipping baseline | `connection-browser-auth-v1` | Tested |
+| `0.1.1-rc.2` | `v0.4.0-rc.1` | Retained legacy | `connection-v1` | Legacy |
+
+`Tested` is the shipping baseline of the current release — exactly one per
+release — and the version its guarantees are written against. `Legacy` is a
+previously validated baseline retained so existing deployments stay
+capability-granted and regression-checked for upgrade continuity; it is not the
+shipping baseline and is not covered by the current release's baseline
+guarantee. See [DSH version policy](dsh-version-policy.md) for the status
+definitions.
+
+The table names the reviewed connection patch generation for each baseline. What
+each baseline has actually been accepted against — the settings plane, the
+session-resume path, and the transport — is recorded by that release's
+attestation, not by this table.
 
 ## Compatibility policy
 
@@ -19,7 +33,8 @@ A version becomes supported when:
 5. negative authorization tests pass;
 6. the DSH web UI and long-lived transport remain functional.
 
-Unknown versions are rejected by `src/compatibility.mjs`.
+A version with no reviewed profile is rejected by `src/compatibility.mjs`,
+which fails closed rather than inferring support from a version number.
 
 ## Existing-session compatibility
 
@@ -39,7 +54,7 @@ When upstream code changes, add a new compatibility profile rather than broadeni
 
 ## Upstream release watcher
 
-A scheduled CI job (`.github/workflows/upstream-watcher.yml`) checks the published `@deepseek-ai/dsh` package daily and classifies it against the compatibility registry as `supported` or `unknown`. An unknown version is recorded as a warning annotation with a JSON report artifact; the registry, the exact matchers, and any deployment are never modified automatically. The check is public: it needs no secrets and carries no downstream information.
+A scheduled CI job (`.github/workflows/upstream-watcher.yml`) checks the published `@deepseek-ai/dsh` package daily and classifies it against the compatibility registry by its reviewed status: `tested`, `legacy`, or `unknown`. An unknown version is recorded as a warning annotation with a JSON report artifact; the registry, the exact matchers, and any deployment are never modified automatically. The check is public: it needs no secrets and carries no downstream information.
 
 ## Manual review path for an unknown version
 
