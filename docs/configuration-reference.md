@@ -51,7 +51,7 @@ surface and must not be routed through the browser gateway. See
 | `DSH_ORBIT_NODE_ROUTE_INGRESS_PORT` | no | `0` | Route-ingress listen port. `0` requests an ephemeral port for development/tests; production route targets should use an explicit stable port. |
 | `DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN` | no | `127.0.0.1` | Route-ingress listen address. Non-loopback production exposure must be protected by verified TLS according to RFC-0010. |
 | `DSH_ORBIT_NODE_ROUTE_DOMAIN` | no | `localhost` | Route domain used to verify `ORBIT-ROUTE-V1`; must exactly match the Hub route-domain configuration. |
-| `DSH_ORBIT_NODE_DSH_TARGET` | no | `http://127.0.0.1:3080` | Node-local DSH transport checked by `GET /_orbit/route-ready`. This is liveness only and does not parse DSH APIs. |
+| `DSH_ORBIT_NODE_DSH_TARGET` | no | `http://127.0.0.1:3080` | Node-local DSH transport checked by `GET /_orbit/route-ready`. This is liveness only and does not parse DSH APIs. Point it at the node-local DSH compatibility adapter (below), not at DSH directly, unless the deployed DSH version admits the Orbit proof without an adapter. |
 | `DSH_ORBIT_NODE_ROUTE_TLS_KEY` / `DSH_ORBIT_NODE_ROUTE_TLS_CERT` | together | unset | Route-ingress TLS private key and certificate, as PEM values or file paths. Configuring only one fails startup. |
 | `DSH_ORBIT_NODE_WS_LIMIT` | no | `50` | Maximum concurrent WebSocket connections permitted on the Node route ingress, integer 1–10000. Out-of-range or non-integer values fail startup closed. |
 | `DSH_ORBIT_REPORT_FILE` | for `upload-report` | none | Path to a validated compatibility report. |
@@ -59,6 +59,30 @@ surface and must not be routed through the browser gateway. See
 Commands and state semantics are documented in
 [`docs/node-registry-client.md`](node-registry-client.md) and the enrollment
 runbook at [`docs/sop/v0.3-node-enrollment-sop.md`](sop/v0.3-node-enrollment-sop.md).
+
+### Node-local DSH compatibility adapter
+
+Per RFC-0003 and RFC-0010, the node-local DSH compatibility adapter owns
+whatever the supported DSH version needs in order to accept a verified route
+request. It is the only component that presents the DSH compatibility proof:
+
+- it replaces any client-supplied `X-DSH-Orbit-Authenticated-Proxy` with the
+  node's own secret — the same `dsh_proxy_auth` secret DSH reads through
+  `DSH_PROXY_AUTH_FILE` (one secret configuration; no second credential store);
+- it fixes `X-Forwarded-Proto: https` and presents DSH's configured public
+  host as the `Host` and `Origin` authority the DSH trust fence expects;
+- it holds no other secret, reads no other state, and must never be published
+  to a host port or a public gateway: it shares the DSH container's network
+  namespace and serves `DSH_ORBIT_NODE_DSH_TARGET`.
+
+The Hub route proxy and the Node route ingress strip client-supplied DSH proof
+and assertion headers before any upstream hop, so injection is adapter-only by
+construction. The canonical adapter configuration is
+[`proxy/dsh-compat-adapter.Caddyfile`](../proxy/dsh-compat-adapter.Caddyfile);
+the mounted drill (`docker-registry/dsh-drill.Caddyfile`) and the browser
+gateway example (`proxy/Caddyfile.example`) apply the same injection contract,
+and `test/compat-adapter-contract.test.mjs` binds all of these sources to the
+contract above.
 
 ## Gateway and deployment
 

@@ -1,0 +1,29 @@
+# Node-local DSH compatibility adapter (RFC-0003, RFC-0010).
+#
+# Contract: this adapter is the only component between the Node route ingress
+# and the DSH web process. It owns the DSH compatibility proof: Caddy's
+# header_up with a value replaces any client-supplied
+# X-DSH-Orbit-Authenticated-Proxy with the node's own secret — the same
+# dsh_proxy_auth secret DSH reads through DSH_PROXY_AUTH_FILE — fixes
+# X-Forwarded-Proto to https, and presents DSH's configured public host as the
+# Host and Origin authority the DSH trust fence expects. It reads no other
+# state and holds no other secret, and it must never be published to a host
+# port or a public gateway: it shares the DSH container's network namespace
+# and serves the Node's DSH_ORBIT_NODE_DSH_TARGET (drill topology: port 3081).
+#
+# The mounted drill uses the same contract in docker-registry/dsh-drill.Caddyfile,
+# and the browser gateway example (proxy/Caddyfile.example) applies the same
+# proof-injection contract on the browser path.
+{
+	auto_https off
+	admin off
+}
+
+:{$DSH_COMPAT_ADAPTER_PORT:3081} {
+	reverse_proxy 127.0.0.1:3080 {
+		header_up Host {$DSH_PUBLIC_HOST}
+		header_up Origin https://{$DSH_PUBLIC_HOST}
+		header_up X-Forwarded-Proto https
+		header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}
+	}
+}
