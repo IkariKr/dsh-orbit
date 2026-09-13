@@ -1,12 +1,13 @@
 // Shared harness for the Stage 9 DSH 0.1.5-rc.2 acceptances.
 //
-// Identity is pinned, not inferred: the checked-out version and Git commit are
-// asserted rather than assumed, so a checkout that drifted cannot silently
+// Identity is pinned, not inferred: the checked-out version, Git commit, and tag
+// are asserted rather than assumed, so a checkout that drifted cannot silently
 // produce Stage 9 evidence. A configured-but-missing root fails closed instead
 // of falling back to a machine-specific default path.
 //
-// Nothing here mutates the upstream checkout. The process acceptance patches the
-// bundle copy inside its own temporary DSH_HOME, which is deleted on teardown.
+// The profile links the connection package into the workspace, so the tested
+// artifact is the checkout's built bundle. This module reads its bytes, and the
+// process acceptance restores them in teardown; no tracked file is written.
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
@@ -53,9 +54,11 @@ export function assertDsh015Identity(dshRoot) {
   const tagCommit = git(dshRoot, ["rev-parse", `${DSH_015_TAG}^{commit}`]);
   assert.equal(tagCommit, DSH_015_COMMIT, `${DSH_015_TAG} must point at the pinned commit`);
 
-  // No tracked file may be modified: the acceptance never writes into the
-  // checkout, so a modified tracked file means the artifact under test is not
-  // the reviewed one. Untracked scratch files do not affect the build artifact.
+  // No tracked source file may be modified: a modified tracked file means the
+  // build artifacts under test may not correspond to the pinned commit.
+  // Untracked and ignored paths (including the gitignored build output that the
+  // acceptance patches and restores) are outside this check and are handled by
+  // the bundle save/restore instead.
   const dirty = git(dshRoot, ["status", "--porcelain", "--untracked-files=no"]);
   assert.equal(dirty, "", `DSH checkout has modified tracked files:\n${dirty}`);
 

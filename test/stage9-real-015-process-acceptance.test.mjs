@@ -4,8 +4,12 @@
 // This is the process-level counterpart to the bundle integration test. It boots
 // the genuine `dsh web` CLI on an isolated DSH_HOME, patches the connection
 // bundle that the booted profile actually loads, and then drives the running
-// process over real sockets. Nothing in the upstream checkout is modified: the
-// patched bundle lives in the temporary DSH_HOME and is deleted on teardown.
+// process over real sockets.
+//
+// The profile resolves the connection package through a symlink into the
+// workspace, so the artifact under test is the checkout's built bundle. Its
+// bytes are saved before patching and restored in teardown; no tracked file and
+// no source file is written.
 //
 // Set DSH_015_ACCEPTANCE_ROOT to a built DSH 0.1.5-rc.2 checkout to run it. An
 // explicitly configured but missing root fails closed rather than falling back.
