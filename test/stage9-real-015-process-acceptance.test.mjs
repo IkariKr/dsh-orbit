@@ -34,12 +34,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { patchConnectionRootForGeneration, verifyConnectionRoot } from "../src/remote-settings-patch.mjs";
 import {
+  acquireDsh015AcceptanceLock,
   assertBuildArtifacts,
   assertDsh015Identity,
   assertPristineBundle,
   assertProfileLinksToBuiltBundle,
   builtConnectionRoot,
   readBundleBytes,
+  releaseDsh015AcceptanceLock,
   resolveDsh015Checkout,
   restoreBundleBytes,
   sanitizedEnv,
@@ -58,6 +60,7 @@ let session = null;
 
 before(async () => {
   if (!dshRoot) return;
+  const lockPath = await acquireDsh015AcceptanceLock(dshRoot);
   const identity = assertDsh015Identity(dshRoot);
 
   const dshHome = await mkdtemp(join(tmpdir(), "orbit-stage9-home-"));
@@ -96,11 +99,12 @@ before(async () => {
 
     // Phase 3: serve the patched bundle.
     boot = await startDshWeb({ dshRoot, dshHome, trustedHosts: [PUBLIC_HOST, OTHER_HOST] });
-    session = { ...identity, dshRoot, dshHome, bundleDir, pristine, boot };
+    session = { ...identity, dshRoot, dshHome, bundleDir, pristine, boot, lockPath };
   } catch (error) {
     await boot?.stop();
     if (bundleDir && pristine) restoreBundleBytes(bundleDir, pristine);
     await rm(dshHome, { recursive: true, force: true });
+    releaseDsh015AcceptanceLock(lockPath);
     throw error;
   }
 });
@@ -116,6 +120,7 @@ after(async () => {
   // digest, so "restored" cannot mean "a different build that lacks the marker".
   assertBuildArtifacts(session.dshRoot);
   await rm(session.dshHome, { recursive: true, force: true });
+  releaseDsh015AcceptanceLock(session.lockPath);
 });
 
 function live(t) {

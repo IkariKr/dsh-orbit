@@ -12,8 +12,9 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, realpathSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 export const DSH_015_VERSION = "0.1.5-rc.2";
 export const DSH_015_COMMIT = "fb2c4b9e698e30edb738bca4cf0618587db7d203";
@@ -147,6 +148,58 @@ export function assertDsh015Identity(dshRoot) {
 /** Absolute path of the connection bundle a booted profile resolves. */
 export function profileConnectionRoot(dshHome) {
   return join(dshHome, "profiles", "node_modules", "@deepseek-ai", "dsh-client-connection", "lib");
+}
+
+const LOCK_TIMEOUT_MS = 10 * 60_000;
+const LOCK_STALE_MS = 15 * 60_000;
+
+/**
+ * Serialize the 0.1.5-rc.2 acceptances that touch the built bundle. The test
+ * runner executes files concurrently, and more than one acceptance patches the
+ * same gitignored build artifact in place; without the lock, one file's
+ * identity assertion can observe another file's patched bytes. A lock left by
+ * a crashed run is broken after the stale window, never silently ignored.
+ * @param dshRoot - resolved checkout root.
+ * @returns the lock path to pass to `releaseDsh015AcceptanceLock`.
+ */
+export async function acquireDsh015AcceptanceLock(dshRoot) {
+  const lockPath = join(dshRoot, "packages", "client", "connection", ".stage9-acceptance.lock");
+  const started = Date.now();
+  for (;;) {
+    try {
+      const fd = openSync(lockPath, "wx");
+      writeSync(fd, JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() }));
+      closeSync(fd);
+      return lockPath;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
+          unlinkSync(lockPath);
+          continue;
+        }
+      } catch {
+        continue; // The lock vanished between the probe and the stat; retry.
+      }
+      if (Date.now() - started > LOCK_TIMEOUT_MS) {
+        throw new Error(
+          `another Stage 9 acceptance still holds ${lockPath}; the 0.1.5-rc.2 acceptances ` +
+            "must patch the built bundle one at a time",
+        );
+      }
+      await sleep(500);
+    }
+  }
+}
+
+/** Release the acceptance lock; a missing lock is not an error. */
+export function releaseDsh015AcceptanceLock(lockPath) {
+  if (!lockPath) return;
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    // Another holder released it first, or the stale breaker removed it.
+  }
 }
 
 /**

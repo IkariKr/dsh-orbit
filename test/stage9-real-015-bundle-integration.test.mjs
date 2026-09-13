@@ -22,7 +22,12 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomBytes, createHash } from "node:crypto";
 import { patchConnectionRootForGeneration, verifyConnectionRoot } from "../src/remote-settings-patch.mjs";
-import { assertDsh015Identity, resolveDsh015Checkout } from "./helpers/dsh-015-acceptance-fixture.mjs";
+import {
+  acquireDsh015AcceptanceLock,
+  assertDsh015Identity,
+  releaseDsh015AcceptanceLock,
+  resolveDsh015Checkout,
+} from "./helpers/dsh-015-acceptance-fixture.mjs";
 
 test("Stage 9 Bundle Integration: DeepSeek Harness 0.1.5-rc.2 build artifacts", async (t) => {
   const dshRoot = resolveDsh015Checkout();
@@ -31,6 +36,18 @@ test("Stage 9 Bundle Integration: DeepSeek Harness 0.1.5-rc.2 build artifacts", 
     return;
   }
 
+  // Even though this acceptance patches a staged copy, its identity assertion
+  // hashes the built bundle; hold the acceptance lock so a concurrent
+  // in-place patcher cannot be observed mid-patch.
+  const lockPath = await acquireDsh015AcceptanceLock(dshRoot);
+  try {
+    await runBundleIntegration(dshRoot);
+  } finally {
+    releaseDsh015AcceptanceLock(lockPath);
+  }
+});
+
+async function runBundleIntegration(dshRoot) {
   assertDsh015Identity(dshRoot);
 
   const dshRealLib = join(dshRoot, "packages/client/connection/lib");
@@ -386,4 +403,4 @@ test("Stage 9 Bundle Integration: DeepSeek Harness 0.1.5-rc.2 build artifacts", 
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
   }
-});
+}
