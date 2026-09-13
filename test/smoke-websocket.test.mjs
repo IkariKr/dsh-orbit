@@ -56,10 +56,11 @@ async function withServer(upgradeHandler, run) {
   }
 }
 
-async function runSmoke(baseUrl, { extraEnv = {} } = {}) {
+async function runSmoke(baseUrl, { extraEnv = {}, generation = "connection-v1" } = {}) {
   const env = {
     ...process.env,
     DSH_SMOKE_URL: baseUrl,
+    DSH_SMOKE_CONNECTION_PATCH: generation,
     DSH_SMOKE_TIMEOUT_MS: "500",
     ...extraEnv,
   };
@@ -188,4 +189,109 @@ test("smoke regression: valid 101 + matching Pong passes", async () => {
       assert.match(stdout, /matching Pong frame received/);
     },
   );
+});
+
+// A minimal BrowserAuth-generation mux stand-in: answers the physical Ping,
+// accepts the $events open, and delivers the ready item on the same streamId.
+function muxHandler({ deliverReady = true } = {}) {
+  return (req, socket) => {
+    const secKey = req.headers["sec-websocket-key"] || "";
+    const accept = computeAccept(secKey);
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\n` +
+        `Upgrade: websocket\r\n` +
+        `Connection: Upgrade\r\n` +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    socket.on("data", (chunk) => {
+      // Answer the physical Ping with a matching Pong (opcode 0x0a).
+      const opcode = chunk.length >= 2 ? chunk[0] & 0x0f : 0;
+      if (opcode === 0x9) {
+        socket.write(encodeServerControlFrame(0x0a, Buffer.from("orbit-dsh-transport-ping")));
+        return;
+      }
+      if (!deliverReady) return;
+      let text = "";
+      for (let i = 0; i < chunk.length; i += 1) {
+        // Unmask the client text frame the same way the smoke masks it.
+        const len = chunk[1] & 0x7f;
+        const mask = chunk.subarray(2, 6);
+        for (let j = 0; j < len; j += 1) {
+          text += String.fromCharCode(chunk[6 + j] ^ mask[j % 4]);
+        }
+        break;
+      }
+      try {
+        const open = JSON.parse(text);
+        if (open?.type === "open" && open.endpoint === "$events") {
+          const payload = JSON.stringify({
+            type: "item",
+            streamId: open.streamId,
+            value: { type: "ready", clientId: "mux-smoke-client" },
+          });
+          const body = Buffer.from(payload, "utf8");
+          const mask = Buffer.alloc(0);
+          const header = Buffer.alloc(2);
+          header[0] = 0x80 | 0x1;
+          header[1] = body.length;
+          socket.write(Buffer.concat([header, mask, body]));
+        }
+      } catch {
+        // Ignore frames that do not parse; the smoke keeps waiting.
+      }
+    });
+  };
+}
+
+test("mux mode passes a real $events open -> item ready handshake", async () => {
+  await withServer(muxHandler(), async (baseUrl) => {
+    const { code, stdout, stderr } = await runSmoke(baseUrl, {
+      generation: "connection-browser-auth-v1",
+      extraEnv: { DSH_SMOKE_TIMEOUT_MS: "2000" },
+    });
+    assert.equal(code, 0, `mux smoke must pass: ${stderr}`);
+    assert.match(stdout, /webSocketTransport: pass/);
+    assert.match(stdout, /remote\.mux 101 upgrade on \/api\/remote\.mux verified/);
+    assert.match(stdout, /\$events open -> item ready/);
+    assert.match(stdout, /matching Pong/);
+  });
+});
+
+test("mux mode fails closed when the $events stream never delivers a ready item", async () => {
+  await withServer(muxHandler({ deliverReady: false }), async (baseUrl) => {
+    const { code, stdout, stderr } = await runSmoke(baseUrl, {
+      generation: "connection-browser-auth-v1",
+      extraEnv: { DSH_SMOKE_TIMEOUT_MS: "800" },
+    });
+    assert.notEqual(code, 0, "a mux that never delivers the ready item must fail the smoke");
+    assert.doesNotMatch(stdout, /webSocketTransport: pass/);
+    assert.match(stderr, /timed out|closed the connection/);
+  });
+});
+
+test("mux mode rejects a legacy stream path override", async () => {
+  await withServer(muxHandler(), async (baseUrl) => {
+    const { code, stderr } = await runSmoke(baseUrl, {
+      generation: "connection-browser-auth-v1",
+      extraEnv: { DSH_SMOKE_WS_PATH: "/api/events.mux", DSH_SMOKE_TIMEOUT_MS: "2000" },
+    });
+    assert.equal(code, 2);
+    assert.match(stderr, /is not a remote-mux stream path/);
+  });
+});
+
+test("smoke fails closed without a declared connection generation", async () => {
+  await withServer(muxHandler(), async (baseUrl) => {
+    const { code, stderr } = await runSmoke(baseUrl, { generation: "" });
+    assert.equal(code, 2);
+    assert.match(stderr, /DSH_SMOKE_CONNECTION_PATCH is required/);
+  });
+});
+
+test("smoke rejects an unreviewed connection generation", async () => {
+  await withServer(muxHandler(), async (baseUrl) => {
+    const { code, stderr } = await runSmoke(baseUrl, { generation: "connection-v99" });
+    assert.equal(code, 2);
+    assert.match(stderr, /no reviewed wire contract for connection patch "connection-v99"/);
+  });
 });

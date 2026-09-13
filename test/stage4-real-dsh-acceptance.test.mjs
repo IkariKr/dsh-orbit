@@ -532,6 +532,7 @@ test("Stage 4 Live Acceptance: Real DeepSeek Harness 0.1.1-rc.2 Process Acceptan
     env: {
       ...process.env,
       DSH_SMOKE_URL: `http://127.0.0.1:${dshPort}`,
+      DSH_SMOKE_CONNECTION_PATCH: "connection-v1",
       DSH_SMOKE_TIMEOUT_MS: "3000",
     },
     stdio: ["ignore", "pipe", "pipe"],
