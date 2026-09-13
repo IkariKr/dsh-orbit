@@ -164,10 +164,23 @@ function cookiePair(response) {
   return raw[0].match(/^([^;]+)/)[1];
 }
 
-/** Fence rejection is 403 and browser-auth rejection is 401; admitted is neither. */
-function assertAdmitted(status, label) {
-  assert.notEqual(status, 401, `${label}: must not be rejected by BrowserAuth`);
-  assert.notEqual(status, 403, `${label}: must not be rejected by the trust fence`);
+// The fence rejects with 403 "forbidden" and BrowserAuth with 401
+// "unauthorized". An admitted request instead reaches the RPC bridge, where the
+// router answers a plain GET with 404 "not found" because no RPC route matches.
+// That contrast, measured on the live process, is the admission proof: asserting
+// only "not 401 and not 403" would accept any status, including a 404 produced
+// before the checks ran.
+const ROUTER_NOT_FOUND_BODY = "not found";
+
+function assertAdmitted(response, label) {
+  assert.notEqual(response.status, 401, `${label}: BrowserAuth must not reject the request`);
+  assert.notEqual(response.status, 403, `${label}: the trust fence must not reject the request`);
+  assert.equal(response.status, 404, `${label}: the router must answer an admitted request`);
+  assert.equal(
+    response.body,
+    ROUTER_NOT_FOUND_BODY,
+    `${label}: an admitted request is answered by the RPC router, not by a rejection`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -347,7 +360,7 @@ test("acceptance process boots the pinned upstream identity with the patched adm
   // The booted process serving the Orbit proof is the behavioural proof that it
   // loaded the patched bundle, not an unpatched one.
   const response = await request(boot, { path: "/api/probe", headers: proofHeaders() });
-  assertAdmitted(response.status, "booted process Orbit proof");
+  assertAdmitted(response, "booted process Orbit proof");
 });
 
 // ---------------------------------------------------------------------------
@@ -368,7 +381,7 @@ test("native token exchange mints an authority-bound cookie on the trusted autho
 
   // Trusted authority + native cookie: the remote-authority native path works.
   const trusted = await request(boot, { path: "/api/probe", headers: { cookie } });
-  assertAdmitted(trusted.status, "native cookie on the trusted authority");
+  assertAdmitted(trusted, "native cookie on the trusted authority");
 
   // Authority-bound cookie: the same cookie must not authenticate another
   // authority, even though that authority passes the trust fence.
@@ -393,7 +406,7 @@ test("native token exchange works on the loopback authority and its cookie is re
   const cookie = cookiePair(exchange);
 
   const loopback = await request(boot, { path: "/api/probe", host: loopbackAuthority, headers: { cookie } });
-  assertAdmitted(loopback.status, "native cookie on the loopback authority");
+  assertAdmitted(loopback, "native cookie on the loopback authority");
 
   const reused = await request(boot, { path: "/api/probe", host: PUBLIC_HOST, headers: { cookie } });
   assert.equal(reused.status, 401, "a loopback-bound cookie must not authenticate the trusted authority");
@@ -452,7 +465,7 @@ test("real HTTP admission matrix distinguishes fence, BrowserAuth, and proof", a
   for (const { label, headers, expected } of cases) {
     const clean = Object.fromEntries(Object.entries(headers).filter(([, value]) => value !== undefined));
     const response = await request(boot, { path: "/api/probe", headers: clean });
-    if (expected === null) assertAdmitted(response.status, label);
+    if (expected === null) assertAdmitted(response, label);
     else assert.equal(response.status, expected, `${label}: unexpected status ${response.status}`);
   }
 });
