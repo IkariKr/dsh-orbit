@@ -651,7 +651,12 @@ export async function runVerificationSequence({
         const session = await runCommand(process.execPath, [SMOKE_SESSION], {
           env: smokeEnv({ DSH_SMOKE_SESSION_ID: config.sessionId }),
         });
-        record("sessionResume", session.code === 0 ? "pass" : "fail", session.code === 0 ? "existing session resumed, current model re-selected" : failDetail(session.stderr, `exit ${session.code}`));
+        const sessionLine = session.stdout.match(/^sessionResume: pass.*$/m)?.[0];
+        record(
+          "sessionResume",
+          session.code === 0 && sessionLine ? "pass" : "fail",
+          sessionLine ?? failDetail(session.stderr, `exit ${session.code}`),
+        );
       },
     },
     {

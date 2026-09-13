@@ -174,7 +174,7 @@ function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessio
       events.push("command:session");
       return {
         code: sessionCode,
-        stdout: "",
+        stdout: sessionCode === 0 ? "sessionResume: pass (existing session resumed on the candidate)\n" : "",
         stderr:
           sessionCode === 0
             ? ""
