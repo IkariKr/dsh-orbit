@@ -666,14 +666,15 @@ export async function runVerificationSequence({
           record("webPluginRoutes", "fail", "the web UI references no plugin asset");
           return;
         }
-        const asset = await fetchPage(`${config.candidateEndpoint}${pluginMatch[1]}`, {
+        const pluginPath = pluginMatch[1].replaceAll("&amp;", "&");
+        const asset = await fetchPage(`${config.candidateEndpoint}${pluginPath}`, {
           headers: gatewayHeaders(),
           ...(identityCa ? { ca: identityCa } : {}),
         });
         record(
           "webPluginRoutes",
           asset.status === 200 ? "pass" : "fail",
-          asset.status === 200 ? `plugin asset ${pluginMatch[1]} -> HTTP 200` : `plugin asset ${pluginMatch[1]} -> HTTP ${asset.status}`,
+          asset.status === 200 ? `plugin asset ${pluginPath} -> HTTP 200` : `plugin asset ${pluginPath} -> HTTP ${asset.status}`,
         );
       },
     },

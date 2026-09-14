@@ -22,11 +22,12 @@ import {
 } from "../src/compatibility-report.mjs";
 
 
-const PLUGIN_ASSET = "/plugins/@deepseek-ai/dsh-client-modules/client.js?rev=abc123";
+const PLUGIN_ASSET_HTML = "/plugins/??@deepseek-ai/dsh-client-modules/client.js&amp;rev=abc123";
+const PLUGIN_ASSET_REQUEST = "/plugins/??@deepseek-ai/dsh-client-modules/client.js&rev=abc123";
 const PATCH_CHECK_STDOUT = [
   "DSH upstream: 0.1.1-rc.2",
   "/usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection/lib: ok/ok",
-  "/data/dsh-home/profiles/web/node_modules/@deepseek-ai/dsh-client-connection/lib: ok",
+  "/data/dsh-home/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib: ok",
   "",
 ].join("\n");
 
@@ -207,10 +208,12 @@ function fakeExecutors(config, { buildCode = 0, upCode = 0, authCode = 0, sessio
         `Basic ${Buffer.from("admin:orbit-candidate-value").toString("base64")}`,
       );
       assert.equal(options.headers["sec-fetch-site"], "same-origin");
-      return { status: 200, body: `<html><body><script src="${PLUGIN_ASSET}"></script></body></html>` };
+      return { status: 200, body: `<html><body><script src="${PLUGIN_ASSET_HTML}"></script></body></html>` };
     }
     if (url.includes("/plugins/")) {
-      return { status: 200, body: "// plugin module" };
+      return url.endsWith(PLUGIN_ASSET_REQUEST)
+        ? { status: 200, body: "// plugin module" }
+        : { status: 404, body: "unknown plugin combo" };
     }
     return { status: 404, body: "" };
   };
