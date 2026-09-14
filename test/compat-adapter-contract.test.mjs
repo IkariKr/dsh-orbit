@@ -62,12 +62,17 @@ test("the browser gateway keeps local Basic Auth separate from the identity-awar
   const localBlock = source.slice(localStart, accessStart);
   const accessBlock = source.slice(accessStart);
   assert.match(localBlock, /basic_auth\s*\{/);
-  assert.doesNotMatch(
+  assert.match(
     localBlock,
-    /Cf-Access-Jwt-Assertion/,
-    "the local/LAN path must never authenticate a client-supplied Access assertion",
+    /header_up\s+-Cf-Access-Jwt-Assertion/,
+    "the local/LAN path must strip a client-supplied Access assertion before DSH sees the authenticated proxy hop",
   );
   assert.match(accessBlock, /@access\s+header\s+Cf-Access-Jwt-Assertion\s+\*/);
+  assert.doesNotMatch(
+    accessBlock,
+    /header_up\s+-Cf-Access-Jwt-Assertion/,
+    "the private identity-aware listener must preserve the assertion it authenticated",
+  );
   assert.doesNotMatch(accessBlock, /basic_auth\s*\{/);
   assert.match(accessBlock, /respond\s+"Unauthorized"\s+401/);
 });

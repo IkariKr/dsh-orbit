@@ -16,7 +16,7 @@ The proxy secret is read by DSH from a file mounted into the container. It must 
 
 ## Identity-aware access header
 
-The Caddy example separates the two authentication paths by listener. Host-published `9443` is the local/LAN Basic Auth path and never treats `Cf-Access-Jwt-Assertion` as authentication. Private `9444` is the identity-aware path and may treat that assertion as evidence only because the example Compose file does not publish `9444` to the host.
+The Caddy example separates the two authentication paths by listener. Host-published `9443` is the local/LAN Basic Auth path, never treats `Cf-Access-Jwt-Assertion` as authentication, and strips any client-supplied copy before forwarding to DSH. Private `9444` is the identity-aware path and may treat that assertion as evidence only because the example Compose file does not publish `9444` to the host.
 
 A trusted identity-aware connector such as a Cloudflare Tunnel sidecar may reach `9444` across the private container network boundary. Do not publish that listener to arbitrary local/LAN clients. If an additional LAN reverse proxy is used, it must still strip an incoming assertion header before forwarding; the Nginx example does this explicitly as defense in depth.
 
@@ -32,7 +32,7 @@ Do not publish DSH port `3080` on a LAN or public interface.
 
 ## Local access
 
-The example Caddy configuration exposes local Basic Auth on `9443`. Its credentials are mounted from files under `secrets/` and are not stored in `.env` or the repository. The local listener ignores identity-provider assertion headers, so a forged `Cf-Access-Jwt-Assertion` cannot bypass Basic Auth.
+The example Caddy configuration exposes local Basic Auth on `9443`. Its credentials are mounted from files under `secrets/` and are not stored in `.env` or the repository. The local listener strips identity-provider assertion headers before the authenticated proxy hop reaches DSH, so a forged `Cf-Access-Jwt-Assertion` cannot influence the downstream identity path.
 
 The local path and the private identity-aware path on `9444` both inject the same internal DSH Orbit proxy secret after their own authentication step.
 

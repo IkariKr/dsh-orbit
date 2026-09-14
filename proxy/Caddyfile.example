@@ -23,6 +23,7 @@ https://:9443 {
   reverse_proxy 127.0.0.1:3080 {
     header_up Host {$DSH_PUBLIC_HOST}
     header_up X-Forwarded-Proto https
+    header_up -Cf-Access-Jwt-Assertion
     header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}
   }
 }
