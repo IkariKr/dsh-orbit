@@ -76,10 +76,11 @@ real deployment appear healthy.
 - DSH answers every unauthenticated request with `401` once native BrowserAuth owns the
   index, because the `/?token=` exchange is the only admission path. That is a healthy
   server, not a failed one.
-- Container readiness therefore means "the web server answered HTTP at all". The start
-  script and every Compose healthcheck call the shared probe `bin/dsh-orbit-web-ready`
-  (installed as `/usr/local/bin/dsh-orbit-web-ready`), which accepts a `401` and a `200`
-  alike and fails closed only when nothing answers.
+- Container readiness therefore means "the web server answered with a non-5xx HTTP
+  response". The start script and every Compose healthcheck call the shared probe
+  `bin/dsh-orbit-web-ready` (installed as `/usr/local/bin/dsh-orbit-web-ready`), which
+  accepts 2xx, 3xx, and 4xx responses—including the BrowserAuth `401`—and fails closed
+  on 5xx responses or when nothing answers.
 - Do not reintroduce a probe that requires an unauthenticated `2xx`: it never becomes
   ready on the BrowserAuth generation and fails the container start on a healthy server.
 

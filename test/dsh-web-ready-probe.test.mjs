@@ -102,6 +102,15 @@ test("the DSH web probe still accepts a public 200", { skip: !canRunProbe && ski
   assert.equal(exitCode, 0, "a 200 answer must keep satisfying readiness for a public generation");
 });
 
+test("the DSH web probe rejects an internal 500", { skip: !canRunProbe && skipReason }, async () => {
+  const { exitCode, requests } = await withServer(500, async (url, _port, seen) => ({
+    exitCode: (await runProbe(url)).status,
+    requests: seen.length,
+  }));
+  assert.equal(requests, 1, "the probe must reach the server for the 500 boundary to be meaningful");
+  assert.equal(exitCode, 1, "an HTTP 500 is a failed service response and must not satisfy readiness");
+});
+
 test("the DSH web probe fails closed when nothing is listening", { skip: !canRunProbe && skipReason }, async () => {
   const server = createServer((_request, response) => {
     response.writeHead(401, { "content-type": "text/plain" });
@@ -148,14 +157,10 @@ test("the image installs the shared probe and every healthcheck uses it", async 
   }
 });
 
-test("the probe rejects a non-answer and never compares against a success status", () => {
+test("the probe accepts non-5xx responses and rejects non-answers", () => {
   assert.match(probeSource, /%\{http_code\}/, "readiness must be judged from the HTTP status");
-  assert.match(probeSource, /""\|000\*\) exit 1/, "an empty or unreachable status must fail closed");
-  assert.doesNotMatch(
-    probeSource,
-    /[!=]= *["']?2\d\d/,
-    "readiness must not be pinned to one success status, which is what broke the 401 generation",
-  );
+  assert.match(probeSource, /2\?\?\|3\?\?\|4\?\?\) exit 0/, "2xx, 3xx, and 4xx answers must satisfy readiness");
+  assert.match(probeSource, /\*\) exit 1/, "empty, 5xx, and malformed statuses must fail closed");
 });
 
 test("the drill claims stack ownership before compose can create a partial stack", async () => {

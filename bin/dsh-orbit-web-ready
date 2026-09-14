@@ -6,10 +6,10 @@
 # index, the /?token= exchange is the only admission path and every other
 # request is answered 401. A probe that requires an HTTP 2xx therefore never
 # observes readiness on that generation, even though the web server is serving
-# normally. Readiness here means "the server answered HTTP at all", which a
-# public generation (200) and an authenticated one (401) both satisfy — the
-# probe stays correct for either without asking which DSH generation is
-# installed.
+# normally. Readiness here means "the server answered with a non-5xx HTTP
+# status", which a public generation (200) and an authenticated one (401) both
+# satisfy — the probe stays correct for either without asking which DSH
+# generation is installed.
 #
 # Usage: dsh-orbit-web-ready [url]   (default http://127.0.0.1:3080)
 set -eu
@@ -24,6 +24,6 @@ status="$(
 )"
 
 case "$status" in
-  ""|000*) exit 1 ;;
-  *) exit 0 ;;
+  2??|3??|4??) exit 0 ;;
+  *) exit 1 ;;
 esac

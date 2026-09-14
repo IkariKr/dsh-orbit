@@ -87,7 +87,7 @@ async function withComposeProject(body) {
     for (let attempt = 0; ; attempt += 1) {
       try {
         await rm(dir, { recursive: true, force: true });
-        return;
+        break;
       } catch (error) {
         if (attempt >= 9 || !["EBUSY", "EPERM", "ENOTEMPTY"].includes(error.code)) throw error;
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -122,4 +122,14 @@ test("a namespace-sharing sidecar that publishes ports is refused by the daemon"
       "the daemon must refuse the exact conflict the product compose must never contain",
     );
   });
+});
+
+test("topology teardown never swallows a body failure", async () => {
+  await assert.rejects(
+    withComposeProject(async () => {
+      throw new Error("sentinel-body-failure");
+    }),
+    /sentinel-body-failure/,
+    "cleanup must preserve the assertion or runtime failure from the compose body",
+  );
 });
