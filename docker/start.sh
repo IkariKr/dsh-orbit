@@ -4,7 +4,7 @@ umask 027
 
 READY_FILE="/tmp/dsh-orbit-ready"
 PROFILE_ROOT="${DSH_PROFILE_ROOT:-/data/dsh-home/profiles/web}"
-PROFILE_CONNECTION_ROOT="${DSH_PROFILE_CONNECTION_ROOT:-${PROFILE_ROOT}/node_modules/@deepseek-ai/dsh-client-connection/lib}"
+PROFILE_CONNECTION_ROOT="${DSH_PROFILE_CONNECTION_ROOT:-${DSH_HOME:-/data/dsh-home}/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib}"
 RESTART_REQUEST="${DSH_HOME:-/data/dsh-home}/.dsh-web-restart.request"
 DSH_BIN="/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js"
 PATCHER="/usr/local/lib/dsh-orbit/bin/dsh-orbit-patch.mjs"
@@ -81,6 +81,10 @@ prepare_runtime() {
 if [ ! -f "$PROFILE_CONNECTION_ROOT/index.js" ] || [ ! -f "$PROFILE_CONNECTION_ROOT/client.js" ]; then
   start_dsh
   wait_for_profile
+  # Profile package files can appear before DSH finishes its profile-healing
+  # transaction. Wait for the web service so node_modules.lock is released
+  # cleanly before terminating the bootstrap process for runtime patching.
+  wait_for_web
   stop_dsh
 fi
 

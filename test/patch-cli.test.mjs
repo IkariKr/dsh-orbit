@@ -92,6 +92,49 @@ test("patch CLI declares SSH_PATCH_ENABLED and keeps dsh-ssh disabled by default
   assert.doesNotMatch(result.stdout, /dsh-ssh verification failed/);
 });
 
+test("runtime patch defaults to DSH_HOME's shared profile workspace", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-patch-cli-profile-root-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const globalRoot = join(dir, "dsh");
+  const globalConnectionRoot = join(globalRoot, "node_modules", "@deepseek-ai", "dsh-client-connection", "lib");
+  const dshHome = join(dir, "home");
+  const profileConnectionRoot = join(
+    dshHome,
+    "profiles",
+    "node_modules",
+    "@deepseek-ai",
+    "dsh-client-connection",
+    "lib",
+  );
+  await mkdir(globalConnectionRoot, { recursive: true });
+  await mkdir(profileConnectionRoot, { recursive: true });
+  await writeFile(join(globalRoot, "package.json"), JSON.stringify({ version: "0.1.1-rc.2" }), "utf8");
+  for (const root of [globalConnectionRoot, profileConnectionRoot]) {
+    await writeFile(join(root, "index.js"), BUNDLE_SERVER_SOURCE, "utf8");
+    await writeFile(join(root, "client.js"), BUNDLE_CLIENT_SOURCE, "utf8");
+  }
+
+  const env = { ...process.env };
+  delete env.DSH_ORBIT_PATCH_DSH_SSH;
+  delete env.DSH_PROFILE_CONNECTION_ROOT;
+  Object.assign(env, {
+    DSH_HOME: dshHome,
+    DSH_GLOBAL_ROOT: globalRoot,
+    DSH_GLOBAL_CONNECTION_ROOT: globalConnectionRoot,
+    DSH_PROFILE_ROOT: join(dshHome, "profiles", "web"),
+    DSH_PUBLIC_HOST: "dsh-a.test",
+  });
+
+  const result = await runPatch(env, "--runtime");
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(
+    result.stdout.replaceAll("\\", "/"),
+    new RegExp(profileConnectionRoot.replaceAll("\\", "/").replaceAll("/", "\\/")),
+  );
+  assert.match(result.stdout, /patched\/patched/);
+});
+
 test("patch CLI refuses a patched tree whose admission helper was tampered", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "orbit-patch-cli-tamper-"));
   t.after(() => rm(dir, { recursive: true, force: true }));

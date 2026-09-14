@@ -19,9 +19,10 @@ const GLOBAL_CONNECTION_ROOT =
   process.env.DSH_GLOBAL_CONNECTION_ROOT ||
   `${GLOBAL_DSH_ROOT}/node_modules/@deepseek-ai/dsh-client-connection/lib`;
 const PROFILE_ROOT = process.env.DSH_PROFILE_ROOT || "/data/dsh-home/profiles/web";
+const DSH_HOME = process.env.DSH_HOME || "/data/dsh-home";
 const PROFILE_CONNECTION_ROOT =
   process.env.DSH_PROFILE_CONNECTION_ROOT ||
-  `${PROFILE_ROOT}/node_modules/@deepseek-ai/dsh-client-connection/lib`;
+  `${DSH_HOME}/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib`;
 const PUBLIC_HOST = process.env.DSH_PUBLIC_HOST;
 const PROXY_AUTH_FILE = process.env.DSH_PROXY_AUTH_FILE || "/run/secrets/dsh_proxy_auth";
 // LEGACY THIRD-PARTY COMPATIBILITY DEBT (ADR-0001): freeze-only.

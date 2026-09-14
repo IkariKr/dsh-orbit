@@ -12,6 +12,22 @@ test("starts DSH with the public host admitted through the upstream trusted-host
   );
 });
 
+test("defaults the profile connection bundle to DSH's shared profile workspace", () => {
+  assert.match(
+    startScript,
+    /PROFILE_CONNECTION_ROOT="\$\{DSH_PROFILE_CONNECTION_ROOT:-\$\{DSH_HOME:-\/data\/dsh-home\}\/profiles\/node_modules\/@deepseek-ai\/dsh-client-connection\/lib\}"/,
+    "DSH installs profile packages under $DSH_HOME/profiles/node_modules; deriving the bundle from profiles/web leaves copied historical profiles stuck in bootstrap",
+  );
+});
+
+test("fresh-profile bootstrap waits for DSH to finish booting before it is stopped for patching", () => {
+  assert.match(
+    startScript,
+    /if \[ ! -f "\$PROFILE_CONNECTION_ROOT\/index\.js" \].*?start_dsh.*?wait_for_profile.*?wait_for_web.*?stop_dsh.*?fi/s,
+    "profile package files can appear before DSH releases profiles/node_modules.lock; bootstrap must wait for the web service before terminating the first process",
+  );
+});
+
 test("waits for the web service through the shared probe, not an unauthenticated 2xx", () => {
   assert.match(
     startScript,
