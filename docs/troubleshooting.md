@@ -72,6 +72,17 @@ heartbeat succeeds. Capabilities may be withheld while report evidence is
 stale. Do not edit SQLite timestamps or shorten production thresholds to make a
 real deployment appear healthy.
 
+### DSH container reports unhealthy while the web UI works
+- DSH answers every unauthenticated request with `401` once native BrowserAuth owns the
+  index, because the `/?token=` exchange is the only admission path. That is a healthy
+  server, not a failed one.
+- Container readiness therefore means "the web server answered HTTP at all". The start
+  script and every Compose healthcheck call the shared probe `bin/dsh-orbit-web-ready`
+  (installed as `/usr/local/bin/dsh-orbit-web-ready`), which accepts a `401` and a `200`
+  alike and fails closed only when nothing answers.
+- Do not reintroduce a probe that requires an unauthenticated `2xx`: it never becomes
+  ready on the BrowserAuth generation and fails the container start on a healthy server.
+
 ## v0.4 Endpoint Selector & Routing Diagnostics
 
 ### Node unavailable / not selectable in UI

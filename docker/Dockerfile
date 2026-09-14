@@ -35,9 +35,10 @@ COPY bin/ /usr/local/lib/dsh-orbit/bin/
 COPY docker/start.sh /usr/local/bin/dsh-orbit-start
 COPY bin/dsh-orbit-restart-web /usr/local/bin/dsh-restart-web
 COPY bin/dsh-orbit-ensure-node-pty /usr/local/bin/dsh-orbit-ensure-node-pty
+COPY bin/dsh-orbit-web-ready /usr/local/bin/dsh-orbit-web-ready
 
 RUN node /usr/local/lib/dsh-orbit/bin/dsh-orbit-patch.mjs --build \
-    && chmod 0755 /usr/local/bin/dsh-orbit-start /usr/local/bin/dsh-restart-web /usr/local/bin/dsh-orbit-ensure-node-pty
+    && chmod 0755 /usr/local/bin/dsh-orbit-start /usr/local/bin/dsh-restart-web /usr/local/bin/dsh-orbit-ensure-node-pty /usr/local/bin/dsh-orbit-web-ready
 
 WORKDIR /workspace
 USER 10001:10001

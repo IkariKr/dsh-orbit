@@ -145,7 +145,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=128m
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/dsh-orbit-ready && wget -q -O /dev/null http://127.0.0.1:3080"]
+      test: ["CMD-SHELL", "test -f /tmp/dsh-orbit-ready && /usr/local/bin/dsh-orbit-web-ready"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -221,7 +221,7 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=128m
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/dsh-orbit-ready && wget -q -O /dev/null http://127.0.0.1:3080"]
+      test: ["CMD-SHELL", "test -f /tmp/dsh-orbit-ready && /usr/local/bin/dsh-orbit-web-ready"]
       interval: 10s
       timeout: 5s
       retries: 12

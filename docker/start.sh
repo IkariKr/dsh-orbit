@@ -10,6 +10,7 @@ DSH_BIN="/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js"
 PATCHER="/usr/local/lib/dsh-orbit/bin/dsh-orbit-patch.mjs"
 HOOK_RUNNER="/usr/local/lib/dsh-orbit/bin/dsh-orbit-run-hooks.mjs"
 TERMINAL_RUNTIME_REPAIR="/usr/local/bin/dsh-orbit-ensure-node-pty"
+WEB_READY="/usr/local/bin/dsh-orbit-web-ready"
 dsh_pid=""
 
 rm -f "$READY_FILE"
@@ -54,7 +55,7 @@ wait_for_profile() {
 wait_for_web() {
   i=0
   while [ "$i" -lt 60 ]; do
-    if wget -q -O /dev/null http://127.0.0.1:3080 2>/dev/null; then
+    if "$WEB_READY"; then
       return 0
     fi
     if ! kill -0 "$dsh_pid" 2>/dev/null; then
