@@ -80,7 +80,19 @@ async function withComposeProject(body) {
     } catch {
       // The project may never have started; cleanup is best-effort.
     }
-    await rm(dir, { recursive: true, force: true });
+    // Docker on Windows can still hold a handle on the project directory for a
+    // moment after `compose down`, which surfaces as EBUSY on rmdir. Retry so a
+    // teardown race cannot fail an otherwise passing topology check; any other
+    // error, or a directory that stays locked, is still reported.
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await rm(dir, { recursive: true, force: true });
+        return;
+      } catch (error) {
+        if (attempt >= 9 || !["EBUSY", "EPERM", "ENOTEMPTY"].includes(error.code)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
   }
 }
 
