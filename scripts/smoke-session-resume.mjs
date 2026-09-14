@@ -49,6 +49,7 @@ if (process.env.DSH_SMOKE_BASIC_USER && process.env.DSH_SMOKE_BASIC_PASSWORD) {
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const followTimeoutMs = Number(process.env.DSH_SMOKE_TIMEOUT_MS || 5000);
+const MAX_WS_MESSAGE_BYTES = 64 * 1024 * 1024;
 
 function encodeClientFrame(opcode, payload = Buffer.alloc(0)) {
   const body = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
@@ -70,7 +71,11 @@ function encodeClientFrame(opcode, payload = Buffer.alloc(0)) {
 
 function parseServerFrame(buffer) {
   if (buffer.length < 2) return null;
+  const fin = (buffer[0] & 0x80) !== 0;
+  const opcode = buffer[0] & 0x0f;
   const masked = (buffer[1] & 0x80) !== 0;
+  if (masked) throw new Error("server frame must not be masked");
+
   let length = buffer[1] & 0x7f;
   let offset = 2;
   if (length === 126) {
@@ -79,18 +84,23 @@ function parseServerFrame(buffer) {
     offset = 4;
   } else if (length === 127) {
     if (buffer.length < 10) return null;
-    length = Number(buffer.readBigUInt64BE(2));
+    const lengthBig = buffer.readBigUInt64BE(2);
+    if (lengthBig > BigInt(MAX_WS_MESSAGE_BYTES)) {
+      throw new Error(`frame exceeds ${MAX_WS_MESSAGE_BYTES} byte limit`);
+    }
+    length = Number(lengthBig);
     offset = 10;
   }
-  const mask = masked ? buffer.subarray(offset, offset + 4) : null;
-  if (masked && mask.length < 4) return null;
-  if (masked) offset += 4;
-  if (buffer.length < offset + length) return null;
-  const payload = Buffer.alloc(length);
-  for (let i = 0; i < length; i++) {
-    payload[i] = masked ? buffer[offset + i] ^ mask[i % 4] : buffer[offset + i];
+  if (length > MAX_WS_MESSAGE_BYTES) {
+    throw new Error(`frame exceeds ${MAX_WS_MESSAGE_BYTES} byte limit`);
   }
-  return { opcode: buffer[0] & 0x0f, payload, used: offset + length };
+  if (buffer.length < offset + length) return null;
+  return {
+    fin,
+    opcode,
+    payload: Buffer.from(buffer.subarray(offset, offset + length)),
+    used: offset + length,
+  };
 }
 
 function browserAuthFollowSnapshot(targetSessionId) {
@@ -144,12 +154,43 @@ function browserAuthFollowSnapshot(targetSessionId) {
         finish(resolve, snapshot);
       };
 
+      let fragmented = null;
+      const handleTextMessage = (payload) => {
+        let message;
+        try {
+          message = JSON.parse(payload.toString("utf8"));
+        } catch {
+          return false;
+        }
+        if (message?.streamId !== streamId) return false;
+        if (message.type === "item" && message.value?.type === "snapshot") {
+          succeed(message.value);
+          return true;
+        }
+        if (message.type === "error" || message.type === "end") {
+          fail(`remote.mux ended before snapshot (${JSON.stringify(message)})`);
+          return true;
+        }
+        return false;
+      };
+
       const onData = (chunk) => {
         buffered = Buffer.concat([buffered, chunk]);
         for (;;) {
-          const frame = parseServerFrame(buffered);
+          let frame;
+          try {
+            frame = parseServerFrame(buffered);
+          } catch (error) {
+            fail(error instanceof Error ? error.message : String(error));
+            return;
+          }
           if (!frame) return;
           buffered = buffered.subarray(frame.used);
+
+          if (frame.opcode >= 0x08 && !frame.fin) {
+            fail("fragmented control frame is invalid");
+            return;
+          }
           if (frame.opcode === 0x08) {
             fail("server closed the stream before the opening snapshot");
             return;
@@ -158,22 +199,39 @@ function browserAuthFollowSnapshot(targetSessionId) {
             socket.write(encodeClientFrame(0x0a, frame.payload));
             continue;
           }
-          if (frame.opcode !== 0x01) continue;
-          let message;
-          try {
-            message = JSON.parse(frame.payload.toString("utf8"));
-          } catch {
+          if (frame.opcode === 0x0a) continue;
+
+          if (frame.opcode === 0x00) {
+            if (fragmented === null) {
+              fail("unexpected continuation frame");
+              return;
+            }
+            fragmented.bytes += frame.payload.length;
+            if (fragmented.bytes > MAX_WS_MESSAGE_BYTES) {
+              fail(`message exceeds ${MAX_WS_MESSAGE_BYTES} byte limit`);
+              return;
+            }
+            fragmented.chunks.push(frame.payload);
+            if (!frame.fin) continue;
+            const completed = fragmented;
+            fragmented = null;
+            if (completed.opcode === 0x01 && handleTextMessage(Buffer.concat(completed.chunks, completed.bytes))) return;
             continue;
           }
-          if (message?.streamId !== streamId) continue;
-          if (message.type === "item" && message.value?.type === "snapshot") {
-            succeed(message.value);
+
+          if (frame.opcode !== 0x01 && frame.opcode !== 0x02) {
+            fail(`unsupported WebSocket opcode 0x${frame.opcode.toString(16)}`);
             return;
           }
-          if (message.type === "error" || message.type === "end") {
-            fail(`remote.mux ended before snapshot (${JSON.stringify(message)})`);
+          if (fragmented !== null) {
+            fail("new data frame arrived before fragmented message completed");
             return;
           }
+          if (!frame.fin) {
+            fragmented = { opcode: frame.opcode, chunks: [frame.payload], bytes: frame.payload.length };
+            continue;
+          }
+          if (frame.opcode === 0x01 && handleTextMessage(frame.payload)) return;
         }
       };
       socket.on("data", onData);
@@ -284,9 +342,10 @@ try {
     // session/list intentionally exposes only already-cached projection hints and
     // never materializes missing cells for cold Sessions. A pre-upgrade 0.1.1
     // Session can therefore be fully valid while list omits modelSelection. The
-    // opening session/follow snapshot is the authoritative cold-safe read: the
-    // Host observes the durable log with projectionMode=all and folds historical
-    // request/header events into modelSelection before promoting the Session.
+    // opening session/follow snapshot is the authoritative cold-safe read. In the
+    // pinned 0.1.5 session-controller contract, follow() calls sourceFor(..., true),
+    // which observes the durable session with projectionMode=all; maxMessages only
+    // limits returned records, not the projection block folded from the full log.
     const snapshot = await browserAuthFollowSnapshot(sessionId);
     if (snapshot?.header?.id !== sessionId) {
       throw new Error(`session follow: opening snapshot identity mismatch for ${JSON.stringify(sessionId)}`);

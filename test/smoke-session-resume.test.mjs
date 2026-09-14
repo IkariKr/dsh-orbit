@@ -10,25 +10,34 @@ const SCRIPT = fileURLToPath(new URL("../scripts/smoke-session-resume.mjs", impo
 
 async function withServer(handler, run, upgradeHandler = undefined) {
   const server = http.createServer(handler);
-  if (upgradeHandler) server.on("upgrade", upgradeHandler);
+  const upgradedSockets = new Set();
+  if (upgradeHandler) {
+    server.on("upgrade", (req, socket, head) => {
+      upgradedSockets.add(socket);
+      socket.once("close", () => upgradedSockets.delete(socket));
+      upgradeHandler(req, socket, head);
+    });
+  }
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   try {
     return await run(`http://127.0.0.1:${address.port}`);
   } finally {
+    for (const socket of upgradedSockets) socket.destroy();
     server.close();
     await once(server, "close");
   }
 }
 
-async function runSmoke(baseUrl, { generation = "connection-v1", sessionId = "session-test" } = {}) {
+async function runSmoke(baseUrl, { generation = "connection-v1", sessionId = "session-test", timeoutMs } = {}) {
   const child = spawn(process.execPath, [SCRIPT], {
     env: {
       ...process.env,
       DSH_SMOKE_URL: baseUrl,
       DSH_SMOKE_SESSION_ID: sessionId,
       DSH_SMOKE_CONNECTION_PATCH: generation,
+      ...(timeoutMs === undefined ? {} : { DSH_SMOKE_TIMEOUT_MS: String(timeoutMs) }),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -51,11 +60,10 @@ function respond(res, rpcId, result) {
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-function encodeServerTextFrame(value) {
-  const payload = Buffer.from(JSON.stringify(value));
+function encodeServerFrame(opcode, payload, { fin = true } = {}) {
   if (payload.length > 0xffff) throw new Error("test WebSocket payload is too large");
   const header = payload.length <= 125 ? Buffer.alloc(2) : Buffer.alloc(4);
-  header[0] = 0x81;
+  header[0] = (fin ? 0x80 : 0) | (opcode & 0x0f);
   if (payload.length <= 125) {
     header[1] = payload.length;
   } else {
@@ -63,6 +71,10 @@ function encodeServerTextFrame(value) {
     header.writeUInt16BE(payload.length, 2);
   }
   return Buffer.concat([header, payload]);
+}
+
+function encodeServerTextFrame(value) {
+  return encodeServerFrame(0x01, Buffer.from(JSON.stringify(value)));
 }
 
 function parseClientFrame(buffer) {
@@ -90,7 +102,7 @@ function parseClientFrame(buffer) {
   return { opcode: buffer[0] & 0x0f, payload, used: offset + length };
 }
 
-function followSnapshotUpgrade(modelSelection) {
+function followSnapshotUpgrade(modelSelection, { fragmented = false } = {}) {
   return (req, socket, head) => {
     assert.equal(req.url, "/api/remote.mux");
     const key = req.headers["sec-websocket-key"];
@@ -129,25 +141,51 @@ function followSnapshotUpgrade(modelSelection) {
         const values = modelSelection === null
           ? {}
           : { modelSelection: { lastUsed: modelSelection, next: modelSelection } };
-        socket.write(
-          encodeServerTextFrame({
-            type: "item",
-            streamId: message.streamId,
-            value: {
-              type: "snapshot",
-              header: { version: 1, id: "session-test", createdAt: 1, cwd: "/workspace", isSeeded: false },
-              cursor: 10,
-              records: [],
-              hasMore: false,
-              projections: { asOfSeq: 10, values },
-            },
-          }),
-        );
+        const response = {
+          type: "item",
+          streamId: message.streamId,
+          value: {
+            type: "snapshot",
+            header: { version: 1, id: "session-test", createdAt: 1, cwd: "/workspace", isSeeded: false },
+            cursor: 10,
+            records: [],
+            hasMore: false,
+            projections: { asOfSeq: 10, values },
+          },
+        };
+        if (fragmented) {
+          const payload = Buffer.from(JSON.stringify(response));
+          const split = Math.max(1, Math.floor(payload.length / 2));
+          socket.write(encodeServerFrame(0x01, payload.subarray(0, split), { fin: false }));
+          socket.write(encodeServerFrame(0x00, payload.subarray(split), { fin: true }));
+        } else {
+          socket.write(encodeServerTextFrame(response));
+        }
         return;
       }
     };
     socket.on("data", onData);
     if (buffered.length) onData(Buffer.alloc(0));
+  };
+}
+
+function oversizedFollowUpgrade() {
+  return (req, socket) => {
+    assert.equal(req.url, "/api/remote.mux");
+    const key = req.headers["sec-websocket-key"];
+    assert.ok(key);
+    const accept = createHash("sha1").update(key + WS_GUID).digest("base64");
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Upgrade: websocket\r\n" +
+        "Connection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    const header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 0x7f;
+    header.writeBigUInt64BE(128n * 1024n * 1024n, 2);
+    socket.end(header);
   };
 }
 
@@ -294,6 +332,63 @@ test("BrowserAuth generation resolves the pre-upgrade session and re-selects its
     "/api/session/list",
     "/api/session/selectModel",
   ]);
+});
+
+test("BrowserAuth generation accepts a fragmented opening session/follow snapshot", async () => {
+  const result = await withServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw);
+
+    if (body.method === "session/list") {
+      respond(res, body.rpcId, {
+        ok: true,
+        value: {
+          items: [{ sessionId: "session-test", updatedAt: 2, running: false, blank: false }],
+          hasMore: false,
+        },
+      });
+      return;
+    }
+
+    if (body.method === "session/selectModel") {
+      respond(res, body.rpcId, {
+        ok: true,
+        value: { selected: { provider: "provider-fragment", model: "model-fragment" } },
+      });
+      return;
+    }
+
+    res.writeHead(404).end();
+  }, (baseUrl) => runSmoke(baseUrl, { generation: "connection-browser-auth-v1" }), followSnapshotUpgrade({
+    provider: "provider-fragment",
+    model: "model-fragment",
+  }, { fragmented: true }));
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /recorded selection: provider-fragment\/model-fragment/);
+});
+
+test("BrowserAuth generation rejects an oversized session/follow WebSocket frame before allocation", async () => {
+  const result = await withServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw);
+    if (body.method === "session/list") {
+      respond(res, body.rpcId, {
+        ok: true,
+        value: {
+          items: [{ sessionId: "session-test", updatedAt: 2, running: false, blank: false }],
+          hasMore: false,
+        },
+      });
+      return;
+    }
+    res.writeHead(404).end();
+  }, (baseUrl) => runSmoke(baseUrl, { generation: "connection-browser-auth-v1", timeoutMs: 300 }), oversizedFollowUpgrade());
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /frame exceeds .* byte limit/i);
 });
 
 test("BrowserAuth generation fails a historical session whose selection cannot be recovered", async () => {
