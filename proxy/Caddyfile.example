@@ -5,9 +5,32 @@
   servers :9443 {
     protocols h1 h2
   }
+  servers :9444 {
+    protocols h1 h2
+  }
 }
 
+# Local / LAN path. Basic Auth is the only authentication input on this
+# listener, so a client-supplied identity-provider assertion cannot bypass the
+# local gateway fence.
 https://:9443 {
+  tls /run/certs/fullchain.pem /run/certs/privkey.pem
+
+  basic_auth {
+    {$DSH_LOCAL_USER} {$DSH_LOCAL_PASSWORD_HASH}
+  }
+
+  reverse_proxy 127.0.0.1:3080 {
+    header_up Host {$DSH_PUBLIC_HOST}
+    header_up X-Forwarded-Proto https
+    header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}
+  }
+}
+
+# Dedicated identity-aware path. The product compose does not publish this
+# listener on the host; a trusted tunnel / sidecar reaches it across the private
+# container network boundary. Only that path may present an Access assertion.
+https://:9444 {
   tls /run/certs/fullchain.pem /run/certs/privkey.pem
 
   @access header Cf-Access-Jwt-Assertion *
@@ -20,14 +43,6 @@ https://:9443 {
   }
 
   handle {
-    basic_auth {
-      {$DSH_LOCAL_USER} {$DSH_LOCAL_PASSWORD_HASH}
-    }
-
-    reverse_proxy 127.0.0.1:3080 {
-      header_up Host {$DSH_PUBLIC_HOST}
-      header_up X-Forwarded-Proto https
-      header_up X-DSH-Orbit-Authenticated-Proxy {$DSH_PROXY_AUTH}
-    }
+    respond "Unauthorized" 401
   }
 }

@@ -129,7 +129,7 @@ Examples are provided for:
 
 The examples intentionally separate a trusted access-provider path from a local/basic-auth path. Do not accept an access-provider assertion header directly from arbitrary clients.
 
-For Cloudflare Access deployments, point the tunnel directly at the loopback Caddy origin. If a separate LAN proxy also reaches Caddy, strip `Cf-Access-Jwt-Assertion` on that path as shown in the Nginx example.
+The Caddy example uses two distinct listeners so the identity boundary is explicit: `9443` is the host-published local/LAN Basic Auth path and never trusts `Cf-Access-Jwt-Assertion`; `9444` is the identity-aware Access path and is intentionally not host-published by the example Compose file. A Cloudflare Tunnel sidecar (or another trusted connector) should reach `9444` only across the private container network boundary. Do not publish `9444` to arbitrary local/LAN clients. If an additional LAN proxy is used, continue stripping `Cf-Access-Jwt-Assertion` there as shown in the Nginx example.
 
 ### 5. Smoke-test settings
 

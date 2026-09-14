@@ -52,6 +52,26 @@ test("the browser gateway example applies the same proof-injection contract", as
   assert.match(source, /header_up\s+X-Forwarded-Proto\s+https/);
 });
 
+test("the browser gateway keeps local Basic Auth separate from the identity-aware listener", async () => {
+  const source = await read(BROWSER_GATEWAY);
+  const localStart = source.indexOf("https://:9443");
+  const accessStart = source.indexOf("https://:9444");
+  assert.ok(localStart >= 0, "the local Basic Auth listener must remain on 9443");
+  assert.ok(accessStart > localStart, "the identity-aware listener must be a separate private listener on 9444");
+
+  const localBlock = source.slice(localStart, accessStart);
+  const accessBlock = source.slice(accessStart);
+  assert.match(localBlock, /basic_auth\s*\{/);
+  assert.doesNotMatch(
+    localBlock,
+    /Cf-Access-Jwt-Assertion/,
+    "the local/LAN path must never authenticate a client-supplied Access assertion",
+  );
+  assert.match(accessBlock, /@access\s+header\s+Cf-Access-Jwt-Assertion\s+\*/);
+  assert.doesNotMatch(accessBlock, /basic_auth\s*\{/);
+  assert.match(accessBlock, /respond\s+"Unauthorized"\s+401/);
+});
+
 test("the Hub and the Node route ingress strip client-supplied DSH proofs and hold no secret", async () => {
   for (const url of [ROUTE_PROXY, ROUTE_INGRESS]) {
     const source = await read(url);
@@ -98,6 +118,26 @@ test("the product compose actually loads the canonical adapter", async () => {
   );
 });
 
+test("Caddy sidecars keep only the capability their image requires to execute", async () => {
+  const compose = await read(COMPOSE_EXAMPLE);
+  const adapterStart = compose.indexOf("\n  dsh-compat-adapter:");
+  const gatewayStart = compose.indexOf("\n  caddy:", adapterStart);
+  const blocks = [
+    ["dsh-compat-adapter", compose.slice(adapterStart, gatewayStart)],
+    ["caddy", compose.slice(gatewayStart)],
+  ];
+
+  for (const [name, block] of blocks) {
+    assert.match(block, /cap_drop:\s*\n\s*- ALL/, `${name} must drop the default capability set`);
+    assert.match(
+      block,
+      /cap_add:\s*\n\s*- NET_BIND_SERVICE/,
+      `${name} must add back NET_BIND_SERVICE because the official Caddy binary carries that file capability and cannot exec after cap_drop: ALL without it`,
+    );
+    assert.match(block, /no-new-privileges:true/, `${name} must retain no-new-privileges`);
+  }
+});
+
 test("the adapter is published on the host loopback only, never publicly", async () => {
   const compose = await read(COMPOSE_EXAMPLE);
   const adapterStart = compose.indexOf("\n  dsh-compat-adapter:");
@@ -119,6 +159,11 @@ test("the adapter is published on the host loopback only, never publicly", async
     adapterPublish.length,
     1,
     "the shared namespace owner (dsh) must publish the adapter on host loopback exactly once",
+  );
+  assert.doesNotMatch(
+    dshBlock,
+    /^\s*-\s*"[^"]*:9444"\s*$/gm,
+    "the identity-aware 9444 listener must stay private to the container network and must not be host-published",
   );
   for (const line of compose.match(/^\s*-\s*"[^"]+"\s*$/gm) ?? []) {
     assert.match(
