@@ -994,8 +994,11 @@ async function main() {
   // --- 1. compose up ---
   prepareDrillProxySecret();
   if (composeUp || !existsSync(join(REPO, "data", "orbit-drill"))) {
-    sh(`docker compose -f ${COMPOSE} up -d --build`);
+    // Ownership is claimed before the command runs: compose creates the network
+    // and can start some services before it fails on a dependency, so the failure
+    // path must still tear down whatever the partial run left behind.
     stackStarted = true;
+    sh(`docker compose -f ${COMPOSE} up -d --build`);
     evidence.steps.push("compose: up (hub, caddy, dsh-a, dsh-b)");
   }
   const caddyContainer = sh(`docker compose -f ${COMPOSE} ps -q caddy`).trim().split("\n")[0];
