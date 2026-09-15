@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -39,6 +40,16 @@ test("E9 publication binds the SUPPORTED claim to the frozen executable and evid
   ]) {
     assert.match(attestation, new RegExp(value), `attestation must bind ${value}`);
   }
+  const frozenPackage = JSON.parse(execFileSync(
+    "git",
+    ["show", `${FROZEN_CANDIDATE}:package.json`],
+    { cwd: ROOT, encoding: "utf8" },
+  ));
+  assert.equal(frozenPackage.version, "0.4.1-rc.1");
+  assert.match(attestation, /formal E9 report.*orbit\.version.*0\.2\.0-snapshot/is);
+  assert.match(attestation, /qualified executable identity.*orbit\.revision.*d359a90165ad7bfeeee76d0dd47c2e5212ae6414/is);
+  assert.match(attestation, /metadata discrepancy.*does not change.*qualified executable.*E9 check outcomes/is);
+
   assert.match(attestation, /FINAL REVIEW: PASS - FREEZE APPROVED/);
   assert.match(attestation, /candidate.*PASS/is);
   assert.match(attestation, /verify.*PASS/is);
