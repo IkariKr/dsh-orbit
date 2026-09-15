@@ -189,6 +189,38 @@ function oversizedFollowUpgrade() {
   };
 }
 
+function oversizedControlFrameUpgrade() {
+  return (req, socket) => {
+    assert.equal(req.url, "/api/remote.mux");
+    const key = req.headers["sec-websocket-key"];
+    assert.ok(key);
+    const accept = createHash("sha1").update(key + WS_GUID).digest("base64");
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Upgrade: websocket\r\n" +
+        "Connection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    socket.end(encodeServerFrame(0x09, Buffer.alloc(126)));
+  };
+}
+
+function fragmentedControlFrameUpgrade() {
+  return (req, socket) => {
+    assert.equal(req.url, "/api/remote.mux");
+    const key = req.headers["sec-websocket-key"];
+    assert.ok(key);
+    const accept = createHash("sha1").update(key + WS_GUID).digest("base64");
+    socket.write(
+      "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Upgrade: websocket\r\n" +
+        "Connection: Upgrade\r\n" +
+        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+    socket.end(encodeServerFrame(0x09, Buffer.from("x"), { fin: false }));
+  };
+}
+
 test("re-selects the current model to exercise existing-session resume without changing selection", async () => {
   const calls = [];
   const result = await withServer(async (req, res) => {
@@ -389,6 +421,50 @@ test("BrowserAuth generation rejects an oversized session/follow WebSocket frame
 
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /frame exceeds .* byte limit/i);
+});
+
+test("BrowserAuth generation rejects oversized WebSocket control frames before payload handling", async () => {
+  const result = await withServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw);
+    if (body.method === "session/list") {
+      respond(res, body.rpcId, {
+        ok: true,
+        value: {
+          items: [{ sessionId: "session-test", updatedAt: 2, running: false, blank: false }],
+          hasMore: false,
+        },
+      });
+      return;
+    }
+    res.writeHead(404).end();
+  }, (baseUrl) => runSmoke(baseUrl, { generation: "connection-browser-auth-v1", timeoutMs: 300 }), oversizedControlFrameUpgrade());
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /control frame payload exceeds 125 bytes/i);
+});
+
+test("BrowserAuth generation rejects fragmented WebSocket control frames", async () => {
+  const result = await withServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw);
+    if (body.method === "session/list") {
+      respond(res, body.rpcId, {
+        ok: true,
+        value: {
+          items: [{ sessionId: "session-test", updatedAt: 2, running: false, blank: false }],
+          hasMore: false,
+        },
+      });
+      return;
+    }
+    res.writeHead(404).end();
+  }, (baseUrl) => runSmoke(baseUrl, { generation: "connection-browser-auth-v1", timeoutMs: 300 }), fragmentedControlFrameUpgrade());
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /fragmented control frame is invalid/i);
 });
 
 test("BrowserAuth generation fails a historical session whose selection cannot be recovered", async () => {

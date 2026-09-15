@@ -94,6 +94,9 @@ function parseServerFrame(buffer) {
   if (length > MAX_WS_MESSAGE_BYTES) {
     throw new Error(`frame exceeds ${MAX_WS_MESSAGE_BYTES} byte limit`);
   }
+  if (opcode >= 0x08 && length > 125) {
+    throw new Error("control frame payload exceeds 125 bytes");
+  }
   if (buffer.length < offset + length) return null;
   return {
     fin,
