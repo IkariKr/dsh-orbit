@@ -3,9 +3,9 @@
 **Current selected shipping baseline:** Orbit `v0.4.1` → DeepSeek Harness
 `0.1.5-rc.2`.
 
-**Qualification status:** pending release compatibility evidence. `0.1.5-rc.2` is
-the selected shipping baseline, not yet a published `SUPPORTED` version — see
-[Baseline Selection and Release Qualification](#baseline-selection-and-release-qualification).
+**Qualification status:** complete. `0.1.5-rc.2` is the selected `SUPPORTED`
+shipping baseline for Orbit `v0.4.1`; the post-freeze E9 evidence is recorded in
+[the v0.4.1 E9 qualification attestation](release-attestations/v0.4.1-e9-qualification.md).
 
 `0.1.1-rc.2` is retained as `LEGACY`: it is the historical `v0.4.0` baseline.
 The machine-readable form is `compatibilityProfiles` in
@@ -97,7 +97,7 @@ Orbit v0.4.0-rc.1
 
 Orbit v0.4.1
     |
-    +-- DSH 0.1.5-rc.2        selected shipping baseline (qualification pending)
+    +-- DSH 0.1.5-rc.2        SUPPORTED shipping baseline
 ```
 
 A new Orbit minor release may adopt a newer DSH baseline, and a patch release
@@ -222,7 +222,7 @@ DSH:
 0.1.5-rc.2
 
 Status:
-qualification pending
+SUPPORTED
 
 Retained:
 0.1.1-rc.2 (LEGACY)

@@ -14,7 +14,7 @@ Questions, deployment topologies, and upgrade experiences belong in [Discussions
 
 ## Status
 
-DSH Orbit `0.4.1-rc.1` selects DeepSeek Harness `0.1.5-rc.2` as its shipping baseline — selected, with qualification pending the E9 compatibility evidence run; `0.1.1-rc.2` remains a retained LEGACY profile (compatibility retained, capability eligible, not covered by the current release guarantee). The v0.4 Endpoint
+DSH Orbit `0.4.1-rc.1` selects DeepSeek Harness `0.1.5-rc.2` as its shipping baseline. The E9 release compatibility qualification is complete, so `0.1.5-rc.2` is published as `SUPPORTED`; `0.1.1-rc.2` remains a retained LEGACY profile (compatibility retained, capability eligible, not covered by the current release guarantee). See the [E9 qualification attestation](docs/release-attestations/v0.4.1-e9-qualification.md). The v0.4 Endpoint
 Selector release `v0.4.0-rc.1` was published as a pre-release after its final
 review passed; see the [tag and release notes](https://github.com/IkariKr/dsh-orbit/releases/tag/v0.4.0-rc.1).
 Production promotion is not authorized and requires a separate gate.

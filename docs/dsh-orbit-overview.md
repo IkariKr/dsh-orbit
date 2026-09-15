@@ -103,11 +103,11 @@ requirements.
 ## Compatibility posture
 
 - **One pinned baseline per release.** Orbit `v0.4.1` selects DSH `0.1.5-rc.2`,
-  and the release attestation records the upstream commit SHA and artifact
-  digests. Selection and qualification are separate steps: the baseline is
-  published as `SUPPORTED` only once its full release compatibility
-  qualification passes. `0.1.1-rc.2` — the `v0.4.0` baseline — is retained as
-  legacy so existing deployments keep working across the change.
+  and its full E9 release compatibility qualification has passed, so that
+  baseline is published as `SUPPORTED`. The release attestation records the
+  frozen Orbit candidate, pinned upstream commit, qualification-session
+  provenance, and evidence digests. `0.1.1-rc.2` — the `v0.4.0` baseline — is
+  retained as legacy so existing deployments keep working across the change.
 - **Capability binding, not just version matching.** Compatibility is version
   *and* validated capabilities, defined by `CAPABILITY_EVIDENCE` in
   `src/registry/capabilities.mjs`.

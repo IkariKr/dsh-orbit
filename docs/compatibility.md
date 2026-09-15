@@ -8,7 +8,7 @@ baseline is published as `SUPPORTED`.
 
 | DeepSeek Harness | DSH Orbit | Role | Connection patch generation | Release status |
 | --- | --- | --- | --- | --- |
-| `0.1.5-rc.2` | `v0.4.1` | Selected shipping baseline | `connection-browser-auth-v1` | Qualification pending |
+| `0.1.5-rc.2` | `v0.4.1` | Selected shipping baseline | `connection-browser-auth-v1` | `SUPPORTED` |
 | `0.1.1-rc.2` | `v0.4.0-rc.1` | Retained legacy | `connection-v1` | Legacy |
 
 The machine profile status and the published release status are two layers:
@@ -16,14 +16,15 @@ The machine profile status and the published release status are two layers:
 | Layer | `0.1.5-rc.2` | `0.1.1-rc.2` |
 | --- | --- | --- |
 | Profile `status` in `src/compatibility.mjs` | `tested` | `legacy` |
-| Published release status | qualification pending | `LEGACY` |
+| Published release status | `SUPPORTED` | `LEGACY` |
 
-`tested` means the release *selected* this baseline and the runtime recognizes
-its exact profile. It is not yet a published `SUPPORTED` claim: `SUPPORTED` is
-published only after the whole qualification list below passes for this
-baseline. What has been proven so far is transport and authentication
-compatibility — the browser-trust fence, BrowserAuth admission, and the
-`/api/remote.mux` event stream — against a real DSH process.
+`tested` means the release selected this baseline and the runtime recognizes
+its exact profile. For `0.1.5-rc.2`, the full E9 qualification list below has
+now passed against the frozen Orbit candidate, so the release status is
+published as `SUPPORTED`. The evidence binds source layout, settings,
+authorization, historical-session resume, plugin routes, and
+`/api/remote.mux` transport to the exact reviewed candidate; see the
+[E9 qualification attestation](release-attestations/v0.4.1-e9-qualification.md).
 
 `Legacy` is a previously validated baseline retained so existing deployments
 stay capability-granted and regression-checked for upgrade continuity; it is not

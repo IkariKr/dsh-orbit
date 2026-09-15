@@ -328,6 +328,7 @@ const requiredDocs = [
   "docs/sop/v0.4-production-promotion-rollback-plan.md",
   "docs/troubleshooting.md",
   "docs/release-attestations/v0.4-stage7-failure-hardening.md",
+  "docs/release-attestations/v0.4.1-e9-qualification.md",
 ];
 
 test("v0.4.1 candidate release identity declarations", async () => {
@@ -353,7 +354,8 @@ test("v0.4.1 candidate release identity declarations", async () => {
   const readme = await text("README.md");
   assert.match(readme, /0\.4\.1-rc\.1/);
   assert.match(readme, /0\.1\.5-rc\.2/);
-  assert.match(readme, /qualification pending/i, "the selected baseline must not be published as SUPPORTED before E9");
+  assert.match(readme, /0\.1\.5-rc\.2.*SUPPORTED/is, "the selected baseline must be published as SUPPORTED after E9");
+  assert.doesNotMatch(readme, /0\.1\.5-rc\.2[^\n]*qualification pending/i);
   assert.match(readme, /Reverse-connected nodes are not part of v0\.4/i);
 
   const roadmap = await text("docs/roadmap.md");
