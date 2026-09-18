@@ -359,7 +359,7 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
   } else {
     assert.equal(gitIsAncestor(authorizationRoot, current), true);
     const committed = execFileSync("git", ["diff", "--name-only", `${authorizationRoot}..HEAD`], { cwd: repo, encoding: "utf8" }).trim();
-    const committedPaths = committed ? committed.split(/\\r?\\n/).filter(Boolean) : [];
+    const committedPaths = committed ? committed.split(/\r?\n/).filter(Boolean) : [];
     assert.ok(committedPaths.length > 0, "frozen candidate must contain construction changes");
     assert.ok(committedPaths.every(allowed), `candidate paths outside allowlist: ${committedPaths.join(", ")}`);
     assert.equal(status, "", "frozen candidate worktree must be clean before evidence execution");
