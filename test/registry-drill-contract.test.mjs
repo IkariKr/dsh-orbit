@@ -66,7 +66,7 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(emitter, /runner-owned Firefox\/Selenium/);
   assert.doesNotMatch(emitter, /c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62/);
   assert.match(bridge, /runner-owned-firefox-selenium/);
-  assert.match(bridge, /page_load_strategy = "eager"/);
+  assert.match(bridge, /page_load_strategy = "none"/);
   assert.match(bridge, /challengeDigest/);
   assert.match(bridge, /cookieIsolationVerified/);
   assert.doesNotMatch(bridge, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);
