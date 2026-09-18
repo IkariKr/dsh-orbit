@@ -381,6 +381,7 @@ def run(args: argparse.Namespace) -> int:
         proxy_thread.start()
         proxy_port = proxy_server.server_address[1]
         options = Options()
+        options.page_load_strategy = "eager"
         options.add_argument("-profile")
         options.add_argument(str(profile_dir))
         options.set_preference("security.enterprise_roots.enabled", True)
