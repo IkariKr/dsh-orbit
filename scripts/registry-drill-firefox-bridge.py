@@ -28,9 +28,7 @@ from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.firefox.remote_connection import FirefoxRemoteConnection
 from selenium.webdriver.firefox.service import Service
-from selenium.webdriver.remote.client_config import ClientConfig
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -44,6 +42,10 @@ WEBDRIVER_COMMAND_TIMEOUT_SECONDS = 20
 class LocalConnectProxy(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
 
+    def __init__(self, server_address, handler_class, upstream_port: int):
+        self.upstream_port = upstream_port
+        super().__init__(server_address, handler_class)
+
 
 class ConnectHandler(socketserver.BaseRequestHandler):
     def handle(self):
@@ -54,7 +56,7 @@ class ConnectHandler(socketserver.BaseRequestHandler):
         target = request.split(b" ", 2)[1].decode("ascii", "replace")
         host, _, port_text = target.partition(":")
         port = int(port_text or "443")
-        upstream = socket.create_connection(("127.0.0.1", 8443), timeout=15)
+        upstream = socket.create_connection(("127.0.0.1", self.server.upstream_port), timeout=15)
         try:
             self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             sockets = [self.request, upstream]
@@ -354,6 +356,10 @@ def run(args: argparse.Namespace) -> int:
             stream.write(line + "\n")
 
     bindings = read_json(Path(args.bindings_path))
+    gateway_url = bindings.get("gatewayUrl")
+    parsed_gateway = urlparse(gateway_url or "")
+    if parsed_gateway.scheme != "https" or not parsed_gateway.port:
+        raise RuntimeError("gatewayUrl must contain an explicit HTTPS port")
     log("bindings-loaded")
     challenge = os.environ.get("DSH_ORBIT_BROWSER_CHALLENGE", "")
     if not challenge:
@@ -370,7 +376,7 @@ def run(args: argparse.Namespace) -> int:
     service = None
     proxy_server = None
     try:
-        proxy_server = LocalConnectProxy(("127.0.0.1", 0), ConnectHandler)
+        proxy_server = LocalConnectProxy(("127.0.0.1", 0), ConnectHandler, parsed_gateway.port)
         proxy_thread = threading.Thread(target=proxy_server.serve_forever, daemon=True)
         proxy_thread.start()
         proxy_port = proxy_server.server_address[1]
@@ -389,23 +395,7 @@ def run(args: argparse.Namespace) -> int:
         options.accept_insecure_certs = False
         log("starting-firefox")
         service = Service(resolve_geckodriver(), log_output=str(gecko_log))
-        service.start()
-        client_config = ClientConfig(
-            remote_server_addr=service.service_url,
-            keep_alive=True,
-            timeout=WEBDRIVER_COMMAND_TIMEOUT_SECONDS,
-        )
-        command_executor = FirefoxRemoteConnection(
-            service.service_url,
-            keep_alive=True,
-            ignore_proxy=options._ignore_local_proxy,
-            client_config=client_config,
-        )
-        driver = webdriver.Remote(
-            command_executor=command_executor,
-            options=options,
-            keep_alive=True,
-        )
+        driver = webdriver.Firefox(service=service, options=options)
         log("firefox-started")
         driver.set_page_load_timeout(60)
         wait = WebDriverWait(driver, WAIT_SECONDS, poll_frequency=POLL_SECONDS)
