@@ -191,6 +191,31 @@ def wait_for(wait: WebDriverWait, condition):
     return wait.until(condition)
 
 
+def wait_for_navigation_element(driver, by, value: str, label: str, log=None, timeout: int = 30):
+    try:
+        element = WebDriverWait(driver, timeout, poll_frequency=POLL_SECONDS).until(
+            EC.presence_of_element_located((by, value))
+        )
+    except WebDriverException as error:
+        try:
+            snapshot = driver.execute_script(
+                """
+                return {
+                  url: window.location.href,
+                  readyState: document.readyState,
+                  title: document.title,
+                  bodyPresent: Boolean(document.body),
+                };
+                """
+            )
+        except WebDriverException:
+            snapshot = {}
+        raise RuntimeError(f"{label} did not render before timeout: {snapshot!r}") from error
+    if log is not None:
+        log(f"{label}-ready:url={driver.current_url!r}:ready={driver.execute_script('return document.readyState')}")
+    return element
+
+
 def stop_owned_process(process, label: str) -> None:
     if process is None or process.poll() is not None:
         return
@@ -539,11 +564,12 @@ def run(args: argparse.Namespace) -> int:
             driver.get(authority_warmup.replace("https://", "https://operator:drill-password@", 1))
             log(f"authority-warmup-loaded:{label}")
             driver.get(warm_url)
+            wait_for_navigation_element(driver, By.TAG_NAME, "body", f"authority-{label}", log=log)
             log(f"authority-loaded:{label}")
         log("selector-load-start")
         driver.get(selector_url)
         log("selector-load-complete")
-        wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
+        wait_for_navigation_element(driver, By.ID, "selector-view", "selector", log=log)
         selector_snapshot = wait_for_selector_cards(driver, stop_path, expected=2, log=log)
         if selector_snapshot is False:
             return 0
@@ -563,7 +589,7 @@ def run(args: argparse.Namespace) -> int:
             return 0
         selector_open_a = True
         driver.get(selector_url)
-        wait_for(wait, EC.presence_of_element_located((By.ID, "selector-view")))
+        wait_for_navigation_element(driver, By.ID, "selector-view", "selector-reload", log=log)
         selector_snapshot = wait_for_selector_cards(driver, stop_path, expected=2, log=log)
         if selector_snapshot is False:
             return 0

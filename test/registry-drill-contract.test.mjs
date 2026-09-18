@@ -67,6 +67,10 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.doesNotMatch(emitter, /c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62/);
   assert.match(bridge, /runner-owned-firefox-selenium/);
   assert.match(bridge, /page_load_strategy = "none"/);
+  assert.match(bridge, /def wait_for_navigation_element\(/);
+  assert.match(bridge, /selector-load-complete/);
+  assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "selector-view", "selector"/);
+  assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "selector-view", "selector-reload"/);
   assert.ok(bridge.includes('driver.get(gateway + "/")'));
   assert.ok(bridge.includes('wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))'));
   assert.ok(bridge.includes('wait_for(wait, EC.presence_of_element_located((By.ID, "session-status")))'));
