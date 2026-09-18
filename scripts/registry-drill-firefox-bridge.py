@@ -153,27 +153,38 @@ def certificate_thumbprint(ca_path: Path) -> str:
     return result.stdout.strip().split("=", 1)[-1].replace(":", "").upper()
 
 
+def root_anchor_present(thumbprint: str) -> bool:
+    if os.name != "nt":
+        return False
+    probe = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", f"$ErrorActionPreference='Stop'; @(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {{$_.Thumbprint -eq '{thumbprint}'}}).Count"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=CERTUTIL_TIMEOUT_SECONDS,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return probe.returncode == 0 and probe.stdout.strip() == "1"
+
+
 def install_windows_root(ca_path: Path) -> tuple[str, bool]:
-    """Install only this drill CA into CurrentUser Root and report ownership."""
+    """Reuse a retained drill CA anchor; avoid crypt32 prompts during unattended runs."""
     thumbprint = certificate_thumbprint(ca_path)
-    # Do not probe the entire user Root store: on some Windows profiles a
-    # thumbprint lookup can block behind the certificate UI/store lock. The
-    # forced import is idempotent for this per-run CA and remains bounded.
+    if root_anchor_present(thumbprint):
+        return thumbprint, False
     installed = certutil_run(["-f", "-user", "-addstore", "Root", str(ca_path)])
     if installed.returncode != 0:
         raw_detail = installed.stderr or installed.stdout or b"certutil addstore failed"
         detail = raw_detail.decode(errors="replace").strip().splitlines()[-1][:240]
         raise RuntimeError(f"certutil addstore failed ({installed.returncode}): {detail}")
-    return thumbprint, True
+    return thumbprint, False
 
 
 def remove_windows_root(thumbprint: str, owned: bool) -> None:
-    if not owned:
-        return
-    try:
-        certutil_run(["-user", "-delstore", "Root", thumbprint])
-    except RuntimeError:
-        pass
+    # Retain the drill anchor by policy: deleting a Root anchor can trigger a
+    # crypt32 confirmation dialog and strand unattended subsequent runs.
+    return
 
 
 def wait_for(wait: WebDriverWait, condition):
