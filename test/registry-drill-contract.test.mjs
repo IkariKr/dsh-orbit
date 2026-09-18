@@ -76,6 +76,9 @@ test("Stage 8 candidate tooling requires explicit current external runtime ident
     "DSH_ORBIT_DRILL_DSH_COMMIT",
     "DSH_ORBIT_DRILL_DSH_CLI_SHA256",
   ]) assert.match(source, new RegExp(variable));
+  for (const variable of ["DSH_ORBIT_DRILL_GATEWAY_PORT", "DSH_ORBIT_DRILL_NODE_A_PORT", "DSH_ORBIT_DRILL_NODE_B_PORT"]) {
+    assert.match(source, new RegExp(variable));
+  }
   assert.match(source, /is required for candidate-bound mounted evidence/);
   assert.doesNotMatch(source, /0\\.4\\.0-rc\\.1/);
   assert.doesNotMatch(source, /0\\.1\\.1-rc\\.2/);

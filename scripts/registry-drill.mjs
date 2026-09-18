@@ -35,9 +35,13 @@ import { REQUIRED_MOUNTED_MATRIX_FIELDS, emptyMountedMatrix, assertMountedMatrix
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const COMPOSE = "docker-registry/drill.compose.yaml";
-const HUB_URL = "http://127.0.0.1:5445/";
+const HUB_PORT = process.env.DSH_ORBIT_DRILL_HUB_PORT ?? "5445";
+const GATEWAY_PORT = process.env.DSH_ORBIT_DRILL_GATEWAY_PORT ?? "8443";
+const NODE_A_PORT = process.env.DSH_ORBIT_DRILL_NODE_A_PORT ?? "18443";
+const NODE_B_PORT = process.env.DSH_ORBIT_DRILL_NODE_B_PORT ?? "18444";
+const HUB_URL = `http://127.0.0.1:${HUB_PORT}/`;
 const ROUTE_DOMAIN_HOST = "dsh-orbit.test";
-const ROUTE_DOMAIN = `${ROUTE_DOMAIN_HOST}:8443`;
+const ROUTE_DOMAIN = `${ROUTE_DOMAIN_HOST}:${GATEWAY_PORT}`;
 const ROUTE_GATEWAY_TOKEN = "drill-proxy-secret";
 const DRILL_ORBIT_VERSION = process.env.DSH_ORBIT_DRILL_ORBIT_VERSION;
 const DRILL_DSH_VERSION = process.env.DSH_ORBIT_DRILL_DSH_VERSION;
@@ -47,7 +51,7 @@ const DRILL_DSH_CLI_SHA256 = process.env.DSH_ORBIT_DRILL_DSH_CLI_SHA256;
 // compose bridge (the Hub process itself stays loopback-only).
 const NODE_HUB_URL = "https://registry-hub:5446/";
 const NODE_HUB_CA_PATH = "/etc/caddy/tls/ca.crt";
-const GATEWAY_URL = "https://127.0.0.1:8443";
+const GATEWAY_URL = `https://127.0.0.1:${GATEWAY_PORT}`;
 const ROUTE_GATEWAY_URL = GATEWAY_URL;
 const AUTH = `Basic ${Buffer.from("operator:drill-password").toString("base64")}`;
 const DRILL_PROXY_SECRET = "drill-proxy-secret";
@@ -1084,8 +1088,8 @@ async function main() {
     await startNode(name, dataHome, name);
     return nodeId;
   }
-  const aNodeId = await deployNode("dsh-a", "/data/dsh-a", "https://127.0.0.1:18443", 18443);
-  const bNodeId = await deployNode("dsh-b", "/data/dsh-b", "https://127.0.0.1:18444", 18444);
+  const aNodeId = await deployNode("dsh-a", "/data/dsh-a", `https://127.0.0.1:${NODE_A_PORT}`, Number(NODE_A_PORT));
+  const bNodeId = await deployNode("dsh-b", "/data/dsh-b", `https://127.0.0.1:${NODE_B_PORT}`, Number(NODE_B_PORT));
   const authorityA = routeAuthority(aNodeId);
   const authorityB = routeAuthority(bNodeId);
   const routeTargetA = "https://dsh-a:9444";
