@@ -192,6 +192,13 @@
       "delete or move historical refs"
     ]
   },
+  "subsequentConstructionAuthorization": {
+    "authorizationId": "S8-CONSTRUCTION-20260918-A1",
+    "status": "AUTHORIZED_FOR_STAGE8_CONSTRUCTION",
+    "record": "docs/release-attestations/v0.4-stage8-construction-authorization-2026-09-18.json",
+    "governancePredecessor": "2a1f41a734e0395615ab0ae1ee41173e257a42ec",
+    "effect": "supersedes only the pre-authorization construction stop; historical reconciliation findings and release contradictions remain unchanged"
+  },
   "stopConditions": [
     "No Stage 8 candidate selected",
     "No runtime construction started",

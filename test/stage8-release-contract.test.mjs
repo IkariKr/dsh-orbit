@@ -214,7 +214,7 @@ test("Stage 8 docs do not introduce forbidden feature scope", async () => {
   assert.doesNotMatch(source, /new (?:runtime )?(?:backup|restore) CLI/i);
 });
 
-test("Stage 8 provenance reconciliation remains stopped before construction", async () => {
+test("Stage 8 provenance reconciliation historical record remains fail-closed", async () => {
   const report = await text("docs/release-attestations/v0.4-stage8-provenance-reconciliation-2026-09-18.md");
   const ledger = JSON.parse(await text("docs/release-attestations/v0.4-stage8-provenance-ledger-2026-09-18.json"));
   assert.match(report, /Provenance reconciliation: HOLD/);
@@ -245,4 +245,87 @@ test("Stage 8 provenance reconciliation remains stopped before construction", as
   assert.match(ledger.releaseContradictions[0].classification, /contradiction/);
   assert.ok(ledger.stopConditions.includes("No runtime construction started"));
   assert.ok(ledger.stopConditions.includes("No tag/release mutation"));
+  assert.equal(ledger.subsequentConstructionAuthorization.authorizationId, "S8-CONSTRUCTION-20260918-A1");
+  assert.equal(ledger.subsequentConstructionAuthorization.status, "AUTHORIZED_FOR_STAGE8_CONSTRUCTION");
+  assert.match(ledger.subsequentConstructionAuthorization.effect, /supersedes only the pre-authorization construction stop/);
+  assert.match(report, /later, separately reviewed construction authorization now exists/);
+});
+
+test("Stage 8 construction authorization is explicit, bounded, and non-self-referential", async () => {
+  const report = await text("docs/release-attestations/v0.4-stage8-construction-authorization-2026-09-18.md");
+  const auth = JSON.parse(await text("docs/release-attestations/v0.4-stage8-construction-authorization-2026-09-18.json"));
+  const expectedMatrix = [
+    "routeTargetsConfiguredAB",
+    "routeTargetsPersisted",
+    "eligibilityAB",
+    "selectorListsAB",
+    "selectorOpenA",
+    "selectorOpenB",
+    "httpRootA",
+    "httpRootB",
+    "staticAssetA",
+    "staticAssetB",
+    "websocketUpgradeA",
+    "websocketUpgradeB",
+    "websocketPingPongA",
+    "websocketPingPongB",
+    "cookieIsolation",
+    "nodeContextIsolation",
+    "gatewayRestartRecovery",
+    "hubRestartRecovery",
+    "nodeAFailClosedOutage",
+    "nodeBHealthyDuringAOutage",
+    "dshLossAndRecovery",
+    "bookmarkFailClosed",
+    "sameNodeIdReenroll",
+    "freshHubRouteIdentity",
+    "deleteBookmarkAndReenroll",
+  ];
+
+  assert.equal(auth.authorizationId, "S8-CONSTRUCTION-20260918-A1");
+  assert.equal(auth.status, "AUTHORIZED_FOR_STAGE8_CONSTRUCTION");
+  assert.equal(auth.acceptedRuntimeBase, "de8eb467a844ef56191f629cdecc6879e561d90a");
+  assert.equal(auth.governancePredecessor, "2a1f41a734e0395615ab0ae1ee41173e257a42ec");
+  assert.equal(auth.constructionLineage.candidateSelected, false);
+  assert.equal(auth.constructionLineage.candidateMustBeFrozenBeforeEvidence, true);
+  assert.equal(auth.candidateScope.runtimeSemanticChangesForbidden, true);
+  for (const forbidden of [
+    "src/**",
+    "bin/**",
+    "ui/**",
+    "docker-registry/compose.example.yaml",
+    "docker-registry/Caddyfile.example",
+  ]) {
+    assert.ok(auth.candidateScope.forbiddenProductPaths.includes(forbidden), `missing forbidden product path ${forbidden}`);
+  }
+  assert.ok(auth.candidateScope.candidateForbiddenPaths.includes("test/evidence/stage8/**"));
+  assert.ok(auth.candidateScope.candidateForbiddenPaths.includes("docs/release-attestations/v0.4.0-rc.x.md"));
+  assert.equal(auth.evidenceHarness.wholeCommitCherryPickForbidden, true);
+  assert.equal(auth.evidenceHarness.minimumHarnessMustBeRebuilt, true);
+  assert.deepEqual(auth.mountedMatrix.requiredFields, expectedMatrix);
+  assert.equal(auth.mountedMatrix.requiredCount, expectedMatrix.length);
+  assert.equal(expectedMatrix.length, 25);
+  assert.equal(auth.diffGates.candidateToClosure.directChildRequired, true);
+  assert.deepEqual(auth.diffGates.candidateToClosure.allowedPaths, [
+    "docs/release-attestations/v0.4.0-rc.x.md",
+    "test/evidence/stage8/**",
+  ]);
+  assert.equal(auth.diffGates.candidateToClosure.allOtherPathsForbidden, true);
+  assert.equal(auth.closureRules.closureShaSelfReferenceForbidden, true);
+  assert.equal(auth.closureRules.closureShaRecordedExternallyAfterCommit, true);
+  assert.ok(auth.runResidueHygiene.forbiddenBeforeClosureCommit.includes("data/**"));
+  for (const blocked of ["canonical E9", "P3", "tag or release creation/mutation", "production promotion"]) {
+    assert.ok(auth.notAuthorized.includes(blocked), `authorization must continue to block ${blocked}`);
+  }
+  assert.equal(auth.finalReview.required, true);
+  assert.equal(auth.finalReview.tagReleaseAuthorizationSeparate, true);
+  assert.equal(auth.finalReview.productionPromotionAuthorizationSeparate, true);
+
+  assert.match(report, /AUTHORIZED FOR STAGE 8 CONSTRUCTION/);
+  assert.match(report, /pushed commit containing this\s+authorization record/);
+  assert.match(report, /25 exact fields/);
+  assert.match(report, /direct evidence-only closure child/);
+  assert.match(report, /must not\s+require or predict its own closure Git SHA/);
+  assert.match(report, /return to implementation\/security remediation/);
+  assert.match(report, /Tag\/release and production promotion each require\s+separate explicit authorization/);
 });

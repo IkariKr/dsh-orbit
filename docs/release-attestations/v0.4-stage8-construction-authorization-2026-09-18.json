@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "authorizationId": "S8-CONSTRUCTION-20260918-A1",
+  "status": "AUTHORIZED_FOR_STAGE8_CONSTRUCTION",
+  "issuedDate": "2026-09-18",
+  "acceptedRuntimeBase": "de8eb467a844ef56191f629cdecc6879e561d90a",
+  "governancePredecessor": "2a1f41a734e0395615ab0ae1ee41173e257a42ec",
+  "constructionLineage": {
+    "root": "the pushed commit containing this authorization record",
+    "mustDescendFromRuntimeBase": true,
+    "mustDescendFromGovernancePredecessor": true,
+    "candidateSelected": false,
+    "candidateMustBeFrozenBeforeEvidence": true
+  },
+  "objective": "Stage 8 release closure only; no product feature or runtime semantic expansion",
+  "authorizedActions": [
+    "create a new isolated branch/worktree from the pushed authorization-record commit",
+    "reconstruct the minimum non-product Stage 8 evidence harness",
+    "make release-closing docs/configuration/SOP/test changes within the candidate allowlist",
+    "freeze one exact candidate commit",
+    "run automated, Docker, browser, mounted, and evidence-emitter checks against the frozen candidate",
+    "create one direct evidence-only closure child of the candidate",
+    "push the candidate and evidence closure for independent Final Review"
+  ],
+  "candidateScope": {
+    "allowedPathRules": [
+      "CHANGELOG.md",
+      "README.md",
+      "package.json: version metadata only; dependency changes require an authorization amendment",
+      "package-lock.json: only mechanically resulting version metadata; dependency graph changes require an authorization amendment",
+      "docs/** except docs/release-attestations/v0.4.0-rc.x.md",
+      "test/** except test/evidence/stage8/**",
+      "scripts/stage8-mounted-matrix.mjs",
+      "scripts/emit-stage8-mounted-evidence.mjs",
+      "scripts/registry-drill-firefox-bridge.py",
+      "scripts/registry-drill.mjs: harness-only changes; no product runtime semantics",
+      "docker-registry/drill.compose.yaml",
+      "docker-registry/drill.Caddyfile",
+      "docker-registry/dsh-drill.Caddyfile"
+    ],
+    "forbiddenProductPaths": [
+      "src/**",
+      "bin/**",
+      "ui/**",
+      "docker-registry/compose.example.yaml",
+      "docker-registry/Caddyfile.example"
+    ],
+    "candidateForbiddenPaths": [
+      "test/evidence/stage8/**",
+      "docs/release-attestations/v0.4.0-rc.x.md"
+    ],
+    "runtimeSemanticChangesForbidden": true,
+    "ifRuntimeChangeIsRequired": "STOP Stage 8 and return to implementation/security remediation review"
+  },
+  "evidenceHarness": {
+    "historicalE85Use": "design/input only",
+    "wholeCommitCherryPickForbidden": true,
+    "minimumHarnessMustBeRebuilt": true,
+    "allowedHarnessPaths": [
+      "scripts/stage8-mounted-matrix.mjs",
+      "scripts/emit-stage8-mounted-evidence.mjs",
+      "scripts/registry-drill-firefox-bridge.py",
+      "scripts/registry-drill.mjs",
+      "docker-registry/drill.compose.yaml",
+      "docker-registry/drill.Caddyfile",
+      "docker-registry/dsh-drill.Caddyfile",
+      "test/** excluding test/evidence/stage8/**"
+    ]
+  },
+  "mountedMatrix": {
+    "requiredCount": 25,
+    "requiredFields": [
+      "routeTargetsConfiguredAB",
+      "routeTargetsPersisted",
+      "eligibilityAB",
+      "selectorListsAB",
+      "selectorOpenA",
+      "selectorOpenB",
+      "httpRootA",
+      "httpRootB",
+      "staticAssetA",
+      "staticAssetB",
+      "websocketUpgradeA",
+      "websocketUpgradeB",
+      "websocketPingPongA",
+      "websocketPingPongB",
+      "cookieIsolation",
+      "nodeContextIsolation",
+      "gatewayRestartRecovery",
+      "hubRestartRecovery",
+      "nodeAFailClosedOutage",
+      "nodeBHealthyDuringAOutage",
+      "dshLossAndRecovery",
+      "bookmarkFailClosed",
+      "sameNodeIdReenroll",
+      "freshHubRouteIdentity",
+      "deleteBookmarkAndReenroll"
+    ]
+  },
+  "candidateEvidenceGate": {
+    "requiredArtifacts": [
+      "fresh-install.json",
+      "migration.json",
+      "backup-restore.json",
+      "two-node-mounted-smoke.json",
+      "mounted-runner-raw.json",
+      "promotion-plan-validation.json",
+      "manifest.json"
+    ],
+    "freshRunBindingsRequired": [
+      "candidate SHA",
+      "runId",
+      "node IDs",
+      "timestamps",
+      "browser challenge/bindings",
+      "TLS/CA/leaf fingerprints",
+      "artifact SHA-256",
+      "artifact byte counts"
+    ],
+    "historicalRebindingForbidden": true
+  },
+  "diffGates": {
+    "governanceRootToCandidate": {
+      "mustContainNoStage8Evidence": true,
+      "mustContainNoReleaseAttestation": true,
+      "mustContainNoForbiddenProductPath": true
+    },
+    "candidateToClosure": {
+      "directChildRequired": true,
+      "allowedPaths": [
+        "docs/release-attestations/v0.4.0-rc.x.md",
+        "test/evidence/stage8/**"
+      ],
+      "allOtherPathsForbidden": true
+    }
+  },
+  "closureRules": {
+    "attestationMayReferenceCandidateSha": true,
+    "attestationMayReferenceParentRuntimeBase": true,
+    "closureShaSelfReferenceForbidden": true,
+    "closureShaRecordedExternallyAfterCommit": true
+  },
+  "runResidueHygiene": {
+    "forbiddenBeforeClosureCommit": [
+      "data/**",
+      "browser checkpoint files",
+      "unexpected untracked files"
+    ],
+    "closureWorkingTreeMayContainOnly": [
+      "docs/release-attestations/v0.4.0-rc.x.md",
+      "test/evidence/stage8/**"
+    ]
+  },
+  "notAuthorized": [
+    "v0.5 feature work",
+    "reverse connection or NAT traversal",
+    "new selector/route mechanism",
+    "new DSH compatibility profile",
+    "product runtime semantic changes",
+    "canonical E9",
+    "P3",
+    "tag or release creation/mutation",
+    "production promotion"
+  ],
+  "finalReview": {
+    "required": true,
+    "tagReleaseAuthorizationSeparate": true,
+    "productionPromotionAuthorizationSeparate": true,
+    "failureRequiresNewCandidateAndFreshCandidateBoundEvidence": true
+  }
+}
