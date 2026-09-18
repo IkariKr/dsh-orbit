@@ -213,3 +213,27 @@ test("Stage 8 docs do not introduce forbidden feature scope", async () => {
   assert.doesNotMatch(source, /feature\s+work\s+added/i);
   assert.doesNotMatch(source, /new (?:runtime )?(?:backup|restore) CLI/i);
 });
+
+test("Stage 8 provenance reconciliation remains stopped before construction", async () => {
+  const report = await text("docs/release-attestations/v0.4-stage8-provenance-reconciliation-2026-09-18.md");
+  const ledger = JSON.parse(await text("docs/release-attestations/v0.4-stage8-provenance-ledger-2026-09-18.json"));
+  assert.match(report, /Provenance reconciliation: HOLD/);
+  assert.match(report, /Stage 8 candidate: NOT SELECTED/);
+  assert.match(report, /Stage 8 construction: NOT AUTHORIZED/);
+  assert.match(report, /v0\.4\.0-rc\.1/);
+  assert.match(report, /Final Review: NOT YET PERFORMED/);
+  assert.match(report, /E8\.3/);
+  assert.match(report, /E8\.5/);
+  assert.match(report, /de8eb467a844ef56191f629cdecc6879e561d90a/);
+  assert.match(report, /must be rebuilt/i);
+  assert.doesNotMatch(report, /Stage 8: NOT STARTED/);
+  assert.match(report, /historical wording `Stage 7 acceptance: HOLD`/);
+  assert.match(report, /current\s+independent review disposition accepts `de8eb467`/);
+  assert.equal(ledger.status, "PROVENANCE RECONCILIATION HOLD");
+  assert.equal(ledger.candidate.selected, false);
+  assert.ok(ledger.histories.some((item) => item.id === "root-e8.3" && item.status === "HOLD"));
+  assert.ok(ledger.histories.some((item) => item.id === "e8.5" && item.classification.includes("historical")));
+  assert.match(ledger.releaseContradictions[0].classification, /contradiction/);
+  assert.ok(ledger.stopConditions.includes("No runtime construction started"));
+  assert.ok(ledger.stopConditions.includes("No tag/release mutation"));
+});

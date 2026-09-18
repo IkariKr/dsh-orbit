@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Stage 8 provenance reconciliation before any new construction",
+  "status": "PROVENANCE RECONCILIATION HOLD",
+  "acceptedStage7Base": {
+    "commit": "de8eb467a844ef56191f629cdecc6879e561d90a",
+    "remoteRef": "origin/chore/v0.4-stage7-corrective-evidence",
+    "runtimeChangesInThisReconciliation": false
+  },
+  "candidate": {
+    "selected": false,
+    "reason": "No existing Stage 8 ref is a descendant of de8eb467; historical evidence is exact-commit bound and cannot be inherited."
+  },
+  "stage7BaseWordingReconciliation": {
+    "acceptedBase": "de8eb467a844ef56191f629cdecc6879e561d90a",
+    "historicalAttestationWording": "Stage 7 acceptance: HOLD",
+    "currentIndependentReview": "Stage 7 PASS / CLOSED",
+    "classification": "disclosed wording discrepancy; not silently rewritten by Stage 8 reconciliation"
+  },
+  "histories": [
+    {
+      "id": "root-e8.3",
+      "ref": "chore/v0.4-stage8-release-closure",
+      "tip": "56fde226cc34e8963985190c22bc60ac73684bb6",
+      "parent": "90312b66ce6f084ae10890313d71cd4bc19244f2",
+      "parentStage7Evidence": "b8bdbbda91180b91005f9344aa28fa029cf37df2",
+      "testedCandidateCommit": "90312b66ce6f084ae10890313d71cd4bc19244f2",
+      "physicalMountedGate": "BLOCKED_BROWSER_LIFECYCLE_CHECKPOINT_MISSING",
+      "status": "HOLD",
+      "classification": "historical/quarantined; must rebuild for a new candidate"
+    },
+    {
+      "id": "e8.4",
+      "ref": "chore/v0.4-stage8-e8.4-mounted-pass",
+      "tip": "4e587b11bc7543709c0d4e0670969e13ebe477b1",
+      "parent": "31ff371aa366c1f39ada79c0dc7e8ac05faef6a4",
+      "parentStage7Evidence": "b8bdbbda91180b91005f9344aa28fa029cf37df2",
+      "testedCandidateCommit": "31ff371aa366c1f39ada79c0dc7e8ac05faef6a4",
+      "physicalMountedGate": "PASS",
+      "status": "READY_FOR_INDEPENDENT_FINAL_REVIEW",
+      "classification": "historical/quarantined; design input only because later final contract requires runner raw evidence"
+    },
+    {
+      "id": "e8.5",
+      "ref": "v0.4.0-rc.1",
+      "tagObject": "95440e3d0d836e707b2f836dfe71dd4bde49dcf1",
+      "tip": "89204e026c5478f6591525eb1c6e5d364cbeb857",
+      "parent": "a263e7592d0726dd3c30895e27469a30f94b1768",
+      "parentStage7Evidence": "0dc00ceb3b0574e2a6bd81eb62502fd6c2e233f3",
+      "testedCandidateCommit": "a263e7592d0726dd3c30895e27469a30f94b1768",
+      "physicalMountedGate": "PASS",
+      "runId": "634cda14-8291-46af-8b4f-4316c83f1331",
+      "status": "PASS-looking historical closure; Final Review authorization not independently evidenced",
+      "classification": "historical/quarantined; exact evidence cannot be rebound to a new candidate"
+    },
+    {
+      "id": "e8.5-authority-tip",
+      "ref": "chore/v0.4-stage8-authority-boundary-c8.4",
+      "tip": "7b10435a9749fbb66712c2b2fbcad42cf219c918",
+      "parent": "f2ba703488ba91e1094e4c24f7697651ad8d244d",
+      "testedCandidateCommit": "a263e7592d0726dd3c30895e27469a30f94b1768",
+      "physicalMountedGate": "PASS inherited from E8.5",
+      "status": "historical authority-boundary line",
+      "classification": "quarantined; not a new evidence closure for its later code"
+    },
+    {
+      "id": "e8.5-contract-only",
+      "ref": "chore/v0.4-stage8-release-closure-e7.3",
+      "tip": "c1ace3a75a0eb38982e17da29dbeb108b3834874",
+      "parent": "09ee7e054bd2925277c27761f9fcfa1a5e2d2c81",
+      "testedCandidateCommit": null,
+      "physicalMountedGate": null,
+      "status": "contract-only change",
+      "classification": "design/input only; not evidence"
+    },
+    {
+      "id": "e8.2-side-branch",
+      "ref": "chore/v0.4-stage8-c8.2.4",
+      "tip": "82e173b3f1fedff58136c18ac867e4a1386fd1db",
+      "parentStage7Evidence": "b8bdbbda91180b91005f9344aa28fa029cf37df2",
+      "testedCandidateCommit": "73f6d7d6a8518200a9b522a2a5706d36af992190",
+      "physicalMountedGate": "BLOCKED_DOCKER_ENGINE_UNAVAILABLE",
+      "status": "HOLD",
+      "classification": "competing historical side branch; must rebuild"
+    }
+  ],
+  "releaseContradictions": [
+    {
+      "object": "v0.4.0-rc.1",
+      "actual": "annotated tag object exists and peels to 89204e0",
+      "attestation": "Tag: NOT CREATED; Final Review: NOT YET PERFORMED; no authorization granted",
+      "classification": "unresolved historical tag/attestation contradiction; do not delete or move tag"
+    },
+    {
+      "object": "main/public release line",
+      "actual": "3b9a28f merged the authority line and 7a8bdf1 contains public release wording",
+      "attestation": "the same release closure still states Final Review not performed and no authorization",
+      "classification": "unresolved merge/public wording contradiction; not authorization proof"
+    }
+  ],
+  "evidenceReuse": {
+    "reusableAsHistoricalDesignInput": [
+      "authority-boundary implementation patterns",
+      "mounted browser lifecycle scenarios",
+      "25-field mounted matrix",
+      "raw-to-emitted evidence binding rules",
+      "release-contract assertions",
+      "promotion-plan structure"
+    ],
+    "mustRebuildForAnyNewCandidate": [
+      "fresh-install.json",
+      "migration.json",
+      "backup-restore.json",
+      "two-node-mounted-smoke.json",
+      "mounted-runner-raw.json",
+      "promotion-plan-validation.json",
+      "manifest.json",
+      "release attestation",
+      "final closure hashes"
+    ],
+    "forbidden": [
+      "rewrite an old candidate SHA in JSON",
+      "reuse an old runId or node IDs",
+      "reuse old raw evidence for a new candidate",
+      "treat the existing v0.4.0-rc.1 tag as authorization",
+      "delete or move historical refs"
+    ]
+  },
+  "stopConditions": [
+    "No Stage 8 candidate selected",
+    "No runtime construction started",
+    "No Docker/browser/mounted drill run",
+    "No tag/release mutation",
+    "No canonical E9",
+    "No P3",
+    "No production promotion",
+    "Independent authorization and final-review record not established"
+  ]
+}
