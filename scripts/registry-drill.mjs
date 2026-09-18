@@ -49,7 +49,8 @@ const DRILL_DSH_COMMIT = process.env.DSH_ORBIT_DRILL_DSH_COMMIT;
 const DRILL_DSH_CLI_SHA256 = process.env.DSH_ORBIT_DRILL_DSH_CLI_SHA256;
 // Nodes reach the Hub through the PRIVATE machine ingress on the
 // compose bridge (the Hub process itself stays loopback-only).
-const NODE_HUB_URL = "http://registry-hub:5446/";
+const NODE_HUB_URL = "https://registry-hub:5446/";
+const NODE_HUB_CA_PATH = "/etc/caddy/tls/ca.crt";
 const GATEWAY_URL = `https://127.0.0.1:${GATEWAY_PORT}`;
 const ROUTE_GATEWAY_URL = GATEWAY_URL;
 const AUTH = `Basic ${Buffer.from("operator:drill-password").toString("base64")}`;
@@ -714,6 +715,7 @@ const waitFor = async (label, fn, { attempts = 40, intervalMs = 3000 } = {}) => 
 const nodeEnv = (dataHome, name = null) => ({
   DSH_ORBIT_NODE_STATE: `${dataHome}/orbit-node.json`,
   DSH_ORBIT_HUB_URL: NODE_HUB_URL,
+  DSH_ORBIT_NODE_CA_CERT: NODE_HUB_CA_PATH,
   DSH_ORBIT_NODE_ORBIT_VERSION: DRILL_ORBIT_VERSION,
   DSH_ORBIT_NODE_ORBIT_REVISION: REVISION,
   DSH_ORBIT_NODE_DSH_VERSION: DRILL_DSH_VERSION,

@@ -49,16 +49,18 @@ services:
     depends_on:
       - registry-hub
     read_only: true
-    environment:
-      DSH_ORBIT_MACHINE_INGRESS_TLS_KEY: /data/orbit/tls/tls.key
-      DSH_ORBIT_MACHINE_INGRESS_TLS_CERT: /data/orbit/tls/tls.crt
     volumes:
       - ../data/orbit-drill:/data/orbit:ro
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     command:
       - node
-      - /opt/dsh-orbit/bin/dsh-orbit-machine-ingress.mjs
+      - --input-type=module
+      - -e
+      - >-
+        import { createMachineIngressServer } from '/opt/dsh-orbit/src/registry/machine-ingress.mjs';
+        const server = createMachineIngressServer({ listenPort: 5447, upstream: 'http://127.0.0.1:5445' });
+        server.listen(5447, '0.0.0.0', () => console.log('drill machine ingress listening on 5447'));
 
   caddy:
     image: caddy:2-alpine

@@ -31,8 +31,9 @@ test("mounted drill requires trusted browser evidence and real compatibility rep
   assert.match(source, /aging reset healed A without heartbeat/);
   assert.doesNotMatch(source, /Object\.fromEntries\(/);
   assert.doesNotMatch(source, /rejectUnauthorized:\s*false/);
-  assert.match(source, /NODE_HUB_URL = "http:\/\/registry-hub:5446\//);
-  assert.doesNotMatch(source, /NODE_HUB_URL = "https:\/\/registry-hub:5446\//);
+  assert.match(source, /NODE_HUB_URL = "https:\/\/registry-hub:5446\//);
+  assert.doesNotMatch(source, /NODE_HUB_URL = "http:\/\/registry-hub:5446\//);
+  assert.match(source, /DSH_ORBIT_NODE_CA_CERT: NODE_HUB_CA_PATH/);
 });
 
 test("mounted drill keeps the RFC production thresholds explicit", async () => {

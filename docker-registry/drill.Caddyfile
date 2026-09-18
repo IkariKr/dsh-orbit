@@ -12,6 +12,11 @@
     https_port 8443
 }
 
+https://:5446 {
+    tls /etc/caddy/tls/tls.crt /etc/caddy/tls/tls.key
+    reverse_proxy 127.0.0.1:5447
+}
+
 https://:8443 {
     @machine path /api/v1/*
     handle @machine {
