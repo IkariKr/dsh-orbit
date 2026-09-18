@@ -80,6 +80,8 @@ test("Stage 8 candidate tooling requires explicit current external runtime ident
     assert.match(source, new RegExp(variable));
   }
   assert.match(source, /is required for candidate-bound mounted evidence/);
+  assert.match(source, /port: Number\(GATEWAY_PORT\)/);
+  assert.doesNotMatch(source, /port: 8443/);
   assert.doesNotMatch(source, /0\\.4\\.0-rc\\.1/);
   assert.doesNotMatch(source, /0\\.1\\.1-rc\\.2/);
 });

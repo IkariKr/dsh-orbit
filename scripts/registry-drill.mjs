@@ -534,7 +534,7 @@ function connectRouteTls(authority) {
   return new Promise((resolve, reject) => {
     const socket = tls.connect({
       host: "127.0.0.1",
-      port: 8443,
+      port: Number(GATEWAY_PORT),
       servername: authority.split(":")[0],
       ca: readFileSync(DRILL_CA_PATH),
       rejectUnauthorized: true,
@@ -673,7 +673,7 @@ function gatewayFetch(path, { method = "GET", headers = {}, body, cookie = null,
 // policy): the driver probes it from INSIDE the hub container.
 function hubGetHealth() {
   try {
-    exec("registry-hub", ["sh", "-c", `node -e "const {get}=require('node:http');get({hostname:'127.0.0.1',port:5445,path:'/',headers:{host:'127.0.0.1:8443'}},r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"`]);
+    exec("registry-hub", ["sh", "-c", `node -e "const {get}=require('node:http');get({hostname:'127.0.0.1',port:5445,path:'/',headers:{host:'127.0.0.1:${GATEWAY_PORT}'}},r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"`]);
     return Promise.resolve(200);
   } catch {
     return Promise.resolve(0);
@@ -1123,7 +1123,7 @@ async function main() {
         nodeIds: [aNodeId, bNodeId],
         openUrls: { a: `https://${authorityA}/`, b: `https://${authorityB}/` },
         selectorUrl: `https://${ROUTE_DOMAIN}/`,
-        port: 8443,
+        port: Number(GATEWAY_PORT),
         recordedAt: new Date().toISOString(),
       }, null, 2) + "\n",
       { encoding: "utf8", mode: 0o640 },
