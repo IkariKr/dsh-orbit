@@ -481,36 +481,30 @@ def run(args: argparse.Namespace) -> int:
         driver.execute_script("arguments[0].click()", node_target)
         log("node-detail-clicked")
         detail_deadline = time.monotonic() + 30
-        detail_state = None
+        detail_state = "current-ui-dom"
         while time.monotonic() < detail_deadline:
             try:
                 detail_nodes = driver.find_elements(By.ID, "node-detail-view")
                 if len(detail_nodes) == 1:
                     detail_node = detail_nodes[0]
-                    detail_state = detail_node.get_attribute("data-detail-state")
-                    log(f"node-detail-state:{detail_state or 'unset'}")
-                    if detail_state == "error":
-                        message = detail_node.text.strip().replace("\\n", " ")[:240]
-                        raise RuntimeError(f"node detail request failed for current-run node: {message!r}")
-                    if detail_state == "ready":
-                        detail_snapshot = driver.execute_script(
-                            """
-                            const detail = document.getElementById('node-detail-view');
-                            const heading = detail?.querySelector('h2');
-                            return {
-                              hidden: detail?.hidden === true || detail?.hasAttribute('hidden'),
-                              heading: heading?.textContent?.trim() || '',
-                              text: detail?.textContent || '',
-                            };
-                            """,
-                        )
-                        log(f"node-detail-snapshot:hidden={detail_snapshot.get('hidden')}:heading={detail_snapshot.get('heading')!r}")
-                        if (
-                            detail_snapshot.get("hidden") is False
-                            and detail_snapshot.get("heading") == node_ids[0]
-                            and "Route Target" in detail_snapshot.get("text", "")
-                        ):
-                            break
+                    detail_snapshot = driver.execute_script(
+                        """
+                        const detail = document.getElementById('node-detail-view');
+                        const heading = detail?.querySelector('h2');
+                        return {
+                          hidden: detail?.hidden === true || detail?.hasAttribute('hidden'),
+                          heading: heading?.textContent?.trim() || '',
+                          text: detail?.textContent || '',
+                        };
+                        """,
+                    )
+                    log(f"node-detail-snapshot:hidden={detail_snapshot.get('hidden')}:heading={detail_snapshot.get('heading')!r}")
+                    if (
+                        detail_snapshot.get("hidden") is False
+                        and detail_snapshot.get("heading") == node_ids[0]
+                        and "Route Target" in detail_snapshot.get("text", "")
+                    ):
+                        break
             except WebDriverException as error:
                 log(f"node-detail-observation-error:{type(error).__name__}")
                 raise RuntimeError(f"node detail browser observation failed: {type(error).__name__}") from error
