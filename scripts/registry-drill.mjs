@@ -49,8 +49,7 @@ const DRILL_DSH_COMMIT = process.env.DSH_ORBIT_DRILL_DSH_COMMIT;
 const DRILL_DSH_CLI_SHA256 = process.env.DSH_ORBIT_DRILL_DSH_CLI_SHA256;
 // Nodes reach the Hub through the PRIVATE machine ingress on the
 // compose bridge (the Hub process itself stays loopback-only).
-const NODE_HUB_URL = "https://registry-hub:5446/";
-const NODE_HUB_CA_PATH = "/etc/caddy/tls/ca.crt";
+const NODE_HUB_URL = "http://registry-hub:5446/";
 const GATEWAY_URL = `https://127.0.0.1:${GATEWAY_PORT}`;
 const ROUTE_GATEWAY_URL = GATEWAY_URL;
 const AUTH = `Basic ${Buffer.from("operator:drill-password").toString("base64")}`;
@@ -685,7 +684,7 @@ function hubGetHealth() {
 // accepting connections again; Hub authentication remains fail-closed.
 function machineIngressGetHealth(nodeService = "dsh-a") {
   try {
-    exec(nodeService, ["sh", "-c", `node -e "const fs=require('node:fs'),https=require('node:https');https.get({hostname:'registry-hub',port:5446,path:'/api/v1/heartbeat',ca:fs.readFileSync('/etc/caddy/tls/ca.crt'),servername:'registry-hub',rejectUnauthorized:true},r=>{r.resume();process.exit(r.statusCode>=400&&r.statusCode<500?0:1)}).on('error',()=>process.exit(1))"`]);
+    exec(nodeService, ["sh", "-c", `node -e "const http=require('node:http');http.get({hostname:'registry-hub',port:5446,path:'/api/v1/heartbeat'},r=>{r.resume();process.exit(r.statusCode>=400&&r.statusCode<500?0:1)}).on('error',()=>process.exit(1))"`]);
     return Promise.resolve(200);
   } catch {
     return Promise.resolve(0);
@@ -715,7 +714,6 @@ const waitFor = async (label, fn, { attempts = 40, intervalMs = 3000 } = {}) => 
 const nodeEnv = (dataHome, name = null) => ({
   DSH_ORBIT_NODE_STATE: `${dataHome}/orbit-node.json`,
   DSH_ORBIT_HUB_URL: NODE_HUB_URL,
-  DSH_ORBIT_NODE_CA_CERT: NODE_HUB_CA_PATH,
   DSH_ORBIT_NODE_ORBIT_VERSION: DRILL_ORBIT_VERSION,
   DSH_ORBIT_NODE_ORBIT_REVISION: REVISION,
   DSH_ORBIT_NODE_DSH_VERSION: DRILL_DSH_VERSION,
