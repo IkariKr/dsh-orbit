@@ -229,11 +229,13 @@ test("Stage 8 provenance reconciliation remains stopped before construction", as
   assert.doesNotMatch(report, /Stage 8: NOT STARTED/);
   assert.match(report, /historical wording `Stage 7 acceptance: HOLD`/);
   assert.match(report, /current\s+independent review disposition accepts `de8eb467`/);
-  assert.match(report, /No independently verifiable Final Review PASS/);
+  assert.match(report, /historical release action exists/);
+  assert.match(report, /authorization\s+provenance is contradictory\/not independently verifiable/);
   assert.match(report, /merge `3b9a28f`/);
   assert.match(report, /`7a8bdf1` states/);
+  assert.match(report, /PR #6/);
   assert.equal(ledger.status, "PROVENANCE RECONCILIATION HOLD");
-  assert.equal(ledger.independentFinalReviewSearch.status, "NOT FOUND");
+  assert.equal(ledger.independentFinalReviewSearch.status, "NOT_INDEPENDENTLY_VERIFIABLE");
   assert.equal(ledger.mainlinePublicReconciliation.mergeCommit, "3b9a28fc88dcf05a5037aeff61bf1a3f62518592");
   assert.equal(ledger.candidateLineageDecision.newCandidateRequired, true);
   assert.ok(ledger.e85ReuseDecision.mustRebuild.includes("mounted-runner-raw.json"));

@@ -85,17 +85,36 @@
     }
   ],
   "independentFinalReviewSearch": {
-    "status": "NOT FOUND",
-    "searchScope": "all local refs, remote refs, tags, commit messages, tracked release documents, reflogs, and pull-request merge refs available in the repository",
+    "status": "NOT_INDEPENDENTLY_VERIFIABLE",
+    "searchScope": "all local refs, remote refs, tags, commit messages, tracked release documents, reflogs, GitHub release metadata, and pull-request metadata available to the audit",
     "requiredRecord": "independent Stage 8 Final Review PASS plus explicit tag/release authorization",
-    "result": "No independently verifiable Final Review PASS or release authorization record was found."
+    "historicalReleaseBodyClaim": "E8.5 Final Review: PASS; tag: created; published: true",
+    "contradictoryAttestation": "Final Review: NOT YET PERFORMED; Tag: NOT CREATED; no authorization granted",
+    "pullRequestReviewDecision": "empty",
+    "result": "A historical release action and release-body claim exist, but no independent reviewer approval/authorization record is independently verifiable."
   },
   "mainlinePublicReconciliation": {
     "mergeCommit": "3b9a28fc88dcf05a5037aeff61bf1a3f62518592",
+    "mergeCommitDate": "2026-09-11T14:38:26Z",
     "publicWordingCommit": "7a8bdf123efc24e619e00439cd8290c890333026",
     "publicClaim": "v0.4.0-rc.1 released as a pre-release after final review passed",
     "attestationClaim": "Final Review NOT YET PERFORMED; no tag/publication/promotion authorization granted",
-    "classification": "unresolved contradiction; public wording is not authorization evidence"
+    "githubRelease": {
+      "tag": "v0.4.0-rc.1",
+      "publishedAt": "2026-09-11T12:43:03Z",
+      "isDraft": false,
+      "isPrerelease": true,
+      "releaseBodyClaim": "E8.5 Final Review: PASS; tag: created; published: true",
+      "url": "https://github.com/IkariKr/dsh-orbit/releases/tag/v0.4.0-rc.1"
+    },
+    "pullRequest": {
+      "number": 6,
+      "mergeCommit": "3b9a28fc88dcf05a5037aeff61bf1a3f62518592",
+      "state": "MERGED",
+      "reviewDecision": "",
+      "title": "Stage 9.0: promote the v0.4 release line to main"
+    },
+    "formalDisposition": "historical release action exists, but authorization provenance is contradictory and no independently verifiable reviewer approval record was found; retain immutable history without retroactive authorization"
   },
   "candidateLineageDecision": {
     "mustStartFrom": "de8eb467a844ef56191f629cdecc6879e561d90a",
