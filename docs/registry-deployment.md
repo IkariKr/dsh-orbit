@@ -1,4 +1,4 @@
-# Registry deployment and operations (v0.3, SOP Stages 6–8)
+# Registry deployment and operations (v0.4.0-rc.2, SOP Stages 6–8)
 
 This stage connects Hub, Node, Gateway and DSH for real. The
 automated multi-node E2E (`test/registry-multinode-e2e.test.mjs`)
@@ -102,9 +102,8 @@ for real container/browser evidence.
 ## Gate B and Stage 7 status
 
 Review Gate B was approved after the remediation evidence package. Stage 7 is
-complete and accepted. The Stage 8 release candidate is documentation-only and
-is awaiting final review; no tag, publication, or production promotion has
-occurred.
+complete and accepted. The `v0.4.0-rc.2` Stage 8 release candidate is awaiting independent Final
+Review; no tag, publication, or production promotion is authorized or claimed.
 
 The remediation mounted run from clean commit
 `2f713e8bbd023ac49080bd2da44023c4a31323db` completed the trusted-browser,
@@ -125,7 +124,7 @@ running containers after compose build/start.
 Review Gate B is **approved**. Stage 7 is complete and accepted; see
 `docs/release-attestations/v0.3-stage7-operational-hardening.md` for the
 operator-grade evidence. Stage 8 remains at its final-review stop point; see
-`docs/release-attestations/v0.3.0-rc.1.md`.
+The new `v0.4.0-rc.2` attestation is created only in the evidence-only closure after fresh mounted evidence; the historical v0.3 attestation remains unchanged.
 
 ## Stage 3 Wildcard route authority gateway
 

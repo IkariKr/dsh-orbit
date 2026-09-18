@@ -1,8 +1,9 @@
 # DSH Orbit configuration reference
 
-This reference consolidates the accepted v0.3 Registry configuration and the
-v0.4 construction-stage additions that have already passed their architecture
-contract. v0.4 settings remain subject to the multistage construction gates in
+This reference consolidates the accepted Registry configuration and the
+v0.4.0-rc.2 release-closing additions covered by the accepted architecture and
+construction authorization. v0.4 settings remain bound to the multistage gates
+and fresh candidate evidence in
 [`docs/sop/v0.4-endpoint-selector-multistage-sop.md`](sop/v0.4-endpoint-selector-multistage-sop.md).
 See [`docs/sop/v0.3-operator-sop.md`](sop/v0.3-operator-sop.md) for the stable
 v0.3 procedures and [`docs/registry-mvp.md`](registry-mvp.md) for the v0.3
@@ -41,7 +42,7 @@ surface and must not be routed through the browser gateway. See
 | `DSH_ORBIT_ENROLL_TOKEN` | for `enroll` | none | One-time plaintext enrollment token; never persisted. |
 | `DSH_ORBIT_REENROLL_TOKEN` | for `reenroll` | none | Tombstone-bound operator token; recovery is explicit, never automatic. |
 | `DSH_ORBIT_NODE_HEARTBEAT_SECONDS` | no | `60` | Heartbeat cadence, bounded to 30–300 seconds. |
-| `DSH_ORBIT_NODE_ORBIT_VERSION` | no | `0.3.0` | Runtime identity reported to the Hub. |
+| `DSH_ORBIT_NODE_ORBIT_VERSION` | no | `0.4.0-rc.2` for the release candidate | Runtime identity reported to the Hub; the mounted run must bind the exact candidate value. |
 | `DSH_ORBIT_NODE_ORBIT_REVISION` | no | unset | Orbit revision reported to the Hub. |
 | `DSH_ORBIT_NODE_DSH_VERSION` | no | empty | DSH version reported to the Hub. |
 | `DSH_ORBIT_NODE_DSH_PROFILE` | no | unset | Compatibility profile reported to the Hub. |
@@ -63,7 +64,7 @@ runbook at [`docs/sop/v0.3-node-enrollment-sop.md`](sop/v0.3-node-enrollment-sop
 
 | Variable | Required | Default | Meaning and constraints |
 | --- | --- | --- | --- |
-| `DSH_ORBIT_REGISTRY_TAG` | yes | none | Registry deployment image tag. It must be explicitly bound to an RC or release image tag, such as `v0.3.0-rc.1`; if unset, deployment must fail closed. The Stage 6 construction tag `v0.3.0-s6` is not permitted. |
+| `DSH_ORBIT_REGISTRY_TAG` | yes | none | Registry deployment image tag. It must be explicitly bound to an RC or release image tag, such as `v0.4.0-rc.2`; if unset, deployment must fail closed. Historical construction tags are not permitted. |
 
 - Terminate TLS at the authenticated gateway.
 - Inject the Hub assertion and operator principal only after authentication.

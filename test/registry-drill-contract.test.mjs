@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+const ROOT = new URL("../", import.meta.url);
+const text = async (path) => readFile(new URL(path, ROOT), "utf8");
 const DRIVER = new URL("../scripts/registry-drill.mjs", import.meta.url);
+const MATRIX = new URL("../scripts/stage8-mounted-matrix.mjs", import.meta.url);
+const EMITTER = new URL("../scripts/emit-stage8-mounted-evidence.mjs", import.meta.url);
+const BRIDGE = new URL("../scripts/registry-drill-firefox-bridge.py", import.meta.url);
 
 test("mounted drill requires trusted browser evidence and real compatibility reports", async () => {
   const source = await readFile(DRIVER, "utf8");
@@ -34,4 +39,44 @@ test("mounted drill keeps the RFC production thresholds explicit", async () => {
   assert.match(source, /HEARTBEAT_MISSED_BEATS = 3/);
   assert.match(source, /HEARTBEAT_LOST_MS = 24 \* 60 \* 60 \* 1000/);
   assert.match(source, /productionThresholdsUnchanged: true/);
+});
+
+test("Stage 8 harness freezes the exact matrix and raw evidence contract", async () => {
+  const matrix = await readFile(MATRIX, "utf8");
+  const driver = await readFile(DRIVER, "utf8");
+  const emitter = await readFile(EMITTER, "utf8");
+  const bridge = await readFile(BRIDGE, "utf8");
+  assert.match(matrix, /REQUIRED_MOUNTED_MATRIX_FIELDS = Object\.freeze\(\[/);
+  assert.match(matrix, /Object\.keys\(matrix\)\.sort\(\)/);
+  assert.match(matrix, /requirePass && matrix\[field\] !== "PASS"/);
+  assert.match(driver, /kind: "stage8-mounted-runner-raw"/);
+  assert.match(driver, /producer: "registry-drill-runner"/);
+  assert.match(driver, /candidateCommit: REVISION/);
+  assert.match(driver, /assertMountedMatrixShape\(evidence\.requiredMatrix, \{ requirePass: true \}\)/);
+  assert.match(driver, /producer: "runner-owned-firefox-selenium"/);
+  assert.match(driver, /challengeDigest/);
+  assert.match(emitter, /raw\.commit !== revision/);
+  assert.match(emitter, /rawEvidenceSha256/);
+  assert.match(emitter, /rawEvidenceBytes/);
+  assert.match(emitter, /assertMountedMatrixShape\(raw\.requiredMatrix, \{ requirePass: true \}\)/);
+  assert.match(emitter, /nodeIds\.length !== 2/);
+  assert.match(emitter, /runner-owned Firefox\/Selenium/);
+  assert.doesNotMatch(emitter, /c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62/);
+  assert.match(bridge, /runner-owned-firefox-selenium/);
+  assert.match(bridge, /challengeDigest/);
+  assert.match(bridge, /cookieIsolationVerified/);
+  assert.doesNotMatch(bridge, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);
+});
+
+test("Stage 8 candidate tooling requires explicit current external runtime identity", async () => {
+  const source = await readFile(DRIVER, "utf8");
+  for (const variable of [
+    "DSH_ORBIT_DRILL_ORBIT_VERSION",
+    "DSH_ORBIT_DRILL_DSH_VERSION",
+    "DSH_ORBIT_DRILL_DSH_COMMIT",
+    "DSH_ORBIT_DRILL_DSH_CLI_SHA256",
+  ]) assert.match(source, new RegExp(variable));
+  assert.match(source, /is required for candidate-bound mounted evidence/);
+  assert.doesNotMatch(source, /0\\.4\\.0-rc\\.1/);
+  assert.doesNotMatch(source, /0\\.1\\.1-rc\\.2/);
 });

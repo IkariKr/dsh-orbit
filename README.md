@@ -8,14 +8,15 @@ The project focuses on secure remote access, upgrade compatibility, and multi-no
 
 ## Status
 
-DSH Orbit `0.3.0` targets DeepSeek Harness `0.1.1-rc.2`. The v0.3 Registry
-MVP release candidate is `v0.3.0-rc.1`, awaiting final review; it is not yet
-tagged, published, or promoted.
+DSH Orbit `0.4.0-rc.2` targets the accepted DeepSeek Harness compatibility
+baseline `0.1.1-rc.2`. This v0.4 release candidate is awaiting independent
+Stage 8 Final Review; it is not tagged, published, or promoted.
 
-The v0.3 release provides the deployment and compatibility layer plus the
-implemented private Registry Hub/Node control plane. The DSH configuration
-plane remains behind an authenticated reverse proxy and the Registry machine
-surface remains private.
+The v0.4 candidate provides the deployment and compatibility layer, the
+private Registry Hub/Node control plane, and the bounded Endpoint Selector
+routing closure for server-reachable nodes. The DSH configuration plane
+remains behind an authenticated reverse proxy and the Registry machine surface
+remains private. Reverse-connected nodes and NAT traversal remain v0.5 scope.
 
 Release documentation:
 
@@ -26,6 +27,7 @@ Release documentation:
 - [Registry backup/restore SOP](docs/sop/v0.3-registry-backup-restore-sop.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [v0.3.0-rc.1 attestation](docs/release-attestations/v0.3.0-rc.1.md)
+- v0.4.0-rc.2 candidate: attestation is emitted only in the evidence-only closure after the mounted run and before independent Final Review.
 
 The first release provides the deployment and compatibility layer needed to expose the DSH configuration plane behind an authenticated reverse proxy without publishing the DSH service directly.
 

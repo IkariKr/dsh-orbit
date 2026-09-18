@@ -6,6 +6,19 @@ The project follows Semantic Versioning once the public API and deployment contr
 
 ## Unreleased
 
+### 0.4.0-rc.2 candidate - 2026-09-18
+
+### Added
+
+- the bounded v0.4 Endpoint Selector release-closure candidate for server-reachable DSH nodes, including deterministic selector/node authorities, Hub-derived eligibility, route-target management, opaque HTTP/WebSocket routing, host-only cookie isolation, and fail-closed node lifecycle handling;
+- release-closing operator documentation, authority-boundary design, promotion/rollback planning, and candidate-bound evidence harness contracts;
+- a fresh candidate/evidence provenance chain rooted in the authorized Stage 8 construction lineage.
+
+### Release status
+
+- `v0.4.0-rc.2` is awaiting independent Stage 8 Final Review. It is not tagged, published, or promoted to production.
+- Reverse-connected nodes and NAT traversal remain v0.5 scope.
+
 ### 0.3.0-rc.1 candidate - 2026-09-02
 
 ### Added

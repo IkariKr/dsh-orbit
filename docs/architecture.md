@@ -89,9 +89,9 @@ not advertise capabilities, and reports do not restore heartbeat contact. See
 `docs/registry-mvp.md`, `docs/registry-deployment.md`, and the frozen RFCs for
 the contract details.
 
-## Proposed v0.4 routing architecture
+## Implemented v0.4 Endpoint Selector & Routing Architecture
 
-v0.4 is intentionally a thin routing layer over the accepted Registry rather than a DSH-aware control plane. The proposal is documented in `docs/rfc/0010-node-endpoint-and-routing.md`, `docs/rfc/0011-browser-node-selection.md`, and `docs/sop/v0.4-endpoint-selector-multistage-sop.md`.
+v0.4 is a thin routing layer over the accepted Registry rather than a DSH-aware control plane. The architecture is documented in `docs/rfc/0010-node-endpoint-and-routing.md`, `docs/rfc/0011-browser-node-selection.md`, and `docs/sop/v0.4-endpoint-selector-multistage-sop.md`; release-closing acceptance remains bound to the exact `v0.4.0-rc.2` candidate and fresh evidence.
 
 The selector lives at one familiar authority such as `dsh.example.com`. Selecting a node navigates to a deterministic authority such as `n-<node-id-hex>.dsh.example.com`; wildcard DNS/TLS terminates at the same Orbit deployment. Host-based selection keeps DSH at `/`, keeps browser authorities isolated per node, and avoids a mutable global active-node session.
 
@@ -99,10 +99,11 @@ The Hub stores one operator-approved server-reachable route target per node. It 
 
 A failed node route never fails over to another node. Reverse-connected nodes, NAT traversal, multi-node sessions, and fleet execution remain later milestones.
 
-## Explicitly out of scope for the implemented v0.3 release
+## Explicitly out of scope for the v0.4.0-rc.2 candidate
 
-Endpoint routing, reverse connections, multi-node sessions, fleet execution,
-and third-party plugin compatibility remain outside the implemented v0.3 MVP.
-The v0.4 documents above are design proposals only until architecture review
-passes. Existing third-party compatibility debt remains freeze-only. See
+Reverse connections, NAT traversal, multi-node concurrent sessions, fleet
+execution, and third-party plugin compatibility remain outside this candidate.
+The v0.4 implementation is limited to server-reachable nodes and remains at the
+Stage 8 independent Final Review stop until its fresh candidate-bound evidence
+is accepted. Existing third-party compatibility debt remains freeze-only. See
 `docs/roadmap.md` and `docs/third-party-debt.md`.

@@ -1,12 +1,13 @@
 # Mounted deployment drill (Gate B live evidence). Runs the REAL
 # topology on Docker Desktop:
 #   browser --TLS--> caddy (hub netns) --127.0.0.1:5445--> hub
-#   dsh-a / dsh-b (bridge, own netns) --private machine ingress--> hub
+#   dsh-a / dsh-b (bridge, own netns) --verified HTTPS private machine ingress--> hub
 #
 # The Hub process binds 127.0.0.1:5445 exclusively (frozen listener
-# policy intact). The machine-ingress sidecar lives in the Hub's
-# network namespace, listens on the compose bridge (5446) and proxies
-# to the loopback listener — the documented private machine boundary.
+# policy intact). The machine-ingress sidecar lives in the Hub's network
+# namespace, listens over verified HTTPS on the compose bridge (5446), and
+# proxies over loopback HTTP to the Hub listener — the documented private
+# machine boundary.
 
 services:
   registry-hub:
@@ -18,6 +19,10 @@ services:
       DSH_ORBIT_HUB_GATEWAY_SECRET: ${DSH_ORBIT_HUB_GATEWAY_SECRET:-drill-gateway-secret}
       DSH_ORBIT_HUB_OPERATOR_PRINCIPAL: operator
       DSH_ORBIT_HUB_TRUSTED_SCHEME: https
+      DSH_ORBIT_HUB_MANAGEMENT_AUTHORITY: 127.0.0.1:8443
+      DSH_ORBIT_HUB_ROUTE_DOMAIN: dsh-orbit.test:8443
+      DSH_ORBIT_HUB_CA_CERT: /data/orbit/tls/ca.crt
+      DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS: "1"
       DSH_ORBIT_HUB_DRILL_AGING: "1"
       DSH_ORBIT_HUB_DRILL_AGING_CLOCK: /data/orbit/drill-aging-clock
     user: "1000:1000"
@@ -44,6 +49,11 @@ services:
     depends_on:
       - registry-hub
     read_only: true
+    environment:
+      DSH_ORBIT_MACHINE_INGRESS_TLS_KEY: /data/orbit/tls/tls.key
+      DSH_ORBIT_MACHINE_INGRESS_TLS_CERT: /data/orbit/tls/tls.crt
+    volumes:
+      - ../data/orbit-drill:/data/orbit:ro
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     command:
@@ -86,6 +96,7 @@ services:
     environment:
       DSH_PUBLIC_HOST: dsh-a.test
       DSH_PROXY_AUTH: drill-proxy-secret
+      DSH_DRILL_NODE: A
     volumes:
       - ./dsh-drill.Caddyfile:/etc/caddy/Caddyfile:ro
       - ../data/orbit-drill/tls:/etc/caddy/tls:ro
@@ -116,11 +127,19 @@ services:
       HOME: /data/dsh-a
       DSH_PUBLIC_HOST: dsh-a.test
       DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
+      DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: "9444"
+      DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0"
+      DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test:8443
+      DSH_ORBIT_NODE_DSH_TARGET: http://127.0.0.1:3081
+      DSH_ORBIT_NODE_CA_CERT: /etc/caddy/tls/ca.crt
+      DSH_ORBIT_NODE_ROUTE_TLS_KEY: /etc/caddy/tls/tls.key
+      DSH_ORBIT_NODE_ROUTE_TLS_CERT: /etc/caddy/tls/tls.crt
       DSH_PROFILE_ROOT: /data/dsh-a/profiles/web
       DSH_PROFILE_CONNECTION_ROOT: /data/dsh-a/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib
     volumes:
       - dsh-a-data:/data/dsh-a
       - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+      - ../data/orbit-drill/tls:/etc/caddy/tls:ro
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=128m
@@ -152,6 +171,7 @@ services:
     environment:
       DSH_PUBLIC_HOST: dsh-b.test
       DSH_PROXY_AUTH: drill-proxy-secret
+      DSH_DRILL_NODE: B
     volumes:
       - ./dsh-drill.Caddyfile:/etc/caddy/Caddyfile:ro
       - ../data/orbit-drill/tls:/etc/caddy/tls:ro
@@ -182,11 +202,19 @@ services:
       HOME: /data/dsh-b
       DSH_PUBLIC_HOST: dsh-b.test
       DSH_PROXY_AUTH_FILE: /run/secrets/dsh_proxy_auth
+      DSH_ORBIT_NODE_ROUTE_INGRESS_PORT: "9445"
+      DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN: "0.0.0.0"
+      DSH_ORBIT_NODE_ROUTE_DOMAIN: dsh-orbit.test:8443
+      DSH_ORBIT_NODE_DSH_TARGET: http://127.0.0.1:3081
+      DSH_ORBIT_NODE_CA_CERT: /etc/caddy/tls/ca.crt
+      DSH_ORBIT_NODE_ROUTE_TLS_KEY: /etc/caddy/tls/tls.key
+      DSH_ORBIT_NODE_ROUTE_TLS_CERT: /etc/caddy/tls/tls.crt
       DSH_PROFILE_ROOT: /data/dsh-b/profiles/web
       DSH_PROFILE_CONNECTION_ROOT: /data/dsh-b/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib
     volumes:
       - dsh-b-data:/data/dsh-b
       - ../secrets/dsh_proxy_auth:/run/secrets/dsh_proxy_auth:ro
+      - ../data/orbit-drill/tls:/etc/caddy/tls:ro
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=128m

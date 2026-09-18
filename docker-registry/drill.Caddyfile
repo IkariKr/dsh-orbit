@@ -24,6 +24,8 @@ https://:8443 {
             operator $2a$14$bsm0UM/r9TDI0b70bwS.LuMKOadTMk3N1TSjSmlDtbpzmByVxEFqG
         }
         reverse_proxy 127.0.0.1:5445 {
+            header_up Host {http.request.hostport}
+            header_up -X-Forwarded-Host
             header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
             header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
         }
@@ -34,6 +36,8 @@ https://:8443 {
             operator $2a$14$bsm0UM/r9TDI0b70bwS.LuMKOadTMk3N1TSjSmlDtbpzmByVxEFqG
         }
         reverse_proxy 127.0.0.1:5445 {
+            header_up Host {http.request.hostport}
+            header_up -X-Forwarded-Host
             header_up X-DSH-Authenticated-Proxy {$DSH_ORBIT_HUB_GATEWAY_SECRET}
             header_up X-DSH-Operator-Id {$DSH_ORBIT_HUB_OPERATOR_PRINCIPAL}
         }

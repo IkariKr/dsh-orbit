@@ -86,8 +86,8 @@ test("Registry Compose requires an explicit release image tag", async () => {
   const config = await text("docs/configuration-reference.md");
   assert.match(config, /`DSH_ORBIT_REGISTRY_TAG`/);
   assert.match(config, /Required.*Default.*Meaning and constraints/s);
-  assert.match(config, /explicitly bound.*v0\.3\.0-rc\.1.*fail closed/s);
-  assert.match(config, /v0\.3\.0-s6.*not permitted/s);
+  assert.match(config, /explicitly bound.*v0\.4\.0-rc\.2.*fail closed/s);
+  assert.match(config, /Historical construction tags are not permitted/s);
 });
 
 test("Node enrollment SOP carries configuration through every CLI lifecycle", async () => {
@@ -328,4 +328,41 @@ test("Stage 8 construction authorization is explicit, bounded, and non-self-refe
   assert.match(report, /must not\s+require or predict its own closure Git SHA/);
   assert.match(report, /return to implementation\/security remediation/);
   assert.match(report, /Tag\/release and production promotion each require\s+separate explicit authorization/);
+});
+
+test("Stage 8 construction root and candidate boundary are mechanically anchored", async () => {
+  const auth = JSON.parse(await text("docs/release-attestations/v0.4-stage8-construction-authorization-2026-09-18.json"));
+  const repo = new URL("../", import.meta.url);
+  const authorizationRoot = "6f766acfc67dff41afe15f228078938f44922a87";
+  const current = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  const allowed = (path) =>
+    path === "CHANGELOG.md" || path === "README.md" || path === "package.json" || path === "package-lock.json" ||
+    (path.startsWith("docs/") && path !== "docs/release-attestations/v0.4.0-rc.x.md") ||
+    (path.startsWith("test/") && !path.startsWith("test/evidence/stage8/")) ||
+    [
+      "scripts/stage8-mounted-matrix.mjs",
+      "scripts/emit-stage8-mounted-evidence.mjs",
+      "scripts/registry-drill-firefox-bridge.py",
+      "scripts/registry-drill.mjs",
+      "docker-registry/drill.compose.yaml",
+      "docker-registry/drill.Caddyfile",
+      "docker-registry/dsh-drill.Caddyfile",
+    ].includes(path);
+  const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: repo, encoding: "utf8" }).trimEnd();
+  const statusPaths = status ? status.split(/\r?\n/).map((line) => line.slice(3).trim()).filter(Boolean) : [];
+  assert.equal(auth.constructionLineage.candidateSelected, false);
+  assert.equal(auth.constructionLineage.candidateMustBeFrozenBeforeEvidence, true);
+  assert.equal(gitIsAncestor(auth.acceptedRuntimeBase, current), true);
+  assert.equal(gitIsAncestor(auth.governancePredecessor, current), true);
+  if (current === authorizationRoot) {
+    assert.ok(statusPaths.every(allowed), `pre-freeze changes outside candidate allowlist: ${statusPaths.join(", ")}`);
+  } else {
+    assert.equal(gitIsAncestor(authorizationRoot, current), true);
+    const committed = execFileSync("git", ["diff", "--name-only", `${authorizationRoot}..HEAD`], { cwd: repo, encoding: "utf8" }).trim();
+    const committedPaths = committed ? committed.split(/\\r?\\n/).filter(Boolean) : [];
+    assert.ok(committedPaths.length > 0, "frozen candidate must contain construction changes");
+    assert.ok(committedPaths.every(allowed), `candidate paths outside allowlist: ${committedPaths.join(", ")}`);
+    assert.equal(status, "", "frozen candidate worktree must be clean before evidence execution");
+  }
+  assert.equal(statusPaths.some((path) => path.startsWith("test/evidence/stage8/") || path === "docs/release-attestations/v0.4.0-rc.x.md" || path.startsWith("data/")), false, "pre-freeze worktree must not contain candidate evidence, attestation, or run residue");
 });

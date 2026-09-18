@@ -37,7 +37,7 @@ Explicitly excluded from 0.3: inbound connection acceptance for NAT-restricted d
 
 ## 0.4: endpoint selector
 
-v0.4 remains limited to **server-reachable** registered nodes. The proposed construction contract is [RFC-0010](rfc/0010-node-endpoint-and-routing.md), [RFC-0011](rfc/0011-browser-node-selection.md), and the [multistage SOP](sop/v0.4-endpoint-selector-multistage-sop.md). Construction begins only after architecture review accepts them.
+v0.4 remains limited to **server-reachable** registered nodes. The accepted construction contract is [RFC-0010](rfc/0010-node-endpoint-and-routing.md), [RFC-0011](rfc/0011-browser-node-selection.md), and the [multistage SOP](sop/v0.4-endpoint-selector-multistage-sop.md). The `v0.4.0-rc.2` release-closing candidate remains subject to fresh evidence and independent Final Review.
 
 - one familiar selector entry point for multiple registered DSH nodes;
 - explicit node selection by navigation to a deterministic per-node route authority under the Orbit wildcard route domain;
