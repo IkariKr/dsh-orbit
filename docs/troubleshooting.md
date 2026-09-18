@@ -1,7 +1,90 @@
 # DSH Orbit troubleshooting
 
-This guide is for the implemented v0.3 Registry MVP. It describes diagnosis and
-safe recovery; it does not relax a fail-closed check or change an RFC contract.
+This guide covers the implemented v0.3 Registry MVP and the v0.4 Stage 7
+failure, restart, and compatibility hardening. It describes diagnosis and safe
+recovery; it does not relax a fail-closed check or change an RFC contract.
+
+## v0.4 Stage 7 operational troubleshooting
+
+The procedures in this section are operator guidance for the accepted v0.4
+failure boundaries. Preserve the exact candidate commit, classified error, and
+sanitized state summary when collecting evidence. Never include private keys,
+plaintext tokens, credentials, cookies, CSRF values, gateway secrets, or raw
+authenticated headers in a report.
+
+### Route/Hub identity backup and restore
+
+Before restoring Registry state, stop Hub and every Registry writer. Use the
+standalone `VACUUM INTO` backup procedure; do not copy a live `.db` file and do
+not attach the source database's `-wal` or `-shm` files to a restored image.
+Quarantine restore staging and compare only the non-secret operational state:
+node ID, route target, route-key ID/public key/state, overlap metadata,
+capabilities, and reachability. A restore mismatch is a hard failure: preserve
+the source and staging files and do not publish the image.
+
+### Hub route-key rotation and restart
+
+During rotation, expect one old key in `rotating` overlap and one new key in
+`active` state. A Hub restart must preserve both key IDs and `revoke_after`; it
+must not create a third key, reset overlap, or revoke the old key early. If the
+same overlap is not present after restart, stop the rollout and retain the
+pre-rotation backup. The scheduled revocation is the point at which the old key
+must stop being accepted.
+
+### Nonce replay and RouteIngress restart
+
+RouteIngress replay protection is process-local. A repeated timestamp/nonce/proof
+must fail within one process, but restarting RouteIngress resets the in-memory
+nonce cache. This is the accepted bounded restart replay window under the
+single-Hub and timestamp-skew assumptions; it is not durable replay prevention.
+Expired or skewed timestamps, bad signatures, and wrong authorities must still
+fail closed after a restart.
+
+### TLS trust failures
+
+An `unknown CA` or `wrong SAN` route-probe failure is expected to fail closed.
+Verify the intended system or private CA and the certificate SAN before changing
+routing state. Do not disable hostname validation, set
+`NODE_TLS_REJECT_UNAUTHORIZED=0`, use `rejectUnauthorized: false`, or pass an
+ignore-certificate-errors flag. Once the matching CA/SAN certificate is
+restored, the route probe should recover normally.
+
+### DSH loss behind a live RouteIngress
+
+If RouteIngress remains alive while the downstream DSH process is stopped,
+`route-ready` must fail and Hub probes must eventually set the node to
+`reachable=unreachable`; the selector must disable Open for that node. A second
+healthy node must remain `reachable=ok` and must not receive silent failover
+traffic. After DSH and its reviewed internal gateway are restored, confirm a
+signed route-ready success, then wait for the normal authenticated probe to
+return the node to `reachable=ok` before reopening it.
+
+### Compatibility withdrawal and Open availability
+
+An unsupported DSH version, a missing compatibility profile, or a missing,
+failed, or `not_run` `webSocketTransport` check must withhold `web.routes` and
+leave Open unavailable. Do not infer compatibility from a similar version
+string or manually add a profile entry in production. Re-run the reviewed
+compatibility evidence against the exact approved DSH baseline.
+
+### Delete, bookmark, and reenroll
+
+After a node is deleted, its old route identity and direct bookmark must fail
+closed and the node must remain unavailable until reenrollment completes. A
+same-node-ID reenrollment still requires a fresh Hub route key, fresh route
+target state, and fresh compatibility evidence; the old proof must not revive
+the old route identity. Keep the tombstone and old state until the reviewed
+reenrollment procedure has completed.
+
+### HTTP/WS abort and capacity cleanup
+
+For a client abort, downstream abort, upgrade failure, or WebSocket disconnect,
+confirm that the socket is destroyed, listeners and timeouts are removed, and
+the global/per-node counters return to their prior capacity. Repeat the
+connect/abort cycle when diagnosing a suspected leak. A single abnormal
+connection must not permanently consume a slot or leave a stale routing
+snapshot. Stop the affected candidate if counters do not recover; do not
+work around the limit by raising it.
 
 ## Hub will not start
 

@@ -66,3 +66,25 @@ test("Stage 7 drill enforces v0.4 failure hardening predicates (S7-F1 through S7
     assert.match(source, new RegExp(pred), `registry-stage7-drill.mjs must declare predicate ${pred}`);
   }
 });
+
+test("Stage 7 delivers operator troubleshooting guidance for every v0.4 hardening boundary", async () => {
+  const troubleshooting = await readFile(new URL("../docs/troubleshooting.md", import.meta.url), "utf8");
+  const requiredTopics = [
+    "Route/Hub identity backup and restore",
+    "Hub route-key rotation and restart",
+    "Nonce replay and RouteIngress restart",
+    "TLS trust failures",
+    "DSH loss behind a live RouteIngress",
+    "Compatibility withdrawal and Open availability",
+    "Delete, bookmark, and reenroll",
+    "HTTP/WS abort and capacity cleanup",
+  ];
+  for (const topic of requiredTopics) {
+    assert.match(troubleshooting, new RegExp(topic.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")), `troubleshooting.md must cover ${topic}`);
+  }
+  assert.match(troubleshooting, /process-local/);
+  assert.match(troubleshooting, /not durable replay prevention/);
+  assert.match(troubleshooting, /rejectUnauthorized: false/);
+  assert.match(troubleshooting, /NODE_TLS_REJECT_UNAUTHORIZED=0/);
+  assert.match(troubleshooting, /private keys/);
+});
