@@ -84,6 +84,53 @@
       "classification": "competing historical side branch; must rebuild"
     }
   ],
+  "independentFinalReviewSearch": {
+    "status": "NOT FOUND",
+    "searchScope": "all local refs, remote refs, tags, commit messages, tracked release documents, reflogs, and pull-request merge refs available in the repository",
+    "requiredRecord": "independent Stage 8 Final Review PASS plus explicit tag/release authorization",
+    "result": "No independently verifiable Final Review PASS or release authorization record was found."
+  },
+  "mainlinePublicReconciliation": {
+    "mergeCommit": "3b9a28fc88dcf05a5037aeff61bf1a3f62518592",
+    "publicWordingCommit": "7a8bdf123efc24e619e00439cd8290c890333026",
+    "publicClaim": "v0.4.0-rc.1 released as a pre-release after final review passed",
+    "attestationClaim": "Final Review NOT YET PERFORMED; no tag/publication/promotion authorization granted",
+    "classification": "unresolved contradiction; public wording is not authorization evidence"
+  },
+  "candidateLineageDecision": {
+    "mustStartFrom": "de8eb467a844ef56191f629cdecc6879e561d90a",
+    "existingStage8RefsAreDescendants": false,
+    "newCandidateRequired": true,
+    "newEvidenceRequired": true,
+    "newEvidenceReason": "All historical Stage 8 evidence is exact-commit, parent-baseline, run, and artifact-hash bound."
+  },
+  "e85ReuseDecision": {
+    "designInputOnly": [
+      "authority-boundary implementation patterns",
+      "mounted browser lifecycle scenarios",
+      "25-field matrix",
+      "raw-to-emitted evidence binding rules",
+      "release contract assertions",
+      "promotion-plan structure"
+    ],
+    "mustRebuild": [
+      "fresh-install.json",
+      "migration.json",
+      "backup-restore.json",
+      "two-node-mounted-smoke.json",
+      "mounted-runner-raw.json",
+      "promotion-plan-validation.json",
+      "manifest.json",
+      "release attestation",
+      "closure hashes"
+    ],
+    "forbiddenRebinding": [
+      "rewrite old candidate SHA",
+      "reuse old runId or node IDs",
+      "copy old raw evidence to a new candidate",
+      "treat v0.4.0-rc.1 as current authorization"
+    ]
+  },
   "releaseContradictions": [
     {
       "object": "v0.4.0-rc.1",
