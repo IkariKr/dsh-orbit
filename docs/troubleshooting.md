@@ -71,10 +71,10 @@ compatibility evidence against the exact approved DSH baseline.
 
 After a node is deleted, its old route identity and direct bookmark must fail
 closed and the node must remain unavailable until reenrollment completes. A
-same-node-ID reenrollment still requires a fresh Hub route key, fresh route
-target state, and fresh compatibility evidence; the old proof must not revive
-the old route identity. Keep the tombstone and old state until the reviewed
-reenrollment procedure has completed.
+same-node-ID reenrollment still requires a fresh Hub route identity, a valid
+retained or operator-approved route target, and fresh compatibility evidence;
+the old proof must not revive the old route identity. Keep the tombstone and
+old state until the reviewed reenrollment procedure has completed.
 
 ### HTTP/WS abort and capacity cleanup
 

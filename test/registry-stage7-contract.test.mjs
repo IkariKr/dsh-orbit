@@ -88,3 +88,13 @@ test("Stage 7 delivers operator troubleshooting guidance for every v0.4 hardenin
   assert.match(troubleshooting, /NODE_TLS_REJECT_UNAUTHORIZED=0/);
   assert.match(troubleshooting, /private keys/);
 });
+
+test("Stage 7 provenance report reconciles post-E7.3 Stage 8 history and remote review prerequisites", async () => {
+  const report = await readFile(new URL("../docs/release-attestations/v0.4-stage7-construction-report-2026-09-18.md", import.meta.url), "utf8");
+  assert.doesNotMatch(report, /^Stage 8: NOT STARTED$/m, "the report must not deny known post-E7.3 Stage 8 history");
+  assert.match(report, /pre-review, unauthorized, and quarantined historical construction/);
+  assert.match(report, /closure must be pushed/);
+  assert.match(report, /remote Stage 7 branch still pointed to E7\.3/);
+  assert.match(report, /valid retained or operator-approved route target/);
+  assert.match(report, /Stage 8 accepted status: NOT ESTABLISHED/);
+});
