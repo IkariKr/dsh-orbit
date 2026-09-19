@@ -508,7 +508,10 @@ def run(args: argparse.Namespace) -> int:
         proxy_thread.start()
         proxy_port = proxy_server.server_address[1]
         options = Options()
-        options.page_load_strategy = "none"
+        # Use Firefox's default normal navigation strategy. The drill must not
+        # advance from warmup until the authenticated management document has
+        # actually committed; a non-blocking page-load strategy leaves Selenium
+        # on the previous /styles.css document while the SPA is still booting.
         options.add_argument("-profile")
         options.add_argument(str(profile_dir))
         options.set_preference("security.enterprise_roots.enabled", True)
@@ -548,8 +551,13 @@ def run(args: argparse.Namespace) -> int:
         # authenticated later, after the browser receives their run bindings.
         body_text = driver.find_element(By.TAG_NAME, "body").text.strip().replace("\\n", " ")[:160]
         log(f"gateway-body-prefix:{body_text!r}")
-        session_status = wait_for(wait, EC.visibility_of_element_located((By.ID, "session-status")))
-        wait.until(lambda _driver: session_status.text.strip().startswith("operator:"))
+        session_status = wait_for(
+            WebDriverWait(driver, 60, poll_frequency=POLL_SECONDS),
+            EC.visibility_of_element_located((By.ID, "session-status")),
+        )
+        WebDriverWait(driver, 60, poll_frequency=POLL_SECONDS).until(
+            lambda _driver: session_status.text.strip().startswith("operator:")
+        )
         log("session-authenticated")
 
         driver.find_element(By.ID, "nav-tokens").click()
@@ -597,8 +605,13 @@ def run(args: argparse.Namespace) -> int:
         # tab transition after token minting. The document bootstraps a fresh
         # authenticated session and loads the Nodes view deterministically.
         navigate(driver, gateway + "/", "gateway-management-reload")
-        session_status = wait_for(wait, EC.visibility_of_element_located((By.ID, "session-status")))
-        wait.until(lambda _driver: session_status.text.strip().startswith("operator:"))
+        session_status = wait_for(
+            WebDriverWait(driver, 60, poll_frequency=POLL_SECONDS),
+            EC.visibility_of_element_located((By.ID, "session-status")),
+        )
+        WebDriverWait(driver, 60, poll_frequency=POLL_SECONDS).until(
+            lambda _driver: session_status.text.strip().startswith("operator:")
+        )
         log("management-nodes-reloaded")
         if not wait_for_node_ids(driver, node_ids, stop_path, log=log):
             return 0

@@ -66,7 +66,7 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(emitter, /runner-owned Firefox\/Selenium/);
   assert.doesNotMatch(emitter, /c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62/);
   assert.match(bridge, /runner-owned-firefox-selenium/);
-  assert.match(bridge, /page_load_strategy = "none"/);
+  assert.doesNotMatch(bridge, /page_load_strategy = "none"/);
   assert.match(bridge, /def wait_for_navigation_element\(/);
   assert.match(bridge, /selector-load-complete/);
   assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "selector-view", "selector"/);
@@ -76,6 +76,7 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "session-status", "gateway-session"/);
   assert.match(bridge, /expected_path="\/"/);
   assert.match(bridge, /_client_config\.timeout = WEBDRIVER_COMMAND_TIMEOUT_SECONDS/);
+  assert.match(bridge, /WebDriverWait\(driver, 60, poll_frequency=POLL_SECONDS\)/);
 
   assert.match(bridge, /root_anchor_present/);
   assert.match(bridge, /installed-retained/);
