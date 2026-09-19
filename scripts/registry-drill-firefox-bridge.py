@@ -26,7 +26,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from selenium import webdriver
-from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import UnexpectedAlertPresentException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.firefox.service import Service
@@ -50,15 +50,15 @@ class LocalConnectProxy(socketserver.ThreadingTCPServer):
 
 class ConnectHandler(socketserver.BaseRequestHandler):
     def handle(self):
-        request = self.request.recv(8192)
-        if not request.startswith(b"CONNECT "):
-            self.request.close()
-            return
-        target = request.split(b" ", 2)[1].decode("ascii", "replace")
-        host, _, port_text = target.partition(":")
-        port = int(port_text or "443")
-        upstream = socket.create_connection(("127.0.0.1", self.server.upstream_port), timeout=15)
+        upstream = None
         try:
+            request = self.request.recv(8192)
+            if not request.startswith(b"CONNECT "):
+                return
+            target = request.split(b" ", 2)[1].decode("ascii", "replace")
+            _host, _, port_text = target.partition(":")
+            _port = int(port_text or "443")
+            upstream = socket.create_connection(("127.0.0.1", self.server.upstream_port), timeout=15)
             self.request.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             sockets = [self.request, upstream]
             while True:
@@ -70,9 +70,20 @@ class ConnectHandler(socketserver.BaseRequestHandler):
                     if not data:
                         return
                     (upstream if source is self.request else self.request).sendall(data)
+        except (OSError, ValueError):
+            # A browser-side cancellation is local to this CONNECT tunnel.
+            # Never let a broken socket escape socketserver and kill the bridge.
+            return
         finally:
-            upstream.close()
-            self.request.close()
+            if upstream is not None:
+                try:
+                    upstream.close()
+                except OSError:
+                    pass
+            try:
+                self.request.close()
+            except OSError:
+                pass
 
 
 def certutil_run(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -443,11 +454,23 @@ def run(args: argparse.Namespace) -> int:
 
     def navigate(driver, url: str, label: str) -> None:
         log(f"navigation-start:{label}")
-        try:
-            driver.get(url)
-        except Exception as error:
-            log(f"navigation-failed:{label}:{type(error).__name__}:{redact_error(error)}")
-            raise
+        for attempt in range(2):
+            try:
+                driver.get(url)
+                break
+            except UnexpectedAlertPresentException as error:
+                if attempt == 0:
+                    log(f"navigation-alert-dismissed:{label}")
+                    try:
+                        driver.switch_to.alert.dismiss()
+                    except WebDriverException:
+                        pass
+                    continue
+                log(f"navigation-failed:{label}:{type(error).__name__}:{redact_error(error)}")
+                raise
+            except Exception as error:
+                log(f"navigation-failed:{label}:{type(error).__name__}:{redact_error(error)}")
+                raise
         try:
             current_url = driver.current_url
         except WebDriverException:
