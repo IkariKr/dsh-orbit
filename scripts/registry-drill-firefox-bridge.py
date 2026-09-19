@@ -733,7 +733,14 @@ def run(args: argparse.Namespace) -> int:
         log(f"cookie-selector-observed:count={len(selector_cookies)}")
         node_a_host = urlparse(open_urls["a"]).hostname or ""
         node_b_host = urlparse(open_urls["b"]).hostname or ""
+        log(
+            "cookie-jars-before-verify:"
+            f"a={[(cookie.get('name'), cookie.get('value'), cookie.get('domain')) for cookie in cookies_a]}:"
+            f"b={[(cookie.get('name'), cookie.get('value'), cookie.get('domain')) for cookie in cookies_b]}:"
+            f"selector={[(cookie.get('name'), cookie.get('value'), cookie.get('domain')) for cookie in selector_cookies]}"
+        )
         cookie_isolated = verify_cookie_jar_isolation(cookies_a, cookies_b, selector_cookies, node_a_host, node_b_host)
+        log("cookie-isolation-verified")
 
         lifecycle = {
             **bindings,

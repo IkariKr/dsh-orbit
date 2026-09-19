@@ -97,6 +97,8 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(bridge, /cookie-isolation-start/);
   assert.match(bridge, /cookie-open-a-observed/);
   assert.match(bridge, /cookie-selector-observed/);
+  assert.match(bridge, /cookie-jars-before-verify/);
+  assert.match(bridge, /cookie-isolation-verified/);
   assert.match(bridge, /UnexpectedAlertPresentException/);
   assert.match(bridge, /navigation-alert-dismissed/);
   assert.match(bridge, /gateway-session/);
