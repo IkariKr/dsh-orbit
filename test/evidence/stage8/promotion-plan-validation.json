@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage8-promotion-plan-validation",
+  "candidateCommit": "cf38544e6a25cbfc2504d3fb833d09557e9f9ae2",
+  "executedAt": "2026-09-19T15:07:41.125Z",
+  "productionTarget": {
+    "authorityApex": "dsh.ikarikore.top",
+    "wildcardRouteDomain": "*.dsh.ikarikore.top",
+    "rollbackContract": "gateway-and-dns-only-no-identity-destruction"
+  },
+  "preflightChecksPass": true,
+  "cutoverStepsReviewed": true,
+  "rollbackTestedInStaging": false,
+  "status": "PLAN_DOCUMENTED_PROMOTION_DEFERRED_UNTIL_FINAL_REVIEW"
+}

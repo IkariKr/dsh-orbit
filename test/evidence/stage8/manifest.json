@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 4,
+  "stage": "v0.4 Stage 8 Release Closure",
+  "releaseCandidate": "v0.4.0-rc.2",
+  "branch": "chore/v0.4-stage8-final-review-remediation-r1",
+  "constructionAuthorization": {
+    "authorizationId": "S8-CONSTRUCTION-20260918-A1",
+    "authorizationRecordCommit": "6f766acfc67dff41afe15f228078938f44922a87",
+    "acceptedRuntimeBase": "de8eb467a844ef56191f629cdecc6879e561d90a",
+    "governancePredecessor": "2a1f41a734e0395615ab0ae1ee41173e257a42ec"
+  },
+  "testedCandidateCommit": "cf38544e6a25cbfc2504d3fb833d09557e9f9ae2",
+  "evidenceClosure": "E8.7",
+  "externalHarnessBaseline": {
+    "dshVersion": "0.1.1-rc.2",
+    "dshCommitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "dshCliBinarySha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62",
+    "dshCliSha256RequiredRunnerInput": true
+  },
+  "mountedRun": {
+    "runId": "525260cd-0085-4565-af82-dfc63eb0f142",
+    "startedAt": "2026-09-19T15:02:49.916Z",
+    "finishedAt": "2026-09-19T15:06:09.215Z",
+    "nodeIds": [
+      "node_5fb58161ac97b584ef86ee8e8f00b5e0",
+      "node_a956ebdea5a4d97b01b1fdd3ba000743"
+    ],
+    "gateway": "https://127.0.0.1:8543",
+    "browserProducer": "runner-owned-firefox-selenium",
+    "browserChallengeDigest": "cb481fad3d99b2c0844bf6c9e72649ec478e1c71d25e793a3fef95bf41dc39c6",
+    "trustMode": "firefox-profile-nss",
+    "tlsValidation": "enabled",
+    "caFingerprint": "sha256 Fingerprint=B0:1D:FA:2C:6D:66:2D:D5:EE:03:AE:EA:AB:58:4A:F6:0D:97:1E:8F:DB:96:2D:52:16:78:33:C7:5D:C6:B4:D7",
+    "leafFingerprint": "sha256 Fingerprint=ED:E8:A2:D8:A6:20:D3:D2:75:61:B5:09:50:2C:7B:D1:0E:6D:67:6B:4B:4B:1F:F7:3F:DB:50:C8:45:DB:EA:21",
+    "requiredMatrix": "25/25 PASS"
+  },
+  "automatedGates": {
+    "publicTree": "PASS",
+    "releaseContracts": "PASS (14/14: test/stage8-release-contract.test.mjs + test/registry-drill-contract.test.mjs in a clean worktree at the frozen candidate)",
+    "localAcceptanceFreshInstall": "43 tests / 41 pass / 0 fail / 2 skip",
+    "localAcceptanceMigration": "25 tests / 25 pass / 0 fail / 0 skip",
+    "localAcceptanceBackupRestore": "28 tests / 26 pass / 0 fail / 2 skip",
+    "mountedRequiredMatrix": "PASS (25/25)"
+  },
+  "physicalMountedGate": "PASS",
+  "artifacts": {
+    "backup-restore.json": {
+      "sha256": "5e882370a6abc836b1d0362002243c2ad365242c0bbe54d64523781c0be6af26",
+      "bytes": 741
+    },
+    "fresh-install.json": {
+      "sha256": "947105fdc10f8a920b5a406d357d9eda14f0cc401a68e06d5f67f8f11ab67852",
+      "bytes": 624
+    },
+    "migration.json": {
+      "sha256": "72868c859a2222cd6d49f146fff2c70b7e03cbd1f320a6984f4f4febcc21e254",
+      "bytes": 671
+    },
+    "mounted-runner-raw.json": {
+      "sha256": "25dbfb71522a27c656f6cbfd2016781d8bb96090b16389d42e359258a44045dc",
+      "bytes": 8881
+    },
+    "promotion-plan-validation.json": {
+      "sha256": "dcd1c41efbb9196ebba8d9a240288d67b6bc23244786931c994eca7706877eb2",
+      "bytes": 540
+    },
+    "two-node-mounted-smoke.json": {
+      "sha256": "035a43e4beba8aad97f4285675b55115aa4a3cc984a5ebf5c82f0111b209871e",
+      "bytes": 4484
+    }
+  },
+  "status": "PASS \u2014 pending independent Stage 8 Final Review"
+}

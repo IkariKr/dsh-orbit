@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage8-fresh-install-acceptance",
+  "candidateCommit": "cf38544e6a25cbfc2504d3fb833d09557e9f9ae2",
+  "executedAt": "2026-09-19T15:07:41.125Z",
+  "execution": "local-file-backed-registry-tests",
+  "verification": {
+    "command": "node --test test/registry-sqlite.test.mjs test/registry-backup.test.mjs test/registry-route-target.test.mjs test/stage7-hardening.test.mjs",
+    "tests": 43,
+    "pass": 41,
+    "fail": 0,
+    "skip": 2,
+    "schemaVersion": 5,
+    "integrityChecks": "pass",
+    "foreignKeyChecks": "pass",
+    "migrationAndRestartCoverage": "pass"
+  },
+  "result": "PASS"
+}
