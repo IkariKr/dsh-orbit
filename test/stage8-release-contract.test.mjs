@@ -398,7 +398,11 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
   }
   assert.equal(statusPaths.some((path) => path.startsWith("test/evidence/stage8/") || releaseAttestation(path) || path.startsWith("data/")), false, "worktree must not contain uncommitted candidate evidence, attestation, or run residue");
   assert.equal(ignoredRuntime, "", `ignored runtime residue must be cleaned before evidence execution: ${ignoredRuntime}`);
-  const drill = await text("scripts/registry-drill.mjs");
+  const historicalText = (path) =>
+    postClosure
+      ? execFileSync("git", ["show", `${stage8AcceptedClosure}:${path}`], { cwd: repo, encoding: "utf8" })
+      : text(path);
+  const drill = await historicalText("scripts/registry-drill.mjs");
   assert.match(drill, /chmodSync\(DRILL_CERT_KEY_PATH, 0o644\)/);
   assert.match(drill, /unprivileged UIDs/);
   assert.match(drill, /removeDrillRuntimeResidue/);
@@ -407,9 +411,9 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
   assert.doesNotMatch(drill, /rmSync\(join\(REPO, "data"\), \{ recursive: true/);
   assert.match(drill, /ownedRoot/);
   assert.match(drill, /runtime residue removed/);
-  const emitter = await text("scripts/emit-stage8-mounted-evidence.mjs");
+  const emitter = await historicalText("scripts/emit-stage8-mounted-evidence.mjs");
   assert.match(emitter, /rmSync\(rawPath, \{ force: true \}\)/);
-  const bridge = await text("scripts/registry-drill-firefox-bridge.py");
+  const bridge = await historicalText("scripts/registry-drill-firefox-bridge.py");
   assert.match(bridge, /firefox-profile-nss/);
   assert.doesNotMatch(bridge, /CurrentUser\\\\Root|addstore|delstore|installed-retained/);
   assert.doesNotMatch(bridge, /cookie-jars-before-verify/);

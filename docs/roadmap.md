@@ -53,6 +53,9 @@ DSH-specific authentication remains behind the node-local compatibility seam. Th
 Construction is authorized by `V05-CONSTRUCTION-20260919-A1`
 (`docs/release-attestations/v0.5-construction-authorization-2026-09-19.md`),
 built on the accepted v0.4 closure `9891ab858a9c953a211978580910efcc2158bcd7`.
+The construction design package is [RFC-0012](rfc/0012-reverse-connected-nodes.md)
+and the [v0.5 multistage SOP](sop/v0.5-reverse-connected-nodes-multistage-sop.md).
+RFC-0012 must receive Stage 0 / Gate A Architecture Review GO before v0.5 product runtime construction begins.
 
 - outbound node-to-hub connection for devices behind NAT or restrictive networks (the only place reverse connection is designed);
 - pairing and device authorization (distinct from 0.3 enrollment: 0.3 enrolls server-reachable nodes, 0.5 pairs NAT-restricted devices);
