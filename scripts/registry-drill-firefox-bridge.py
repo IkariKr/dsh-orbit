@@ -42,6 +42,8 @@ WEBDRIVER_COMMAND_TIMEOUT_SECONDS = 20
 
 class LocalConnectProxy(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
+    daemon_threads = True
+    block_on_close = False
 
     def __init__(self, server_address, handler_class, upstream_port: int):
         self.upstream_port = upstream_port
@@ -732,14 +734,7 @@ def run(args: argparse.Namespace) -> int:
         return 0
     finally:
         log("cleanup-start")
-        if proxy_server is not None:
-            try:
-                proxy_server.shutdown()
-                proxy_server.server_close()
-                log("cleanup-proxy-done")
-            except Exception as error:
-                log(f"cleanup-proxy-failed:{type(error).__name__}:{redact_error(error)}")
-                raise
+        cleanup_failures = []
         if driver is not None:
             quit_error = []
 
@@ -755,7 +750,9 @@ def run(args: argparse.Namespace) -> int:
             if quit_thread.is_alive():
                 log("driver-quit-timeout; forcing owned geckodriver shutdown")
             elif quit_error:
-                log(f"driver-quit-error:{type(quit_error[0]).__name__}")
+                detail = f"driver quit: {type(quit_error[0]).__name__}:{redact_error(quit_error[0])}"
+                cleanup_failures.append(detail)
+                log(f"cleanup-driver-failed:{detail}")
             else:
                 log("cleanup-driver-done")
         if service is not None:
@@ -763,14 +760,27 @@ def run(args: argparse.Namespace) -> int:
                 stop_owned_process(getattr(service, "process", None), "geckodriver")
                 log("cleanup-geckodriver-done")
             except Exception as error:
-                log(f"cleanup-geckodriver-failed:{type(error).__name__}:{redact_error(error)}")
-                raise
+                detail = f"geckodriver: {type(error).__name__}:{redact_error(error)}"
+                cleanup_failures.append(detail)
+                log(f"cleanup-geckodriver-failed:{detail}")
+        if proxy_server is not None:
+            try:
+                proxy_server.shutdown()
+                proxy_server.server_close()
+                log("cleanup-proxy-done")
+            except Exception as error:
+                detail = f"proxy: {type(error).__name__}:{redact_error(error)}"
+                cleanup_failures.append(detail)
+                log(f"cleanup-proxy-failed:{detail}")
         try:
             shutil.rmtree(profile_dir)
             log("cleanup-profile-done")
         except Exception as error:
-            log(f"cleanup-profile-failed:{type(error).__name__}:{redact_error(error)}")
-            raise
+            detail = f"profile: {type(error).__name__}:{redact_error(error)}"
+            cleanup_failures.append(detail)
+            log(f"cleanup-profile-failed:{detail}")
+        if cleanup_failures:
+            raise RuntimeError("browser cleanup failed: " + "; ".join(cleanup_failures))
 
 
 def main() -> int:

@@ -97,6 +97,11 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.doesNotMatch(bridge, /security\.enterprise_roots\.enabled", True/);
   assert.match(bridge, /firefox-start-failed:/);
   assert.match(bridge, /cleanup-start/);
+  assert.match(bridge, /daemon_threads = True/);
+  assert.match(bridge, /block_on_close = False/);
+  assert.ok(bridge.indexOf('cleanup-driver-done') < bridge.indexOf('cleanup-proxy-done'));
+  assert.match(bridge, /cleanup_failures/);
+  assert.match(bridge, /browser cleanup failed/);
   assert.match(bridge, /cleanup-profile-done/);
   assert.match(bridge, /trustMode/);
   assert.match(bridge, /redact_error_text/);
