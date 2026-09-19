@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 3,
+  "kind": "stage8-final-two-node-mounted-smoke",
+  "candidateCommit": "4c6b03319de80e04a3e222a3121768cf58b0c8b5",
+  "executedAt": "2026-09-19T13:54:55.279Z",
+  "execution": "executed",
+  "result": "PASS",
+  "runId": "a593d46b-4ccd-43fc-a8c4-9d5f52365756",
+  "provenance": {
+    "producer": "registry-drill-runner",
+    "runnerCommit": "4c6b03319de80e04a3e222a3121768cf58b0c8b5",
+    "rawEvidenceSha256": "17fbd34e03932ed1bd079d53e4f8a12a18faa85922ba4fd510496e3f03b29304",
+    "rawEvidenceBytes": 8455,
+    "browserProducer": null,
+    "browserChallengeBound": true,
+    "browserBridgeExitCode": 0
+  },
+  "gateway": {
+    "url": "https://127.0.0.1:8443",
+    "tlsValidation": "enabled",
+    "caFingerprint": "sha256 Fingerprint=83:D5:E8:BB:C3:20:23:71:86:C2:E7:27:F1:F7:6B:B2:58:E2:C4:D6:A9:2B:35:1C:93:30:A1:59:ED:82:07:80",
+    "leafFingerprint": "sha256 Fingerprint=A0:E8:77:2E:42:00:08:A6:B0:4C:BB:18:F6:3E:36:E1:18:0E:48:E6:BC:3D:F4:62:0D:CB:BB:5B:29:5D:DA:8E",
+    "sans": [
+      "127.0.0.1",
+      "registry-hub",
+      "dsh-orbit.test",
+      "*.dsh-orbit.test",
+      "dsh-a",
+      "dsh-b",
+      "dsh-a.test",
+      "dsh-b.test"
+    ]
+  },
+  "nodes": {
+    "a": "node_cf6f53f382a7003f4f3e38a0ae5fecfe",
+    "b": "node_1882c4d5d8b0d25be53c0964459cb21b"
+  },
+  "requiredMatrix": {
+    "routeTargetsConfiguredAB": "PASS",
+    "routeTargetsPersisted": "PASS",
+    "eligibilityAB": "PASS",
+    "selectorListsAB": "PASS",
+    "selectorOpenA": "PASS",
+    "selectorOpenB": "PASS",
+    "httpRootA": "PASS",
+    "httpRootB": "PASS",
+    "staticAssetA": "PASS",
+    "staticAssetB": "PASS",
+    "websocketUpgradeA": "PASS",
+    "websocketUpgradeB": "PASS",
+    "websocketPingPongA": "PASS",
+    "websocketPingPongB": "PASS",
+    "cookieIsolation": "PASS",
+    "nodeContextIsolation": "PASS",
+    "gatewayRestartRecovery": "PASS",
+    "hubRestartRecovery": "PASS",
+    "nodeAFailClosedOutage": "PASS",
+    "nodeBHealthyDuringAOutage": "PASS",
+    "dshLossAndRecovery": "PASS",
+    "bookmarkFailClosed": "PASS",
+    "sameNodeIdReenroll": "PASS",
+    "freshHubRouteIdentity": "PASS",
+    "deleteBookmarkAndReenroll": "PASS"
+  },
+  "lifecycle": {
+    "steps": [
+      "compose: up (hub, caddy, dsh-a, dsh-b)",
+      "caddy: real caddy validate -> Valid configuration; TLS certificate mounted",
+      "browser: trusted HTTPS bootstrap checkpoint accepted",
+      "gateway: unauthenticated browser request -> 401 before Hub",
+      "gateway: /api/v1/* machine surface -> 403 (not proxied)",
+      "session: bootstrap via TLS gateway -> operator (cookie + CSRF issued)",
+      "dsh-a: real DSH session.create + session.list persisted session-b05b02b3-8ae4-492e-bff2-94fa8684f2bc",
+      "dsh-b: real DSH session.create + session.list persisted session-64e27242-972d-4388-82f5-192c2d8f2155",
+      "nodes: A=node_cf6f53f382a7003f4f3e38a0ae5fecfe B=node_1882c4d5d8b0d25be53c0964459cb21b enrolled, running, reports uploaded",
+      "both fresh with 3 capabilities each; registryContact A=fresh B=fresh; lastHeartbeatAt surfaced for both",
+      "browser: trusted HTTPS live Nodes/detail checkpoint accepted",
+      "gateway: restarted; new session works; selector and A/B routed HTTP recovered",
+      "Hub: restarted with persistent SQLite; route targets and A/B routed HTTP recovered",
+      "A disconnect: aging clock advanced for A only to 2026-09-19T13:54:56.941Z (3 missed beats at 60s cadence)",
+      "A disconnect: A=lost with contact-lost; B=fresh, capabilities=3, alerts=[]",
+      "aging override reset: A remained lost across a real maintenance tick until heartbeat",
+      "A reconnect: fresh again, alert flags cleared; B untouched",
+      "delete A (requestId, explicit result): tombstoned; A local state=revoked; old bookmark fail-closed; B=fresh",
+      "reenroll A: current identity report re-uploaded (uploaded: orbitCompatible pass, capabilities 3)",
+      "reenroll A: same nodeId node_cf6f53f382a7003f4f3e38a0ae5fecfe, fresh Hub route identity, bookmark recovered; B final=fresh"
+    ],
+    "cleanup": "owned Node daemons stopped; compose down executed; runtime residue removed"
+  },
+  "dsh": {
+    "version": "0.1.1-rc.2",
+    "commitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "cliSha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  }
+}

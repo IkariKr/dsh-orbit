@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 3,
+  "kind": "stage8-mounted-runner-raw",
+  "runId": "a593d46b-4ccd-43fc-a8c4-9d5f52365756",
+  "commit": "4c6b03319de80e04a3e222a3121768cf58b0c8b5",
+  "candidateCommit": "4c6b03319de80e04a3e222a3121768cf58b0c8b5",
+  "startedAt": "2026-09-19T13:51:23.908Z",
+  "producer": "registry-drill-runner",
+  "requiredMatrix": {
+    "routeTargetsConfiguredAB": "PASS",
+    "routeTargetsPersisted": "PASS",
+    "eligibilityAB": "PASS",
+    "selectorListsAB": "PASS",
+    "selectorOpenA": "PASS",
+    "selectorOpenB": "PASS",
+    "httpRootA": "PASS",
+    "httpRootB": "PASS",
+    "staticAssetA": "PASS",
+    "staticAssetB": "PASS",
+    "websocketUpgradeA": "PASS",
+    "websocketUpgradeB": "PASS",
+    "websocketPingPongA": "PASS",
+    "websocketPingPongB": "PASS",
+    "cookieIsolation": "PASS",
+    "nodeContextIsolation": "PASS",
+    "gatewayRestartRecovery": "PASS",
+    "hubRestartRecovery": "PASS",
+    "nodeAFailClosedOutage": "PASS",
+    "nodeBHealthyDuringAOutage": "PASS",
+    "dshLossAndRecovery": "PASS",
+    "bookmarkFailClosed": "PASS",
+    "sameNodeIdReenroll": "PASS",
+    "freshHubRouteIdentity": "PASS",
+    "deleteBookmarkAndReenroll": "PASS"
+  },
+  "steps": [
+    "compose: up (hub, caddy, dsh-a, dsh-b)",
+    "caddy: real caddy validate -> Valid configuration; TLS certificate mounted",
+    "browser: trusted HTTPS bootstrap checkpoint accepted",
+    "gateway: unauthenticated browser request -> 401 before Hub",
+    "gateway: /api/v1/* machine surface -> 403 (not proxied)",
+    "session: bootstrap via TLS gateway -> operator (cookie + CSRF issued)",
+    "dsh-a: real DSH session.create + session.list persisted session-b05b02b3-8ae4-492e-bff2-94fa8684f2bc",
+    "dsh-b: real DSH session.create + session.list persisted session-64e27242-972d-4388-82f5-192c2d8f2155",
+    "nodes: A=node_cf6f53f382a7003f4f3e38a0ae5fecfe B=node_1882c4d5d8b0d25be53c0964459cb21b enrolled, running, reports uploaded",
+    "both fresh with 3 capabilities each; registryContact A=fresh B=fresh; lastHeartbeatAt surfaced for both",
+    "browser: trusted HTTPS live Nodes/detail checkpoint accepted",
+    "gateway: restarted; new session works; selector and A/B routed HTTP recovered",
+    "Hub: restarted with persistent SQLite; route targets and A/B routed HTTP recovered",
+    "A disconnect: aging clock advanced for A only to 2026-09-19T13:54:56.941Z (3 missed beats at 60s cadence)",
+    "A disconnect: A=lost with contact-lost; B=fresh, capabilities=3, alerts=[]",
+    "aging override reset: A remained lost across a real maintenance tick until heartbeat",
+    "A reconnect: fresh again, alert flags cleared; B untouched",
+    "delete A (requestId, explicit result): tombstoned; A local state=revoked; old bookmark fail-closed; B=fresh",
+    "reenroll A: current identity report re-uploaded (uploaded: orbitCompatible pass, capabilities 3)",
+    "reenroll A: same nodeId node_cf6f53f382a7003f4f3e38a0ae5fecfe, fresh Hub route identity, bookmark recovered; B final=fresh"
+  ],
+  "provenance": {
+    "commit": "4c6b03319de80e04a3e222a3121768cf58b0c8b5",
+    "cleanWorktree": true,
+    "statusPorcelain": ""
+  },
+  "tls": {
+    "validation": "enabled",
+    "caPath": "D:\\App\\01_Ai\\CodeX\\dsh-orbit-stage8-construction-a1\\data\\orbit-drill\\tls\\ca.crt",
+    "caFingerprint": "sha256 Fingerprint=83:D5:E8:BB:C3:20:23:71:86:C2:E7:27:F1:F7:6B:B2:58:E2:C4:D6:A9:2B:35:1C:93:30:A1:59:ED:82:07:80",
+    "leafFingerprint": "sha256 Fingerprint=A0:E8:77:2E:42:00:08:A6:B0:4C:BB:18:F6:3E:36:E1:18:0E:48:E6:BC:3D:F4:62:0D:CB:BB:5B:29:5D:DA:8E",
+    "sans": [
+      "127.0.0.1",
+      "registry-hub",
+      "dsh-orbit.test",
+      "*.dsh-orbit.test",
+      "dsh-a",
+      "dsh-b",
+      "dsh-a.test",
+      "dsh-b.test"
+    ]
+  },
+  "aging": {
+    "mode": "controlled-accelerated-contact-aging",
+    "clockPath": "D:\\App\\01_Ai\\CodeX\\dsh-orbit-stage8-construction-a1\\data\\orbit-drill\\drill-aging-clock",
+    "heartbeatCadenceSeconds": 60,
+    "missedBeatsForStale": 3,
+    "lostAfterMs": 86400000,
+    "productionThresholdsUnchanged": true,
+    "disconnectWallClock": "2026-09-19T13:52:37.222Z",
+    "staleAcceleratedClock": "2026-09-19T13:54:56.941Z",
+    "lostAcceleratedClock": "2026-09-20T13:51:56.941Z",
+    "resetBeforeReconnect": true,
+    "resetWallClock": "2026-09-19T13:53:13.449Z",
+    "resetDidNotHealWithoutHeartbeat": true
+  },
+  "dshVersion": "0.1.1-rc.2",
+  "dsh": {
+    "version": "0.1.1-rc.2",
+    "commitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "cliSha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  },
+  "hubListenPolicy": "127.0.0.1:5445 (loopback; frozen policy intact)",
+  "containers": {
+    "hub": "db2bada38897710aa1ecc441feeab5fae88e8d01fa2309dbdc3a027edab87953",
+    "caddy": "4a287270ffc4ae503669e176f3be4bfc52ace1f62ac030da993ef9e63fd7d171",
+    "dshA": "ef14ded20d49c22b0805e39df50e8ca63d2ab96666e903335cb39ff3883d765b",
+    "dshB": "3d749ab98d4759d8534a4b25c43df3c85a5d3dfb276b1c4d6f2ae2aa5dc7578d"
+  },
+  "hubImage": {
+    "id": "sha256:4061440fbeb9a6ca72be780e508124635298eb5fb3f49b3372b3b27f9b4d1151",
+    "digest": "local-image-no-registry-digest",
+    "created": "2026-09-18T12:09:49.403227456Z"
+  },
+  "dshImages": {
+    "a": {
+      "id": "sha256:6bd6532f08afbf7437e4b8c143b7d9fbcecfd727f03930072fa356574733e2d8",
+      "digest": "local-image-no-registry-digest",
+      "created": "2026-09-08T04:51:50.761449359Z"
+    },
+    "b": {
+      "id": "sha256:723c4af5e233ff952f5db40ce71990569a2a58a76c1a373509f12a36c74a42ad",
+      "digest": "local-image-no-registry-digest",
+      "created": "2026-09-08T04:51:50.759057057Z"
+    }
+  },
+  "dshImage": {
+    "a": {
+      "id": "sha256:6bd6532f08afbf7437e4b8c143b7d9fbcecfd727f03930072fa356574733e2d8",
+      "digest": "local-image-no-registry-digest",
+      "created": "2026-09-08T04:51:50.761449359Z"
+    },
+    "b": {
+      "id": "sha256:723c4af5e233ff952f5db40ce71990569a2a58a76c1a373509f12a36c74a42ad",
+      "digest": "local-image-no-registry-digest",
+      "created": "2026-09-08T04:51:50.759057057Z"
+    }
+  },
+  "hubImageDigest": "local-image-no-registry-digest",
+  "dshImageDigest": "local-image-no-registry-digest; local-image-no-registry-digest",
+  "caddyImage": {
+    "id": "sha256:af555904a0961945f16bb323a501457b13a4f7e9bde969b145b97da80b38ecbe",
+    "digest": "caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648",
+    "created": "2026-06-22T20:09:05.216443494Z"
+  },
+  "caddyVersion": "v2.11.4",
+  "browserBridge": {
+    "producer": "runner-owned-firefox-selenium",
+    "challengeDigest": "1824a3bf4301b6e9921e370839432e42e2cc2d2b29a0afe35b404db8df1b2b33",
+    "python": "python",
+    "startedAt": "2026-09-19T13:51:38.052Z"
+  },
+  "browserBootstrap": {
+    "checkpoint": "passed",
+    "tlsValidation": "enabled",
+    "recordedAt": "2026-09-19T13:51:48.306Z",
+    "gatewayUrl": "https://127.0.0.1:8443",
+    "caFingerprint": "sha256 Fingerprint=83:D5:E8:BB:C3:20:23:71:86:C2:E7:27:F1:F7:6B:B2:58:E2:C4:D6:A9:2B:35:1C:93:30:A1:59:ED:82:07:80",
+    "leafFingerprint": "sha256 Fingerprint=A0:E8:77:2E:42:00:08:A6:B0:4C:BB:18:F6:3E:36:E1:18:0E:48:E6:BC:3D:F4:62:0D:CB:BB:5B:29:5D:DA:8E"
+  },
+  "routeAuthorities": {
+    "a": "n-cf6f53f382a7003f4f3e38a0ae5fecfe.dsh-orbit.test:8443",
+    "b": "n-1882c4d5d8b0d25be53c0964459cb21b.dsh-orbit.test:8443"
+  },
+  "routeTargets": {
+    "a": "https://dsh-a:9444",
+    "b": "https://dsh-b:9445"
+  },
+  "aNodeId": "node_cf6f53f382a7003f4f3e38a0ae5fecfe",
+  "bNodeId": "node_1882c4d5d8b0d25be53c0964459cb21b",
+  "browser": {
+    "checkpoint": "passed",
+    "tlsValidation": "enabled",
+    "recordedAt": "2026-09-19T13:52:07.876Z",
+    "gatewayUrl": "https://127.0.0.1:8443",
+    "caFingerprint": "sha256 Fingerprint=83:D5:E8:BB:C3:20:23:71:86:C2:E7:27:F1:F7:6B:B2:58:E2:C4:D6:A9:2B:35:1C:93:30:A1:59:ED:82:07:80",
+    "leafFingerprint": "sha256 Fingerprint=A0:E8:77:2E:42:00:08:A6:B0:4C:BB:18:F6:3E:36:E1:18:0E:48:E6:BC:3D:F4:62:0D:CB:BB:5B:29:5D:DA:8E",
+    "nodeIds": [
+      "node_cf6f53f382a7003f4f3e38a0ae5fecfe",
+      "node_1882c4d5d8b0d25be53c0964459cb21b"
+    ]
+  },
+  "routeIdentity": {
+    "beforeDelete": "a0d92c71dd7172a61cf5ba3fcb509067",
+    "afterReenroll": "de2b5f9aefc9735dc5a2fa5dcbbc532e"
+  },
+  "finishedAt": "2026-09-19T13:54:55.279Z",
+  "success": true,
+  "browserBridgeExit": {
+    "code": 0,
+    "signal": null,
+    "error": null
+  },
+  "cleanup": "owned Node daemons stopped; compose down executed; runtime residue removed"
+}

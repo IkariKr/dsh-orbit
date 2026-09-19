@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage8-backup-restore-acceptance",
+  "candidateCommit": "4c6b03319de80e04a3e222a3121768cf58b0c8b5",
+  "executedAt": "2026-09-19T14:01:17.891Z",
+  "execution": "local-file-backed-wal-registry-tests",
+  "verification": {
+    "command": "node --test test/registry-backup.test.mjs test/registry-route-target.test.mjs test/stage7-hardening.test.mjs",
+    "backupMethod": "sqlite-vacuum-into",
+    "restoreMethod": "sqlite-standalone-atomic-restore",
+    "tests": 28,
+    "pass": 26,
+    "fail": 0,
+    "skip": 2,
+    "writersQuiesced": true,
+    "walSidecarsQuarantined": true,
+    "privateKeyExposedInStateDigest": false,
+    "routeIdentityRestored": true,
+    "integrityCheck": "ok"
+  },
+  "result": "PASS"
+}

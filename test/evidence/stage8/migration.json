@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "kind": "stage8-migration-acceptance",
+  "candidateCommit": "4c6b03319de80e04a3e222a3121768cf58b0c8b5",
+  "executedAt": "2026-09-19T14:01:17.891Z",
+  "execution": "local-file-backed-v3-fixture-tests",
+  "verification": {
+    "command": "node --test test/registry-sqlite.test.mjs test/stage7-hardening.test.mjs",
+    "migrationPath": "v3 -> v4 -> v5",
+    "tests": 25,
+    "pass": 25,
+    "fail": 0,
+    "schemaVersion": 5,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "routeTables": [
+      "route_targets",
+      "hub_route_keys"
+    ],
+    "nodeIdentityPreserved": true,
+    "idempotentRerun": true
+  },
+  "result": "PASS"
+}
