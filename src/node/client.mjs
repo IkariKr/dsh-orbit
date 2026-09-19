@@ -28,6 +28,8 @@ const REPORT_PATH = "/api/v1/report-upload";
 const ROTATE_PATH = "/api/v1/credential-rotate";
 const REENROLL_PATH = "/api/v1/reenroll";
 const ENROLL_PATH = "/api/v1/enroll";
+const PAIR_PATH = "/api/v1/pair";
+const REVERSE_PROTOCOL = "orbit-reverse-v1";
 
 export const HEARTBEAT_CADENCE_SECONDS_MIN = 30;
 export const HEARTBEAT_CADENCE_SECONDS_MAX = 300;
@@ -179,6 +181,14 @@ export class NodeClient {
           );
         }
       }
+      const pendingPairing = this.store.pendingPairing;
+      if (pendingPairing && typeof pendingPairing.hubBaseUrl === "string" && pendingPairing.hubBaseUrl !== "") {
+        if (pendingPairing.hubBaseUrl !== this.baseHubUrl) {
+          throw new Error(
+            `pending pairing is bound to ${pendingPairing.hubBaseUrl} but the runtime configuration targets ${this.baseHubUrl}; refusing to replay pairing against another Hub`,
+          );
+        }
+      }
       return;
     }
     if (typeof this.store.hubBaseUrl === "string" && this.store.hubBaseUrl !== "") {
@@ -277,6 +287,84 @@ export class NodeClient {
       throw new Error(`enrollment outcome unknown (network failure): retry with the same enrollment token (${message})`);
     }
     throw new Error(`enrollment denied: ${code} (${message})`);
+  }
+
+  // ------------------------------------------------------------------
+  // Pairing bootstrap (RFC-0012 D3): one-time bootstrap for a fresh
+  // NAT-restricted installation. Same persisted-intent principle as
+  // enrollment: the pairingRequestId + keypair are written BEFORE the
+  // request, so a lost response replays the exact request and adopts the
+  // Hub's recorded result. The token itself is never persisted. A
+  // paired node starts with routeMode = reverse (RFC-0012 D1/D3.3).
+
+  async pair({ token }) {
+    if (this.store.state !== "unenrolled") {
+      throw new Error(`pairing requires an unenrolled store (state is ${this.store.state})`);
+    }
+    if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token)) {
+      throw new Error("pairing token must be 32 lowercase hex characters");
+    }
+    if (this.store.pendingEnrollment) {
+      throw new Error("store carries a pending enrollment; pairing is not available");
+    }
+    let pending = this.store.pendingPairing;
+    if (!pending) {
+      const keys = generateNodeKeyPair();
+      pending = {
+        pairingRequestId: randomHex(16),
+        publicKeyHex: keys.publicKeyHex,
+        privateKeyHex: keys.privateKeyHex,
+        hubBaseUrl: this.baseHubUrl,
+        generatedAt: this.now().toISOString(),
+      };
+      // RFC-0012 D3.2: the private key is persisted before any network
+      // submission.
+      await this.persist({ ...this.store, pendingPairing: pending });
+    }
+    this.enforceBinding(); // the pending binding and runtime config must agree
+    const response = await this.transport(PAIR_PATH, {
+      body: { token, pairingRequestId: pending.pairingRequestId, publicKey: pending.publicKeyHex },
+    });
+    if (response.status === 200) {
+      const expectedKeyId = deriveKeyId(pending.publicKeyHex);
+      if (response.body.keyId !== expectedKeyId) {
+        throw new Error(`hub returned keyId ${JSON.stringify(response.body.keyId)} that does not match the paired public key`);
+      }
+      if (response.body.routeMode !== "reverse" || response.body.reverseProtocol !== REVERSE_PROTOCOL) {
+        throw new Error(`hub returned an unexpected pairing result (routeMode ${JSON.stringify(response.body.routeMode)}, protocol ${JSON.stringify(response.body.reverseProtocol)})`);
+      }
+      let responseBinding;
+      try {
+        responseBinding = canonicalHubBaseUrl(response.body.hubBaseUrl);
+      } catch {
+        throw new Error(`hub returned an invalid hubBaseUrl ${JSON.stringify(response.body.hubBaseUrl)}`);
+      }
+      if (responseBinding !== this.baseHubUrl) {
+        throw new Error(`hub returned hubBaseUrl ${responseBinding} that does not match the pairing target ${this.baseHubUrl}`);
+      }
+      await this.persist({
+        nodeId: response.body.nodeId,
+        publicKeyHex: pending.publicKeyHex,
+        privateKeyHex: pending.privateKeyHex,
+        hubBaseUrl: this.baseHubUrl,
+        hubRouteKeys: null,
+        state: "active",
+        rotation: null,
+        pendingPairing: null,
+        routeMode: "reverse",
+      });
+      this.backoff.recordSuccess();
+      this.recordEvent("paired", { nodeId: response.body.nodeId, keyId: response.body.keyId, routeMode: "reverse" });
+      return { nodeId: response.body.nodeId, keyId: response.body.keyId, routeMode: "reverse", reverseProtocol: response.body.reverseProtocol };
+    }
+    const { code, message } = wireError(response.status, response.body);
+    this.recordEvent("pair-failed", { code, message });
+    if (response.status === 0) {
+      // Uncertain outcome: the Hub may have committed. Retry with the
+      // SAME token; the persisted intent replays the exact request.
+      throw new Error(`pairing outcome unknown (network failure): retry with the same pairing token (${message})`);
+    }
+    throw new Error(`pairing denied: ${code} (${message})`);
   }
 
   // ------------------------------------------------------------------

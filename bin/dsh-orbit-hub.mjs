@@ -17,6 +17,9 @@
 //   DSH_ORBIT_HUB_CA_CERT            optional private-CA PEM or PEM file for Node route targets
 //   DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS route probe cadence (default 60)
 //   DSH_ORBIT_HUB_ROUTE_ROTATION_OVERLAP_DAYS Hub route-key overlap (1-30, default 14)
+//   DSH_ORBIT_HUB_PAIRING_BASE_URL   canonical public Hub base URL returned
+//                                    by POST /api/v1/pair (RFC-0012 D3.3);
+//                                    pairing fails closed when unset
 //   DSH_ORBIT_HUB_DRILL_AGING / DSH_ORBIT_HUB_DRILL_AGING_CLOCK
 //                                    isolated mounted-drill contact-aging clock;
 //                                    rejected unless drill mode is explicit
@@ -40,6 +43,7 @@ const rotationOverlapHours = Number.parseInt(process.env.DSH_ORBIT_HUB_ROTATION_
 const routeDomain = process.env.DSH_ORBIT_HUB_ROUTE_DOMAIN ?? "localhost";
 const probeCadenceSeconds = Number(process.env.DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS ?? "60");
 const hubRouteOverlapDays = Number(process.env.DSH_ORBIT_HUB_ROUTE_ROTATION_OVERLAP_DAYS ?? "14");
+const pairingHubBaseUrl = process.env.DSH_ORBIT_HUB_PAIRING_BASE_URL ?? null;
 
 let caCertificates = null;
 if (process.env.DSH_ORBIT_HUB_CA_CERT) {
@@ -124,6 +128,7 @@ const registry = new Registry({
   routeDomain,
   trustedExternalScheme,
   caCertificates,
+  pairingHubBaseUrl,
   ...(drillContactNow ? { registryContactNow: drillContactNow } : {}),
 });
 const options = { lanBoundaryOnly, trustedExternalScheme };

@@ -1,16 +1,25 @@
-# v0.3 Registry gateway example (SOP Stage 6).
+# v0.5 Registry gateway example (RFC-0012 D2; supersedes the v0.3 layout).
 #
-# The browser ingress ends HERE; the machine ingress NEVER ends here.
+# The browser ingress ends HERE. The machine ingress reaches the Hub ONLY
+# through the exact RFC-0012 D2 allowlist below; every other machine path,
+# including /api/v1/enroll, still never ends here.
 # Enforced at the gateway:
-#   1. an authentication GATE runs first (basic_auth below);
+#   1. an authentication GATE runs first for browser surfaces (basic_auth
+#      below);
 #   2. only after it passes are the internal assertion + principal
 #      injected;
 #   3. client-supplied assertion/principal-shaped headers are stripped
 #      BEFORE injection and never trusted;
 #   4. the browser's OWN Cookie / Origin / Sec-Fetch-Site pass through
-#      untouched — the hub's RFC-0007 trust checks depend on them.
-#   5. /api/v1/* (machine surface) is refused: nodes talk to the hub
-#      over the private loopback listener only.
+#      untouched — the hub's RFC-0007 trust checks depend on them;
+#   5. machine traffic (pair / heartbeat / report-upload /
+#      credential-rotate / reenroll / reverse control+channel) is admitted
+#      ONLY on the deployment-designated Hub authority, with no
+#      authentication gate, no injected principal, and browser cookies /
+#      gateway assertion headers stripped before the Hub machine handler;
+#   6. node route authorities (n-*.dsh.example.local) deny exactly the
+#      Orbit machine paths (RFC-0012 D2 Host-scoped admission); DSH
+#      application paths keep routing normally.
 
 # The gateway shares the Hub container's network namespace
 # (network_mode: service:registry-hub in compose), so it reaches the hub's
@@ -22,10 +31,60 @@
 }
 
 registration.example.invalid {
-    # 5 FIRST: the machine surface is private and must never be
-    # proxied — matchers are evaluated in order.
-    @machine path /api/v1/*
-    handle @machine {
+    # RFC-0012 D2 machine allowlist FIRST (matchers are evaluated in
+    # order): exact paths only, POST for the RFC-0006 routes, GET
+    # (WebSocket upgrade) for the reverse surfaces. No basic_auth gate and
+    # no injected principal: machine requests authenticate with their own
+    # RFC-0006 credentials (or the pairing token). Browser cookies,
+    # Origin, and gateway assertion headers are stripped so machine
+    # traffic never inherits a browser session.
+    @machinePost {
+        method POST
+        path /api/v1/pair /api/v1/heartbeat /api/v1/report-upload /api/v1/credential-rotate /api/v1/reenroll
+    }
+    handle @machinePost {
+        reverse_proxy 127.0.0.1:5445 {
+            header_up -Cookie
+            header_up -Origin
+            header_up -X-DSH-Authenticated-Proxy
+            header_up -X-DSH-Operator-Id
+        }
+    }
+
+    @machineUpgrade {
+        method GET
+        path /api/v1/reverse/control /api/v1/reverse/channel
+    }
+    handle @machineUpgrade {
+        reverse_proxy 127.0.0.1:5445 {
+            header_up -Cookie
+            header_up -Origin
+            header_up -X-DSH-Authenticated-Proxy
+            header_up -X-DSH-Operator-Id
+        }
+    }
+
+    # Known machine paths with the wrong method fail closed at the
+    # gateway (RFC-0012 D2: wrong method is 405 before Hub logic).
+    @machineWrongMethod {
+        not method POST
+        path /api/v1/pair /api/v1/heartbeat /api/v1/report-upload /api/v1/credential-rotate /api/v1/reenroll
+    }
+    handle @machineWrongMethod {
+        respond 405
+    }
+
+    @machineUpgradeWrongMethod {
+        not method GET
+        path /api/v1/reverse/control /api/v1/reverse/channel
+    }
+    handle @machineUpgradeWrongMethod {
+        respond 405
+    }
+
+    # Every other machine path — including /api/v1/enroll — is refused.
+    @machineDenied path /api/v1/*
+    handle @machineDenied {
         respond 403
     }
 
@@ -66,7 +125,15 @@ registration.example.invalid {
 # - dsh.example.local -> Selector return landing
 # - n-<nodeId>.dsh.example.local -> Deterministic node route proxying to downstream DSH
 # - invalid wildcard subdomains -> 404 route-not-found (fail closed before private APIs)
+# - ANY Orbit machine path -> 404: machine paths are admitted only on the
+#   deployment-designated Hub authority (RFC-0012 D2); DSH application
+#   paths keep routing.
 dsh.example.local, *.dsh.example.local {
+    @machineApi path /api/v1/enroll /api/v1/pair /api/v1/heartbeat /api/v1/report-upload /api/v1/credential-rotate /api/v1/reenroll /api/v1/reverse/control /api/v1/reverse/channel
+    handle @machineApi {
+        respond 404
+    }
+
     basic_auth {
         operator $2a$10$REPLACE_WITH_BCRYPT_HASH
     }

@@ -34,7 +34,9 @@ export function emptyNodeStore() {
     state: "unenrolled",
     rotation: null,
     pendingEnrollment: null,
+    pendingPairing: null,
     pendingReenrollment: null,
+    routeMode: null,
     updatedAt: null,
   };
 }
@@ -93,6 +95,14 @@ export function validateNodeStore(store) {
     }
   }
 
+  // Route mode (RFC-0012 D1): transport fact mirrored from the Hub; paired
+  // nodes are reverse. Absent/null keeps legacy enrolled stores valid.
+  if (store.routeMode !== null && store.routeMode !== undefined) {
+    if (store.routeMode !== "direct" && store.routeMode !== "reverse") {
+      problems.push(`routeMode ${JSON.stringify(store.routeMode)} is neither "direct" nor "reverse"`);
+    }
+  }
+
   // State/identity invariants (P1-08) + cross-state relations (P2-02)
   if (store.state === "unenrolled") {
     if (store.nodeId !== null) problems.push("unenrolled store must not carry a nodeId");
@@ -102,6 +112,12 @@ export function validateNodeStore(store) {
     }
     if (store.pendingReenrollment !== null && store.pendingReenrollment !== undefined) {
       problems.push("unenrolled store must not carry a pendingReenrollment");
+    }
+    if (store.pendingPairing !== null && store.pendingPairing !== undefined && store.pendingEnrollment !== null && store.pendingEnrollment !== undefined) {
+      problems.push("unenrolled store must not carry both a pendingEnrollment and a pendingPairing");
+    }
+    if (store.routeMode !== null && store.routeMode !== undefined) {
+      problems.push("unenrolled store must not carry a routeMode");
     }
     if (store.rotation !== null && store.rotation !== undefined) {
       problems.push("unenrolled store must not carry a rotation marker");
@@ -129,6 +145,9 @@ export function validateNodeStore(store) {
     }
     if (store.pendingEnrollment !== null && store.pendingEnrollment !== undefined) {
       problems.push("active/revoked store must not carry a pendingEnrollment");
+    }
+    if (store.pendingPairing !== null && store.pendingPairing !== undefined) {
+      problems.push("active/revoked store must not carry a pendingPairing");
     }
     if (store.pendingReenrollment !== null && store.pendingReenrollment !== undefined && store.state !== "revoked") {
       problems.push("active store must not carry a pendingReenrollment (re-enrollment requires REVOKED)");
@@ -164,6 +183,32 @@ export function validateNodeStore(store) {
         }
       } catch (error) {
         problems.push(`pendingEnrollment Hub binding is invalid: ${error.message}`);
+      }
+    }
+  }
+
+  // Pending pairing (RFC-0012 D3.2): requestId + keypair + the Hub
+  // binding persisted BEFORE the POST /api/v1/pair request so an exact
+  // replay is possible after a lost response; the token is never stored.
+  if (store.pendingPairing !== null && store.pendingPairing !== undefined) {
+    const pending = store.pendingPairing;
+    if (typeof pending !== "object" || !HEX32.test(pending.pairingRequestId ?? "")) {
+      problems.push("pendingPairing lacks a valid pairingRequestId");
+    }
+    if (!HEX64.test(pending.publicKeyHex ?? "") || !HEX96.test(pending.privateKeyHex ?? "")) {
+      problems.push("pendingPairing lacks a valid keypair");
+    } else if (!keyPairMatches(pending.publicKeyHex, pending.privateKeyHex)) {
+      problems.push("pendingPairing keypair does not self-verify");
+    }
+    if (typeof pending.hubBaseUrl !== "string" || pending.hubBaseUrl === "") {
+      problems.push("pendingPairing lacks its Hub binding");
+    } else {
+      try {
+        if (canonicalHubBaseUrl(pending.hubBaseUrl) !== pending.hubBaseUrl) {
+          problems.push("pendingPairing Hub binding is not canonicalized");
+        }
+      } catch (error) {
+        problems.push(`pendingPairing Hub binding is invalid: ${error.message}`);
       }
     }
   }

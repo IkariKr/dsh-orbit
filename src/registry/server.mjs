@@ -24,10 +24,31 @@ import { buildSelectorReadModel, mapEligibilityReason, isHtmlAccept, renderUnava
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
+  "/api/v1/pair",
   "/api/v1/heartbeat",
   "/api/v1/report-upload",
   "/api/v1/credential-rotate",
   "/api/v1/reenroll",
+]);
+
+// RFC-0012 D2: reverse control/channel are WebSocket-upgrade-only machine
+// surfaces. Plain (non-upgrade) requests to them fail closed explicitly.
+const REVERSE_UPGRADE_PATHS = new Set(["/api/v1/reverse/control", "/api/v1/reverse/channel"]);
+const EMPTY_BODY_SHA256 = sha256Hex("");
+
+// RFC-0012 D2: the Orbit-owned machine surfaces are admitted only on the
+// deployment-designated Hub authority. Per-node route authorities deny
+// exactly these paths (DSH application paths under /api/v1/* that are not
+// Orbit machine surfaces keep routing normally to the node's DSH).
+const ORBIT_MACHINE_PATHS = new Set([
+  "/api/v1/enroll",
+  "/api/v1/pair",
+  "/api/v1/heartbeat",
+  "/api/v1/report-upload",
+  "/api/v1/credential-rotate",
+  "/api/v1/reenroll",
+  "/api/v1/reverse/control",
+  "/api/v1/reverse/channel",
 ]);
 
 const SESSION_COOKIE = "dsh-orbit-hub-session";
@@ -37,6 +58,21 @@ const PRINCIPAL_HEADER = "x-dsh-operator-id";
 
 function isLoopback(address) {
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+function socketReasonPhrase(status) {
+  const phrases = {
+    400: "Bad Request",
+    401: "Unauthorized",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    426: "Upgrade Required",
+    429: "Too Many Requests",
+    500: "Internal Server Error",
+    503: "Service Unavailable",
+  };
+  return phrases[status] ?? "Error";
 }
 
 // In-memory sliding-window limiter; bounds abuse and never affects
@@ -207,6 +243,18 @@ export function createHubServer({ registry, options = {} }) {
         return;
       }
 
+      // RFC-0012 D2: machine paths are admitted only on the
+      // deployment-designated Hub authority; per-node route authorities
+      // deny exactly the Orbit machine surfaces instead of leaking them
+      // into the node route proxy. DSH application paths keep routing.
+      if (ORBIT_MACHINE_PATHS.has(request.url ?? "")) {
+        response.writeHead(404, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          error: { code: "machine-path-denied", message: "machine paths are not served on node route authorities" },
+        }));
+        return;
+      }
+
       // Check 5-condition eligibility
       const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
       if (!eligibility.eligible) {
@@ -344,6 +392,16 @@ export function createHubServer({ registry, options = {} }) {
       return;
     }
 
+    if (REVERSE_UPGRADE_PATHS.has(path)) {
+      // RFC-0012 D2: these machine surfaces are WebSocket-upgrade-only.
+      if (request.headers.origin !== undefined) {
+        return sendJson(response, 403, { error: { code: "origin-forbidden", message: "reverse machine upgrades must omit Origin" } });
+      }
+      if (request.method !== "GET") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "reverse machine paths accept GET upgrades only" } });
+      }
+      return sendJson(response, 426, { error: { code: "upgrade-required", message: "reverse machine paths require a WebSocket upgrade" } });
+    }
     if (MACHINE_ROUTES.has(path)) {
       handleMachineRequest(request, response, path).catch((error) => sendError(response, error));
       return;
@@ -368,6 +426,19 @@ export function createHubServer({ registry, options = {} }) {
     }
     const bodyLimit = path === "/api/v1/report-upload" ? BODY_LIMIT_REPORT : BODY_LIMIT_KIB;
     const rawBody = await readBody(request, bodyLimit);
+
+    if (path === "/api/v1/pair") {
+      // RFC-0012 D3: token-authenticated bootstrap; no machine signature
+      // exists yet. The plaintext token is used only for the attempt
+      // limiter key (digest) and the registry call; it is never logged.
+      const body = parseBody(rawBody);
+      const plaintextToken = typeof body.token === "string" ? body.token : "";
+      if (!limiter.allow(`pair-attempt:${sha256Hex(plaintextToken)}`, RATE_LIMITS.enrollmentAttemptsPerToken, 3600_000)) {
+        return sendJson(response, 429, { error: { code: "rate-limited", message: "pairing attempts per token exceeded" } });
+      }
+      const result = registry.pair({ token: plaintextToken, pairingRequestId: body.pairingRequestId, publicKey: body.publicKey });
+      return sendJson(response, 200, result);
+    }
 
     if (path === "/api/v1/enroll") {
       const body = parseBody(rawBody);
@@ -665,6 +736,48 @@ export function createHubServer({ registry, options = {} }) {
     ...(maxWsPerNode !== undefined ? { maxPerNode: maxWsPerNode } : {}),
   });
 
+  // RFC-0012 D2/D4 (Stage 2): reverse machine upgrades authenticate with
+  // the existing ORBIT-MACHINE-V1 rules over GET + empty-body hash, then
+  // fail closed: the session/channel machinery arrives in Stage 3/4 and
+  // nothing is established here.
+  function handleReverseMachineUpgrade(request, socket) {
+    const path = request.url ?? "";
+    if (request.headers.origin !== undefined) {
+      sendSocketHttpError(socket, 403, "Forbidden", {}, {
+        error: { code: "origin-forbidden", message: "reverse machine upgrades must omit Origin" },
+      });
+      return;
+    }
+    const remote = request.socket.remoteAddress ?? "unknown";
+    if (!limiter.allow(`machine-ip:${remote}`, RATE_LIMITS.perIpPerMinute, 60_000)) {
+      sendSocketHttpError(socket, 429, "Too Many Requests", { "retry-after": "60" }, {
+        error: { code: "rate-limited", message: "per-IP machine rate limit exceeded" },
+      });
+      return;
+    }
+    try {
+      registry.authenticateMachine({
+        nodeId: machineField(request, "x-orbit-node"),
+        keyId: machineField(request, "x-orbit-key"),
+        method: "GET",
+        path,
+        timestamp: machineField(request, "x-orbit-timestamp"),
+        nonce: machineField(request, "x-orbit-nonce"),
+        bodyHash: EMPTY_BODY_SHA256,
+        signature: machineField(request, "x-orbit-signature"),
+      });
+    } catch (error) {
+      const status = error instanceof DeniedError ? error.status : 500;
+      const code = error instanceof DeniedError ? error.code : "internal-error";
+      const message = error instanceof DeniedError ? error.message : "reverse upgrade authentication failed";
+      sendSocketHttpError(socket, status, socketReasonPhrase(status), {}, { error: { code, message } });
+      return;
+    }
+    sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
+      error: { code: "reverse-unavailable", message: "reverse sessions are not available until v0.5 Stage 3" },
+    });
+  }
+
   // Stage 4: Server WebSocket Upgrade Pipeline (RFC-0010 D7)
   server.on("upgrade", (request, socket, head) => {
     const upgradeHeader = request.headers.upgrade;
@@ -692,6 +805,17 @@ export function createHubServer({ registry, options = {} }) {
       if (!isValidOriginFormTarget(request.url)) {
         sendSocketHttpError(socket, 400, "Bad Request", {}, {
           error: { code: "invalid-target", message: "only origin-form request-target is supported" },
+        });
+        return;
+      }
+
+      // RFC-0012 D2: machine paths are admitted only on the
+      // deployment-designated Hub authority; per-node route authorities
+      // deny exactly the Orbit machine surfaces instead of leaking them
+      // into the node route proxy. DSH application paths keep routing.
+      if (ORBIT_MACHINE_PATHS.has(request.url ?? "")) {
+        sendSocketHttpError(socket, 404, "Not Found", {}, {
+          error: { code: "machine-path-denied", message: "machine paths are not served on node route authorities" },
         });
         return;
       }
@@ -748,6 +872,11 @@ export function createHubServer({ registry, options = {} }) {
       sendSocketHttpError(socket, 404, "Not Found", {}, {
         error: { code: "route-not-found", message: "invalid or unrecognized node route authority" },
       });
+      return;
+    }
+
+    if (REVERSE_UPGRADE_PATHS.has(request.url ?? "")) {
+      handleReverseMachineUpgrade(request, socket);
       return;
     }
 

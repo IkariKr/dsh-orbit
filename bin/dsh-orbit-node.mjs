@@ -4,6 +4,8 @@
 // Commands:
 //   (default)     run the heartbeat/report loop (daemon; keeps alive)
 //   enroll        one-time enrollment with an operator token
+//   pair          one-time RFC-0012 pairing bootstrap (fresh NAT-restricted
+//                 installation; creates a reverse-mode node)
 //   reenroll      explicit re-enrollment (revoked node, operator token)
 //   rotate        initiate credential rotation (signed with the old key)
 //   status        print persisted + runtime state
@@ -14,6 +16,7 @@
 //   DSH_ORBIT_HUB_URL                 hub base URL (required; must match the
 //                                     persisted binding once enrolled)
 //   DSH_ORBIT_ENROLL_TOKEN            one-time enrollment token (enroll only)
+//   DSH_ORBIT_PAIR_TOKEN              one-time pair token (pair only)
 //   DSH_ORBIT_REENROLL_TOKEN          tombstone-bound re-enrollment token
 //   DSH_ORBIT_NODE_HEARTBEAT_SECONDS  cadence 30-300 (default 60; others fail closed)
 //   DSH_ORBIT_NODE_ORBIT_VERSION      orbit version reported to the hub
@@ -102,6 +105,19 @@ switch (command) {
       })
       .catch((error) => {
         console.error(`enroll failed: ${error.message}`);
+        process.exit(1);
+      });
+    break;
+  }
+  case "pair": {
+    const token = requireEnv("DSH_ORBIT_PAIR_TOKEN");
+    client
+      .pair({ token })
+      .then((result) => {
+        console.log(`paired: ${result.nodeId} (keyId ${result.keyId}, routeMode ${result.routeMode})`);
+      })
+      .catch((error) => {
+        console.error(`pair failed: ${error.message}`);
         process.exit(1);
       });
     break;
