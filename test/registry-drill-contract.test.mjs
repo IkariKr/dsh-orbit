@@ -72,8 +72,8 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "selector-view", "selector"/);
   assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "selector-view", "selector-reload"/);
   assert.ok(bridge.includes('navigate(driver, gateway + "/", "gateway-management")'));
-  assert.ok(bridge.includes('wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))'));
-  assert.ok(bridge.includes('wait_for(wait, EC.presence_of_element_located((By.ID, "session-status")))'));
+  assert.match(bridge, /wait_for_navigation_element\(driver, By\.TAG_NAME, "body", "gateway-management"/);
+  assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "session-status", "gateway-session"/);
 
   assert.match(bridge, /root_anchor_present/);
   assert.match(bridge, /installed-retained/);
@@ -94,6 +94,7 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(bridge, /cookie-selector-observed/);
   assert.match(bridge, /UnexpectedAlertPresentException/);
   assert.match(bridge, /navigation-alert-dismissed/);
+  assert.match(bridge, /gateway-session/);
   assert.match(bridge, /except \(OSError, ValueError\)/);
   assert.match(bridge, /broken socket escape/);
   assert.doesNotMatch(bridge, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);

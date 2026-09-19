@@ -374,6 +374,7 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
   assert.match(drill, /force-recreate machine-ingress caddy/);
   assert.doesNotMatch(drill, /docker restart \$\{machineIngressContainer\}/);
   assert.doesNotMatch(drill, /rmSync\(join\(REPO, "data"\), \{ recursive: true/);
+  assert.match(drill, /ownedRoot/);
   assert.match(drill, /runtime residue removed/);
   const emitter = await text("scripts/emit-stage8-mounted-evidence.mjs");
   assert.match(emitter, /rmSync\(rawPath, \{ force: true \}\)/);

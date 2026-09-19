@@ -534,8 +534,8 @@ def run(args: argparse.Namespace) -> int:
         # Navigate to the same origin without userinfo after Firefox has
         # cached the real Basic Auth challenge response for this host.
         navigate(driver, gateway + "/", "gateway-management")
-        wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
-        wait_for(wait, EC.presence_of_element_located((By.ID, "session-status")))
+        wait_for_navigation_element(driver, By.TAG_NAME, "body", "gateway-management", log=log)
+        wait_for_navigation_element(driver, By.ID, "session-status", "gateway-session", log=log)
         log(f"gateway-loaded:title={driver.title!r}:url={driver.current_url!r}")
         # Keep the management document active until its session and one-time
         # token checkpoints are complete. Selector and Node authorities are

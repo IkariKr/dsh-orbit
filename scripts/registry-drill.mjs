@@ -445,8 +445,20 @@ function removeDrillRuntimeResidue() {
     DRILL_EXT_PATH,
   ];
   for (const path of paths) rmSync(path, { force: true });
-  rmSync(join(REPO, "data", "orbit-drill", "tls"), { recursive: true, force: true });
-  rmSync(join(REPO, "data", "orbit-drill"), { recursive: true, force: true });
+  const ownedRoot = join(REPO, "data", "orbit-drill");
+  for (const path of readdirSync(ownedRoot, { withFileTypes: true })) {
+    const child = join(ownedRoot, path.name);
+    if (path.isDirectory()) {
+      for (const nested of readdirSync(child, { withFileTypes: true })) {
+        const nestedPath = join(child, nested.name);
+        if (nested.isFile()) rmSync(nestedPath, { force: true });
+      }
+      try { rmSync(child, { force: true }); } catch {}
+    } else {
+      rmSync(child, { force: true });
+    }
+  }
+  try { rmSync(ownedRoot, { force: true }); } catch {}
   removeDrillProxySecret();
 }
 
