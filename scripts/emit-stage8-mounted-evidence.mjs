@@ -4,7 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertMountedMatrixShape } from "./stage8-mounted-matrix.mjs";
@@ -97,4 +97,5 @@ const smoke = {
 mkdirSync(dirname(outputPath), { recursive: true });
 writeFileSync(rawOutputPath, rawBuffer, { encoding: "utf8", mode: 0o640 });
 writeFileSync(outputPath, JSON.stringify(smoke, null, 2) + "\n", { encoding: "utf8", mode: 0o640 });
-console.log(JSON.stringify({ outputPath, runId: smoke.runId, candidateCommit: smoke.candidateCommit, rawEvidenceSha256: rawSha256 }, null, 2));
+rmSync(rawPath, { force: true });
+console.log(JSON.stringify({ outputPath, runId: smoke.runId, candidateCommit: smoke.candidateCommit, rawEvidenceSha256: rawSha256, rawSourceRemoved: true }, null, 2));

@@ -447,7 +447,6 @@ function removeDrillRuntimeResidue() {
   for (const path of paths) rmSync(path, { force: true });
   rmSync(join(REPO, "data", "orbit-drill", "tls"), { recursive: true, force: true });
   rmSync(join(REPO, "data", "orbit-drill"), { recursive: true, force: true });
-  rmSync(join(REPO, "data"), { recursive: true, force: true });
   removeDrillProxySecret();
 }
 
