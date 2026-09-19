@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import select
 import shutil
 import socket
@@ -391,6 +392,24 @@ def run(args: argparse.Namespace) -> int:
         with log_path.open("a", encoding="utf-8") as stream:
             stream.write(line + "\n")
 
+    def redact_error(error: BaseException) -> str:
+        message = str(error)
+        message = re.sub(r"https?://[^/\\s:@]+:[^@\\s]+@", "https://<redacted>@", message)
+        return message[:500]
+
+    def navigate(driver, url: str, label: str) -> None:
+        log(f"navigation-start:{label}")
+        try:
+            driver.get(url)
+        except Exception as error:
+            log(f"navigation-failed:{label}:{type(error).__name__}:{redact_error(error)}")
+            raise
+        try:
+            current_url = driver.current_url
+        except WebDriverException:
+            current_url = "<unavailable>"
+        log(f"navigation-returned:{label}:url={current_url!r}")
+
     bindings = read_json(Path(args.bindings_path))
     gateway_url = bindings.get("gatewayUrl")
     parsed_gateway = urlparse(gateway_url or "")
@@ -444,10 +463,10 @@ def run(args: argparse.Namespace) -> int:
         gateway = bindings["gatewayUrl"]
         log("navigating-gateway-authenticated")
         gateway_warmup = gateway.rstrip("/") + "/styles.css"
-        driver.get(gateway_warmup.replace("https://", "https://operator:drill-password@", 1))
+        navigate(driver, gateway_warmup.replace("https://", "https://operator:drill-password@", 1), "gateway-warmup")
         # Navigate to the same origin without userinfo after Firefox has
         # cached the real Basic Auth challenge response for this host.
-        driver.get(gateway + "/")
+        navigate(driver, gateway + "/", "gateway-management")
         wait_for(wait, EC.presence_of_element_located((By.TAG_NAME, "body")))
         wait_for(wait, EC.presence_of_element_located((By.ID, "session-status")))
         log(f"gateway-loaded:title={driver.title!r}:url={driver.current_url!r}")
@@ -503,7 +522,7 @@ def run(args: argparse.Namespace) -> int:
         # Reload the clean management document instead of relying on a SPA
         # tab transition after token minting. The document bootstraps a fresh
         # authenticated session and loads the Nodes view deterministically.
-        driver.get(gateway + "/")
+        navigate(driver, gateway + "/", "gateway-management-reload")
         session_status = wait_for(wait, EC.visibility_of_element_located((By.ID, "session-status")))
         wait.until(lambda _driver: session_status.text.strip().startswith("operator:"))
         log("management-nodes-reloaded")
@@ -561,13 +580,13 @@ def run(args: argparse.Namespace) -> int:
         for label, warm_url in [("selector", selector_url), ("open-a", open_urls["a"]), ("open-b", open_urls["b"])]:
             authority_warmup = warm_url.rstrip("/") + "/styles.css"
             log(f"authority-warmup-start:{label}")
-            driver.get(authority_warmup.replace("https://", "https://operator:drill-password@", 1))
+            navigate(driver, authority_warmup.replace("https://", "https://operator:drill-password@", 1), f"{label}-warmup")
             log(f"authority-warmup-loaded:{label}")
-            driver.get(warm_url)
+            navigate(driver, warm_url, f"{label}-authority")
             wait_for_navigation_element(driver, By.TAG_NAME, "body", f"authority-{label}", log=log)
             log(f"authority-loaded:{label}")
         log("selector-load-start")
-        driver.get(selector_url)
+        navigate(driver, selector_url, "selector")
         log("selector-load-complete")
         wait_for_navigation_element(driver, By.ID, "selector-view", "selector", log=log)
         selector_snapshot = wait_for_selector_cards(driver, stop_path, expected=2, log=log)
@@ -588,7 +607,7 @@ def run(args: argparse.Namespace) -> int:
         if route_a is False:
             return 0
         selector_open_a = True
-        driver.get(selector_url)
+        navigate(driver, selector_url, "selector-reload")
         wait_for_navigation_element(driver, By.ID, "selector-view", "selector-reload", log=log)
         selector_snapshot = wait_for_selector_cards(driver, stop_path, expected=2, log=log)
         if selector_snapshot is False:
