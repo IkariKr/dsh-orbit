@@ -152,6 +152,19 @@ def redact_error_text(error: BaseException | str) -> str:
     return message[:500]
 
 
+def safe_url_for_log(value: str) -> str:
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return "<unavailable>"
+        authority = parsed.hostname
+        if parsed.port:
+            authority += f":{parsed.port}"
+        return f"{parsed.scheme}://{authority}{parsed.path or '/'}"
+    except (TypeError, ValueError):
+        return "<unavailable>"
+
+
 def certificate_thumbprint(ca_path: Path) -> str:
     result = subprocess.run(
         ["openssl", "x509", "-in", str(ca_path), "-noout", "-fingerprint", "-sha1"],
@@ -416,7 +429,7 @@ def run(args: argparse.Namespace) -> int:
             current_url = driver.current_url
         except WebDriverException:
             current_url = "<unavailable>"
-        log(f"navigation-returned:{label}:url={current_url!r}")
+        log(f"navigation-returned:{label}:url={safe_url_for_log(current_url)!r}")
 
     bindings = read_json(Path(args.bindings_path))
     gateway_url = bindings.get("gatewayUrl")

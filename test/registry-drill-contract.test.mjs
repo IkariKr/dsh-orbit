@@ -79,6 +79,8 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(bridge, /installed-retained/);
   assert.match(bridge, /log_output=subprocess.DEVNULL/);
   assert.match(bridge, /redact_error_text/);
+  assert.match(bridge, /safe_url_for_log/);
+  assert.match(bridge, /navigation-returned:.*safe_url_for_log/);
   assert.match(bridge, /rootAnchorOwnership/);
   assert.doesNotMatch(bridge, /Retain the drill anchor/);
   assert.match(bridge, /challengeDigest/);
