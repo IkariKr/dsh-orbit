@@ -144,6 +144,14 @@ def resolve_geckodriver() -> str:
     raise RuntimeError("geckodriver.exe was not found; set DSH_ORBIT_GECKODRIVER")
 
 
+def redact_error_text(error: BaseException | str) -> str:
+    message = str(error)
+    message = re.sub(r"https?://[^/\\s:@]+:[^@\\s]+@", "https://<redacted>@", message)
+    message = message.replace("operator:drill-password@", "<redacted>@")
+    message = message.replace("drill-password", "<redacted>")
+    return message[:500]
+
+
 def certificate_thumbprint(ca_path: Path) -> str:
     result = subprocess.run(
         ["openssl", "x509", "-in", str(ca_path), "-noout", "-fingerprint", "-sha1"],
@@ -169,22 +177,22 @@ def root_anchor_present(thumbprint: str) -> bool:
     return probe.returncode == 0 and probe.stdout.strip() == "1"
 
 
-def install_windows_root(ca_path: Path) -> tuple[str, bool]:
-    """Reuse a retained drill CA anchor; avoid crypt32 prompts during unattended runs."""
+def install_windows_root(ca_path: Path) -> tuple[str, str]:
+    """Reuse or install a uniquely identified drill CA and retain it explicitly."""
     thumbprint = certificate_thumbprint(ca_path)
     if root_anchor_present(thumbprint):
-        return thumbprint, False
+        return thumbprint, "preexisting"
     installed = certutil_run(["-f", "-user", "-addstore", "Root", str(ca_path)])
     if installed.returncode != 0:
         raw_detail = installed.stderr or installed.stdout or b"certutil addstore failed"
         detail = raw_detail.decode(errors="replace").strip().splitlines()[-1][:240]
         raise RuntimeError(f"certutil addstore failed ({installed.returncode}): {detail}")
-    return thumbprint, False
+    return thumbprint, "installed-retained"
 
 
-def remove_windows_root(thumbprint: str, owned: bool) -> None:
-    # Retain the drill anchor by policy: deleting a Root anchor can trigger a
-    # crypt32 confirmation dialog and strand unattended subsequent runs.
+def remove_windows_root(thumbprint: str, ownership: str) -> None:
+    # Retain only this uniquely fingerprinted drill anchor; ownership is recorded
+    # in the bridge log/checkpoint so residue is explicit and auditable.
     return
 
 
@@ -341,6 +349,7 @@ def wait_for_route_page(
     driver,
     expected_url: str,
     forbidden_text: str,
+    expected_cookie_value: str,
     label: str,
     stop_path: Path,
     log=None,
@@ -370,6 +379,7 @@ def wait_for_route_page(
                 snapshot.get("url", "").startswith(expected_url)
                 and snapshot.get("readyState") in {"interactive", "complete"}
                 and forbidden_text not in snapshot.get("body", "")
+                and any(cookie.get("name") == "drill_node" and cookie.get("value") == expected_cookie_value for cookie in driver.get_cookies())
             ):
                 return snapshot
         except WebDriverException as error:
@@ -393,9 +403,7 @@ def run(args: argparse.Namespace) -> int:
             stream.write(line + "\n")
 
     def redact_error(error: BaseException) -> str:
-        message = str(error)
-        message = re.sub(r"https?://[^/\\s:@]+:[^@\\s]+@", "https://<redacted>@", message)
-        return message[:500]
+        return redact_error_text(error)
 
     def navigate(driver, url: str, label: str) -> None:
         log(f"navigation-start:{label}")
@@ -423,8 +431,8 @@ def run(args: argparse.Namespace) -> int:
 
     ca_path = Path(args.ca_path)
     log(f"installing-ca:{ca_path.name}")
-    thumbprint, owned_root = install_windows_root(ca_path)
-    log(f"ca-trusted:{thumbprint}:{'owned' if owned_root else 'preexisting'}")
+    thumbprint, root_ownership = install_windows_root(ca_path)
+    log(f"ca-trusted:{thumbprint}:{root_ownership}")
     profile_dir = Path(tempfile.mkdtemp(prefix="dsh-orbit-firefox-"))
     gecko_log = log_path.with_name("geckodriver.log")
     driver = None
@@ -450,7 +458,7 @@ def run(args: argparse.Namespace) -> int:
         options.set_preference("network.proxy.no_proxies_on", "")
         options.accept_insecure_certs = False
         log("starting-firefox")
-        service = Service(resolve_geckodriver(), log_output=str(gecko_log))
+        service = Service(resolve_geckodriver(), log_output=subprocess.DEVNULL)
         driver = webdriver.Firefox(service=service, options=options)
         log("firefox-started")
         driver.set_page_load_timeout(60)
@@ -497,6 +505,7 @@ def run(args: argparse.Namespace) -> int:
             "plaintextOneTimeVerified": True,
             "browserProducer": "runner-owned-firefox-selenium",
             "challengeDigest": challenge_digest,
+            "rootAnchorOwnership": root_ownership,
             "recordedAt": utc_now(),
         }
         write_json(Path(args.bootstrap_path), bootstrap)
@@ -600,6 +609,7 @@ def run(args: argparse.Namespace) -> int:
             driver,
             open_urls["a"],
             node_ids[1],
+            "A",
             "Open A",
             stop_path,
             log=log,
@@ -617,6 +627,7 @@ def run(args: argparse.Namespace) -> int:
             driver,
             open_urls["b"],
             node_ids[0],
+            "B",
             "Open B",
             stop_path,
             log=log,
@@ -651,6 +662,7 @@ def run(args: argparse.Namespace) -> int:
             "nodeIds": node_ids,
             "browserProducer": "runner-owned-firefox-selenium",
             "challengeDigest": challenge_digest,
+            "rootAnchorOwnership": root_ownership,
             "recordedAt": utc_now(),
         }
         write_json(Path(args.lifecycle_path), lifecycle)
@@ -680,7 +692,7 @@ def run(args: argparse.Namespace) -> int:
                 log(f"driver-quit-error:{type(quit_error[0]).__name__}")
         if service is not None:
             stop_owned_process(getattr(service, "process", None), "geckodriver")
-        remove_windows_root(thumbprint, owned_root)
+        remove_windows_root(thumbprint, root_ownership)
         shutil.rmtree(profile_dir, ignore_errors=True)
 
 
@@ -697,7 +709,7 @@ def main() -> int:
     try:
         return run(args)
     except Exception as error:  # no token or credential values are included
-        print(f"browser bridge failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
+        print(f"browser bridge failed: {type(error).__name__}: {redact_error_text(error)}", file=sys.stderr, flush=True)
         return 1
 
 

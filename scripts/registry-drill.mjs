@@ -249,6 +249,9 @@ function ensureDrillCertificate() {
   }
   try {
     chmodSync(DRILL_CERT_PATH, 0o644);
+    // Drill-only bind mount is consumed by two distinct unprivileged UIDs
+    // (Caddy 1000 and DSH Node 10001); 0644 is required for both readers.
+    // The key remains under ignored data/orbit-drill and is removed after runs.
     chmodSync(DRILL_CERT_KEY_PATH, 0o644);
     chmodSync(DRILL_CA_PATH, 0o644);
   } catch {}
@@ -293,6 +296,9 @@ function readCheckpoint(path, label) {
 function validateBrowserBindings(checkpoint, label) {
   if (checkpoint.browserProducer !== "runner-owned-firefox-selenium") {
     throw new Error(`${label} must be produced by runner-owned Firefox bridge`);
+  }
+  if (!['preexisting', 'installed-retained'].includes(checkpoint.rootAnchorOwnership)) {
+    throw new Error(`${label} must record explicit Root anchor ownership`);
   }
   const expectedChallengeDigest = createHash("sha256").update(BROWSER_CHALLENGE).digest("hex");
   if (checkpoint.challengeDigest !== expectedChallengeDigest) {
@@ -432,6 +438,14 @@ function browserBridgeArgs() {
   ];
 }
 
+function redactBrowserError(value) {
+  return String(value ?? "")
+    .replace(/https?:\/\/[^/\s:@]+:[^@\s]+@/g, "https://<redacted>@")
+    .replaceAll("operator:drill-password@", "<redacted>@")
+    .replaceAll("drill-password", "<redacted>")
+    .slice(0, 500);
+}
+
 function startBrowserBridge() {
   if (!existsSync(BROWSER_BRIDGE_PATH)) {
     throw new Error(`runner-owned Firefox bridge missing: ${BROWSER_BRIDGE_PATH}`);
@@ -449,7 +463,7 @@ function startBrowserBridge() {
   let stderr = "";
   browserBridgeProcess.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
   browserBridgeProcess.on("exit", (code, signal) => {
-    evidence.browserBridgeExit = { code, signal, error: code === 0 ? null : stderr.trim().slice(0, 500) };
+    evidence.browserBridgeExit = { code, signal, error: code === 0 ? null : redactBrowserError(stderr) };
   });
   evidence.browserBridge = {
     producer: "runner-owned-firefox-selenium",

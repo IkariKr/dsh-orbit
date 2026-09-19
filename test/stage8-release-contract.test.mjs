@@ -350,6 +350,7 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
     ].includes(path);
   const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: repo, encoding: "utf8" }).trimEnd();
   const statusPaths = status ? status.split(/\r?\n/).map((line) => line.slice(3).trim()).filter(Boolean) : [];
+  const ignoredRuntime = execFileSync("git", ["ls-files", "--others", "--ignored", "--exclude-standard", "--", "data", "secrets"], { cwd: repo, encoding: "utf8" }).trim();
   assert.equal(auth.constructionLineage.candidateSelected, false);
   assert.equal(auth.constructionLineage.candidateMustBeFrozenBeforeEvidence, true);
   assert.equal(gitIsAncestor(auth.acceptedRuntimeBase, current), true);
@@ -365,4 +366,8 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
     assert.equal(status, "", "frozen candidate worktree must be clean before evidence execution");
   }
   assert.equal(statusPaths.some((path) => path.startsWith("test/evidence/stage8/") || path === "docs/release-attestations/v0.4.0-rc.x.md" || path.startsWith("data/")), false, "pre-freeze worktree must not contain candidate evidence, attestation, or run residue");
+  assert.equal(ignoredRuntime, "", `ignored runtime residue must be cleaned before evidence execution: ${ignoredRuntime}`);
+  const drill = await text("scripts/registry-drill.mjs");
+  assert.match(drill, /chmodSync\(DRILL_CERT_KEY_PATH, 0o644\)/);
+  assert.match(drill, /unprivileged UIDs/);
 });

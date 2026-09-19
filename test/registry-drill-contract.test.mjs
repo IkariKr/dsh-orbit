@@ -76,7 +76,11 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.ok(bridge.includes('wait_for(wait, EC.presence_of_element_located((By.ID, "session-status")))'));
 
   assert.match(bridge, /root_anchor_present/);
-  assert.match(bridge, /Retain the drill anchor/);
+  assert.match(bridge, /installed-retained/);
+  assert.match(bridge, /log_output=subprocess.DEVNULL/);
+  assert.match(bridge, /redact_error_text/);
+  assert.match(bridge, /rootAnchorOwnership/);
+  assert.doesNotMatch(bridge, /Retain the drill anchor/);
   assert.match(bridge, /challengeDigest/);
   assert.match(bridge, /cookieIsolationVerified/);
   assert.doesNotMatch(bridge, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);
