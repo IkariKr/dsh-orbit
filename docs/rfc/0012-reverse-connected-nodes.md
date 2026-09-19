@@ -1,6 +1,6 @@
 # RFC 0012: Reverse-connected nodes for v0.5
 
-Status: **Proposed for v0.5 architecture review (2026-09-20). Product construction is blocked until the Stage 0 / Gate A review records GO.**
+Status: **Proposed for v0.5 architecture review; remediated per Gate A review round 1 (2026-09-20, `docs/review/review-v0.5-stage0-rfc-sop-2026-09-20.md`). Product construction is blocked until the Stage 0 / Gate A review records GO.**
 
 Depends on: RFC-0001 node identity, RFC-0003 node authentication, RFC-0005 enrollment and registry persistence, RFC-0006 machine API, RFC-0007 browser management API, RFC-0008 per-node Hub service identity, RFC-0009 capability/health semantics, RFC-0010 node endpoint/routing, RFC-0011 browser node selection, and authorization `V05-CONSTRUCTION-20260919-A1`.
 
@@ -99,7 +99,7 @@ A NAT-restricted node needs a public outbound-reachable Orbit endpoint. v0.5 reu
 
 For a reverse-connected node, this public authority is persisted as its canonical RFC-0005/RFC-0008 `hubBaseUrl`. The reverse control/data connection and the ordinary heartbeat/report/rotation requests all use that same canonical Hub binding. v0.5 does **not** add a second independently trusted `reverseBaseUrl` and does not silently rebind an existing node from one Hub authority to another.
 
-A previously enrolled node may enable reverse mode without pairing only when its already-persisted canonical `hubBaseUrl` is reachable from its current network and exposes the v0.5 public reverse machine ingress. Migrating an existing node to a different Hub authority is a separate explicit trust/binding migration and is not smuggled into reverse reconnect logic. A fresh NAT-restricted installation should use pairing so the correct public `hubBaseUrl` is established at bootstrap.
+A previously enrolled node may enable reverse mode without pairing only when its already-persisted canonical `hubBaseUrl` is reachable from its current network and exposes the v0.5 reverse machine surfaces defined below. Migrating an existing node to a different Hub authority is a separate explicit trust/binding migration and is not smuggled into reverse reconnect logic. A fresh NAT-restricted installation should use pairing so the correct public `hubBaseUrl` is established at bootstrap.
 
 The outer gateway may publicly admit only the following exact Orbit-owned machine surfaces:
 
@@ -114,6 +114,14 @@ GET  /api/v1/reverse/channel      (WebSocket upgrade only)
 ```
 
 `/api/v1/enroll` remains outside the public reverse ingress. Server-reachable enrollment keeps its existing boundary.
+
+The seven surfaces above are served by one Hub machine handler set on every machine ingress that a node's persisted canonical `hubBaseUrl` can reference:
+
+- the pre-existing server-reachable machine listener keeps its RFC-0006 paths and additionally admits `POST /api/v1/pair`, `GET /api/v1/reverse/control`, and `GET /api/v1/reverse/channel` with identical semantics, so an already-registered node enables reverse mode through its existing binding without repair or rebinding;
+- `/api/v1/enroll` remains server-reachability-only and is never added to the public projection;
+- the public gateway is the outward projection of that same handler set behind mandatory verified TLS/WSS, gateway rate limits, header stripping, and the exact method/path allowlist above;
+- machine paths are admitted only on the deployment-designated Hub authority referenced by `hubBaseUrl`; per-node route authorities (`n-<node-id-hex>.<route-domain>`) deny machine paths;
+- v0.5 adds no rebinding, no second binding, and no `reverseBaseUrl` for reverse enablement.
 
 Gateway rules are fixed:
 
@@ -302,11 +310,17 @@ After the new session becomes ready, the Hub atomically:
 
 This prevents a half-open reconnect from destroying a healthy session and prevents an old disconnect callback from clearing a new session.
 
+Pending (authenticated, not yet `ready`) control connections are bounded per node:
+
+- a new authenticated control connection for a node closes that node's prior pending connections;
+- a pending connection that has not reached `ready` within 30 seconds is closed;
+- neither rule can evict the current ready session.
+
 ### D4.3 Liveness
 
 - Hub sends WebSocket ping every 20 seconds.
 - Missing pong for 10 seconds closes the control session.
-- Control close changes reverse presence to offline immediately.
+- Control close changes reverse presence to offline immediately for a `routeMode = reverse` node; on a `direct` node the dead non-routing session falls back to `unknown`.
 - The node reconnects with exponential backoff 1s, 2s, 4s … capped at 30s with ±20% jitter.
 - A successful ready session resets the backoff.
 - Live session state is never persisted.
@@ -469,7 +483,7 @@ It does not replace existing dimensions.
 
 - `registryContact` remains driven only by RFC-0009 heartbeat.
 - `orbitCompatible`, `dshHealthy`, and `web.routes` remain report-derived.
-- `reversePresence` is current authenticated reverse control-session state. It is `online` when a current ready session exists; it is `offline` when `routeMode = reverse` and no ready session exists; it is `unknown` only for a `direct` node with no reverse session, where reverse presence is not an active routing fact. A ready reverse session on a direct-mode node may still be displayed as `online`, but it remains ineligible for routing while mode is direct.
+- `reversePresence` is current authenticated reverse control-session state. It is `online` when a current ready session exists; it is `offline` when `routeMode = reverse` and no ready session exists; it is `unknown` only for a `direct` node with no reverse session, where reverse presence is not an active routing fact. A ready reverse session on a direct-mode node may still be displayed as `online`, but it remains ineligible for routing while mode is direct. When that session dies, presence falls back to `unknown`.
 - `reachable` remains the Hub's route-transport readiness result, but its source now depends on explicit `routeMode`.
 
 For `routeMode = direct`:
@@ -516,7 +530,7 @@ Required:
 - `reachable = ok`;
 - active per-node Hub route identity;
 - fresh `web.routes`;
-- at least one data channel can be obtained within the 2-second capacity wait.
+- at least one data channel is available: eligibility uses a non-destructive pool-availability predicate, and the 2-second capacity wait with its 503 `reverse-capacity` failure happens only when a flow is actually assigned.
 
 The selector keeps the same deterministic Open target. It may display `routeMode` and reverse presence, but it does not invent another selection system.
 
