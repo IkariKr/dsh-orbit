@@ -63,6 +63,29 @@ DSH Node B --bridge--> registry-hub:5446 machine-ingress
   WAL/migration mutation and again after migration, and refuses to enter
   registry listening on either page corruption or existing FK violations.
 
+## Verification TLS trust boundary
+
+All automated, drill, mounted, and browser verification follows
+`docs/sop/verification-tls-trust-policy.md`.
+
+Verification must not install temporary test/drill CA certificates into the host
+Windows System/CurrentUser Root stores or equivalent persistent OS trust stores.
+TLS verification remains mandatory: Node/CLI clients use an explicit run-scoped
+CA bundle, while Firefox/Selenium uses a runner-owned temporary profile with the
+CA imported only into that profile's NSS certificate database.
+
+Unknown CA, wrong SAN, wrong hostname, and other negative TLS cases must still
+fail closed. `accept_insecure_certs`, certificate-error ignore flags,
+`rejectUnauthorized=false`, or HTTP downgrade are not acceptable substitutes.
+If a browser acceptance path cannot run without persistent OS Root-store
+mutation or an interactive certificate prompt, the verification is `BLOCKED`
+and stops rather than weakening TLS.
+
+Run-owned CA/leaf keys, certificates, browser profiles, NSS databases,
+checkpoints, and logs are cleanup-owned residue. Cleanup must be bounded to the
+current run and must not recursively delete unrelated repository/operator data.
+A cleanup failure prevents the run from qualifying as PASS.
+
 ## Restart drills
 
 1. **Hub restart**: the registry DB is a persistent SQLite/WAL file; nodes
