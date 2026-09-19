@@ -69,6 +69,7 @@ export class ReverseClient {
     onEvent = () => {},
     caCertificates = null,
     livenessPollMs = DSH_LIVENESS_POLL_MS,
+    channelPool = null,
   }) {
     if (typeof getCredentials !== "function") {
       throw new Error("reverse client requires a getCredentials callback");
@@ -80,6 +81,7 @@ export class ReverseClient {
     this.onEvent = onEvent;
     this.caCertificates = caCertificates;
     this.livenessPollMs = livenessPollMs;
+    this.channelPool = channelPool;
     this.socket = null;
     this.parse = null;
     this.expectedAccept = null;
@@ -105,6 +107,7 @@ export class ReverseClient {
 
   stop() {
     this.stopped = true;
+    this.channelPool?.clearSession();
     this.clearTimers();
     if (this.socket) {
       this.sendClose(1000, "node-stop");
@@ -334,6 +337,8 @@ export class ReverseClient {
       this.sendJson({ type: "ready", protocol: REVERSE_PROTOCOL, routeReady: this.currentRouteReady });
       // A successful ready session resets the reconnect backoff (D4.3).
       this.backoffAttempt = 0;
+      // The data-channel pool hangs off the current ready session (D5).
+      this.channelPool?.setSession(this.sessionId, message.idleTarget, message.maxChannels);
       // D8: report status only when the local route readiness changes.
       this.routeReadyTimer = setInterval(async () => {
         const ready = await probeDshTransport(this.dshTarget);
@@ -355,6 +360,7 @@ export class ReverseClient {
     }
   onConnectionLost() {
     const hadSession = this.sessionId !== null;
+    this.channelPool?.clearSession();
     this.sessionId = null;
     this.parse = null;
     if (this.livenessTimer) {

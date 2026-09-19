@@ -36,8 +36,10 @@ import { readFile } from "node:fs/promises";
 import process from "node:process";
 import { NodeClient } from "../src/node/client.mjs";
 import { ReverseClient } from "../src/node/reverse-client.mjs";
+import { ReverseChannelPool } from "../src/node/reverse-channels.mjs";
 import { RouteIngress } from "../src/node/route-ingress.mjs";
 import { deriveKeyId } from "../src/registry/crypto.mjs";
+import { RouteNonceCache } from "../src/registry/route-auth.mjs";
 import { assertStateFilePermissions, loadNodeStore, loadNodeStoreAsync } from "../src/node/store.mjs";
 
 function requireEnv(name) {
@@ -188,6 +190,7 @@ switch (command) {
     let mainTimer = null;
     let ingress = null;
     let reverseClient = null;
+    let sharedRouteNonceCache = null;
     const cadenceMs = client.heartbeatCadenceSeconds * 1000;
 
     const routeIngressDisabled = process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_DISABLED === "1";
@@ -237,6 +240,7 @@ switch (command) {
         await client.recoverAfterRestart();
 
         if (!routeIngressDisabled) {
+          sharedRouteNonceCache = new RouteNonceCache();
           ingress = new RouteIngress({
             nodeId: () => client.store.nodeId,
             routeDomain,
@@ -245,6 +249,7 @@ switch (command) {
             maxWsConnections,
             getTrustKeys: () => client.getHubRouteKeys(),
             getNodeState: () => client.status().state,
+            nonceCache: sharedRouteNonceCache,
           });
           client.routeIngress = ingress;
           await ingress.listen(ingressPort, ingressListen);

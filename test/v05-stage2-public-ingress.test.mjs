@@ -138,7 +138,7 @@ test("wrong method on pair, plain requests on reverse paths, and unknown machine
   registry.close();
 });
 
-test("reverse control upgrade authenticates with ORBIT-MACHINE-V1 over GET + empty body hash and establishes a session; the channel surface stays Stage 4 fail-closed", async (t) => {
+test("reverse control upgrade authenticates with ORBIT-MACHINE-V1 over GET + empty body hash and establishes a session; the channel surface binds to the current session", async (t) => {
   const registry = pairRegistry();
   const { baseUrl, reverseSessions, close } = await createTestServer(registry, { pairingHubBaseUrl: PAIRING_HUB_BASE_URL });
   t.after(close);
@@ -151,16 +151,46 @@ test("reverse control upgrade authenticates with ORBIT-MACHINE-V1 over GET + emp
   });
   assert.equal(control.status, 101, "the control upgrade must succeed after machine authentication");
 
-  const channel = await upgradeProbe(baseUrl, "/api/v1/reverse/channel", {
+  // A channel upgrade without the session binding fails closed (400).
+  const channelNoBinding = await upgradeProbe(baseUrl, "/api/v1/reverse/channel", {
     nodeId: node.nodeId,
     keyId: node.keyId,
     privateKeyHex: node.privateKeyHex,
   });
-  assert.equal(channel.status, 503);
-  assert.equal(channel.body.error.code, "reverse-channel-unavailable");
+  assert.equal(channelNoBinding.status, 400);
+  assert.equal(channelNoBinding.body.error.code, "bad-request");
+
+  // With a READY control session, the bound channel upgrade registers
+  // into the bounded pool (Stage 4).
+  const { ReverseClient } = await import("../src/node/reverse-client.mjs");
+  const reverseClient = new ReverseClient({
+    hubBaseUrl: baseUrl,
+    getCredentials: () => ({ nodeId: node.nodeId, keyId: node.keyId, privateKeyHex: node.privateKeyHex }),
+    dshTarget: "http://127.0.0.1:1",
+  });
+  reverseClient.start();
+  await waitForCondition(() => reverseSessions.getSessionInfo(node.nodeId) !== null, "ready session");
+  const sessionInfo = reverseSessions.getSessionInfo(node.nodeId);
+  const channel = await upgradeProbe(baseUrl, "/api/v1/reverse/channel", {
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    privateKeyHex: node.privateKeyHex,
+    extraHeaders: { "x-orbit-reverse-session": sessionInfo.reverseSessionId },
+  });
+  assert.equal(channel.status, 101);
+  reverseClient.stop();
   await close();
   registry.close();
 });
+
+async function waitForCondition(predicate, label, timeoutMs = 8000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timeout waiting for ${label}`);
+}
 
 test("reverse upgrade security: Origin 403, signature binding, nonce replay, skew, and no credential substitution", async (t) => {
   const registry = pairRegistry();

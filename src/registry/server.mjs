@@ -22,6 +22,7 @@ import {
 } from "./route-proxy.mjs";
 import { buildSelectorReadModel, mapEligibilityReason, isHtmlAccept, renderUnavailableHtml } from "./selector-view.mjs";
 import { ReverseSessionManager } from "./reverse-session.mjs";
+import { ReverseChannelManager } from "./reverse-channel.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -740,10 +741,15 @@ export function createHubServer({ registry, options = {} }) {
   // RFC-0012 D4: live reverse control sessions are process memory only.
   // Runtime observability logs carry nodeIds and readiness only — never
   // session IDs, keys, or signatures (RFC-0012 D13).
+  const reverseChannels = options.reverseChannels ?? new ReverseChannelManager();
   const reverseSessions = options.reverseSessions ?? new ReverseSessionManager({
     onPromoted: (nodeId, routeReady) => console.log(`reverse session ready node=${nodeId} routeReady=${routeReady}`),
     onRouteReadyChange: (nodeId, routeReady) => console.log(`reverse route readiness node=${nodeId} routeReady=${routeReady}`),
-    onSessionClosed: (session, reason) => console.log(`reverse session closed node=${session.nodeId} reason=${reason}`),
+    onSessionClosed: (session, reason) => {
+      console.log(`reverse session closed node=${session.nodeId} reason=${reason}`);
+      // D4.2: a takeover/close invalidates the old generation's channels.
+      reverseChannels.closeChannelsForSession(session.sessionId, reason);
+    },
   });
 
   // RFC-0012 D2/D4: reverse machine upgrades authenticate with the
@@ -795,10 +801,31 @@ export function createHubServer({ registry, options = {} }) {
       });
       return;
     }
-    // Stage 4 boundary: the data-channel pool arrives later; until then
-    // the channel surface fails closed after authentication.
-    sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
-      error: { code: "reverse-channel-unavailable", message: "reverse data channels are not available until v0.5 Stage 4" },
+    // RFC-0012 D5: the channel must bind to the node's CURRENT ready
+    // session. The session header is a binding value, never a credential.
+    let boundSession;
+    try {
+      boundSession = machineField(request, "x-orbit-reverse-session");
+    } catch (error) {
+      const status = error instanceof DeniedError ? error.status : 400;
+      const code = error instanceof DeniedError ? error.code : "bad-request";
+      sendSocketHttpError(socket, status, socketReasonPhrase(status), {}, {
+        error: { code, message: error.message },
+      });
+      return;
+    }
+    const sessionInfo = reverseSessions.getSessionInfo(auth.node.node_id);
+    if (!sessionInfo || boundSession !== sessionInfo.reverseSessionId) {
+      sendSocketHttpError(socket, 403, "Forbidden", {}, {
+        error: { code: "session-binding-invalid", message: "X-Orbit-Reverse-Session does not match the current ready session" },
+      });
+      return;
+    }
+    reverseChannels.registerChannel({
+      nodeId: auth.node.node_id,
+      sessionId: boundSession,
+      socket,
+      secWebSocketKey: request.headers["sec-websocket-key"],
     });
   }
 
@@ -914,5 +941,5 @@ export function createHubServer({ registry, options = {} }) {
     reverseSessions.closeAll("hub-shutdown");
   });
 
-  return { server, wsTracker, reverseSessions };
+  return { server, wsTracker, reverseSessions, reverseChannels };
 }
