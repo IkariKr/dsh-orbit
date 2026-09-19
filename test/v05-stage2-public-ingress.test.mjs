@@ -72,7 +72,10 @@ function upgradeProbe(baseUrl, path, { nodeId, keyId, privateKeyHex, nonce, time
         response.on("error", reject);
       },
     );
-    request.on("upgrade", () => reject(new Error("unexpected successful upgrade")));
+    request.on("upgrade", (upgradeResponse, upgradeSocket) => {
+      upgradeSocket.destroy();
+      resolve({ status: upgradeResponse.statusCode, body: {} });
+    });
     request.on("error", reject);
     request.end();
   });
@@ -135,19 +138,18 @@ test("wrong method on pair, plain requests on reverse paths, and unknown machine
   registry.close();
 });
 
-test("reverse control upgrade authenticates with ORBIT-MACHINE-V1 over GET + empty body hash, then fails closed (Stage 2)", async (t) => {
+test("reverse control upgrade authenticates with ORBIT-MACHINE-V1 over GET + empty body hash and establishes a session; the channel surface stays Stage 4 fail-closed", async (t) => {
   const registry = pairRegistry();
-  const { baseUrl, close } = await createTestServer(registry, { pairingHubBaseUrl: PAIRING_HUB_BASE_URL });
+  const { baseUrl, reverseSessions, close } = await createTestServer(registry, { pairingHubBaseUrl: PAIRING_HUB_BASE_URL });
   t.after(close);
   const node = await enrollActiveNode(baseUrl, registry);
 
-  const ok = await upgradeProbe(baseUrl, "/api/v1/reverse/control", {
+  const control = await upgradeProbe(baseUrl, "/api/v1/reverse/control", {
     nodeId: node.nodeId,
     keyId: node.keyId,
     privateKeyHex: node.privateKeyHex,
   });
-  assert.equal(ok.status, 503);
-  assert.equal(ok.body.error.code, "reverse-unavailable");
+  assert.equal(control.status, 101, "the control upgrade must succeed after machine authentication");
 
   const channel = await upgradeProbe(baseUrl, "/api/v1/reverse/channel", {
     nodeId: node.nodeId,
@@ -155,6 +157,7 @@ test("reverse control upgrade authenticates with ORBIT-MACHINE-V1 over GET + emp
     privateKeyHex: node.privateKeyHex,
   });
   assert.equal(channel.status, 503);
+  assert.equal(channel.body.error.code, "reverse-channel-unavailable");
   await close();
   registry.close();
 });
@@ -216,7 +219,7 @@ test("reverse upgrade security: Origin 403, signature binding, nonce replay, ske
   const replayNonce = randomHex(16);
   const replayTs = String(Math.trunc(Date.now() / 1000));
   const first = await upgradeProbe(baseUrl, "/api/v1/reverse/control", { ...probeArgs, nonce: replayNonce, timestamp: replayTs });
-  assert.equal(first.status, 503);
+  assert.equal(first.status, 101);
   const replay = await upgradeProbe(baseUrl, "/api/v1/reverse/control", { ...probeArgs, nonce: replayNonce, timestamp: replayTs });
   assert.equal(replay.status, 401);
   await close();
@@ -297,8 +300,7 @@ test("the server-reachable machine listener exposes pair and the reverse surface
     keyId: node.keyId,
     privateKeyHex: node.privateKeyHex,
   });
-  assert.equal(upgraded.status, 503);
-  assert.equal(upgraded.body.error.code, "reverse-unavailable");
+  assert.equal(upgraded.status, 101, "the reverse session establishes through the existing binding");
 
   // Origin never passes the ingress.
   const originBlocked = await upgradeProbe(probeUrl, "/api/v1/reverse/control", {

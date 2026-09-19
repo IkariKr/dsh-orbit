@@ -21,6 +21,7 @@ import {
   sendSocketHttpError,
 } from "./route-proxy.mjs";
 import { buildSelectorReadModel, mapEligibilityReason, isHtmlAccept, renderUnavailableHtml } from "./selector-view.mjs";
+import { ReverseSessionManager } from "./reverse-session.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -736,11 +737,21 @@ export function createHubServer({ registry, options = {} }) {
     ...(maxWsPerNode !== undefined ? { maxPerNode: maxWsPerNode } : {}),
   });
 
-  // RFC-0012 D2/D4 (Stage 2): reverse machine upgrades authenticate with
-  // the existing ORBIT-MACHINE-V1 rules over GET + empty-body hash, then
-  // fail closed: the session/channel machinery arrives in Stage 3/4 and
-  // nothing is established here.
-  function handleReverseMachineUpgrade(request, socket) {
+  // RFC-0012 D4: live reverse control sessions are process memory only.
+  // Runtime observability logs carry nodeIds and readiness only — never
+  // session IDs, keys, or signatures (RFC-0012 D13).
+  const reverseSessions = options.reverseSessions ?? new ReverseSessionManager({
+    onPromoted: (nodeId, routeReady) => console.log(`reverse session ready node=${nodeId} routeReady=${routeReady}`),
+    onRouteReadyChange: (nodeId, routeReady) => console.log(`reverse route readiness node=${nodeId} routeReady=${routeReady}`),
+    onSessionClosed: (session, reason) => console.log(`reverse session closed node=${session.nodeId} reason=${reason}`),
+  });
+
+  // RFC-0012 D2/D4: reverse machine upgrades authenticate with the
+  // existing ORBIT-MACHINE-V1 rules over GET + empty-body hash. The
+  // control surface then establishes a reverse control session (Stage 3);
+  // the channel surface still fails closed until the data-channel pool
+  // arrives in Stage 4.
+  function handleReverseMachineUpgrade(request, socket, head) {
     const path = request.url ?? "";
     if (request.headers.origin !== undefined) {
       sendSocketHttpError(socket, 403, "Forbidden", {}, {
@@ -755,8 +766,9 @@ export function createHubServer({ registry, options = {} }) {
       });
       return;
     }
+    let auth;
     try {
-      registry.authenticateMachine({
+      auth = registry.authenticateMachine({
         nodeId: machineField(request, "x-orbit-node"),
         keyId: machineField(request, "x-orbit-key"),
         method: "GET",
@@ -773,8 +785,20 @@ export function createHubServer({ registry, options = {} }) {
       sendSocketHttpError(socket, status, socketReasonPhrase(status), {}, { error: { code, message } });
       return;
     }
+    if (path === "/api/v1/reverse/control") {
+      reverseSessions.registerUpgrade({
+        nodeId: auth.node.node_id,
+        keyId: auth.key.key_id,
+        socket,
+        secWebSocketKey: request.headers["sec-websocket-key"],
+        head,
+      });
+      return;
+    }
+    // Stage 4 boundary: the data-channel pool arrives later; until then
+    // the channel surface fails closed after authentication.
     sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
-      error: { code: "reverse-unavailable", message: "reverse sessions are not available until v0.5 Stage 3" },
+      error: { code: "reverse-channel-unavailable", message: "reverse data channels are not available until v0.5 Stage 4" },
     });
   }
 
@@ -876,7 +900,7 @@ export function createHubServer({ registry, options = {} }) {
     }
 
     if (REVERSE_UPGRADE_PATHS.has(request.url ?? "")) {
-      handleReverseMachineUpgrade(request, socket);
+      handleReverseMachineUpgrade(request, socket, head);
       return;
     }
 
@@ -887,7 +911,8 @@ export function createHubServer({ registry, options = {} }) {
 
   server.on("close", () => {
     wsTracker.destroyAll();
+    reverseSessions.closeAll("hub-shutdown");
   });
 
-  return { server, wsTracker };
+  return { server, wsTracker, reverseSessions };
 }

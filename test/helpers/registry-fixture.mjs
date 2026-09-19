@@ -18,13 +18,19 @@ export function createTestRegistry(options = {}) {
 }
 
 export async function createTestServer(registry, options = {}) {
-  const { server } = createHubServer({ registry, options });
+  const hub = createHubServer({ registry, options });
+  const { server } = hub;
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   const baseUrl = `http://127.0.0.1:${address.port}`;
   return {
     baseUrl,
-    close: () => new Promise((resolve) => server.close(resolve)),
+    reverseSessions: hub.reverseSessions,
+    close: () =>
+      new Promise((resolve) => {
+        server.closeAllConnections?.();
+        server.close(resolve);
+      }),
   };
 }
 

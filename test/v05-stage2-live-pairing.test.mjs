@@ -23,6 +23,7 @@ import { GATEWAY_CERT_PEM, GATEWAY_KEY_PEM } from "./fixtures/gateway-identity.m
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { deriveKeyId, sha256Hex, randomHex, signSigningString } from "../src/registry/crypto.mjs";
 import { buildSigningString, MACHINE_V1_LABEL } from "../src/registry/protocol.mjs";
+import { createFrameParser } from "../src/registry/reverse-ws.mjs";
 import { validReport } from "./helpers/registry-fixture.mjs";
 import { NodeClient } from "../src/node/client.mjs";
 import { loadNodeStoreAsync } from "../src/node/store.mjs";
@@ -165,6 +166,52 @@ function startRehearsalGateway({ certPem, keyPem }) {
     response.end(JSON.stringify({ error: { code: "not-found", message: "gateway serves only the machine allowlist" } }));
     request.resume();
   });
+  // WebSocket upgrade relay for the reverse control surface (the Hub owns
+  // authentication and the session; the gateway only forwards bytes).
+  server.on("upgrade", (request, clientSocket, head) => {
+    const path = (request.url ?? "").split("?")[0];
+    if (!PUBLIC_GET_PATHS.has(path) || request.headers.origin !== undefined) {
+      clientSocket.destroy();
+      return;
+    }
+    const headers = { ...request.headers };
+    delete headers.cookie;
+    delete headers["x-dsh-authenticated-proxy"];
+    delete headers["x-dsh-operator-id"];
+    const upstream = http.request(hubUrl + path, { method: "GET", headers });
+    upstream.on("upgrade", (upstreamResponse, upstreamSocket, upstreamHead) => {
+      const relayHeaders = Object.entries(upstreamResponse.headers)
+        .map(([name, value]) => `${name}: ${value}`)
+        .join("\r\n");
+      clientSocket.write(`HTTP/1.1 101 ${upstreamResponse.statusMessage ?? "Switching Protocols"}\r\n${relayHeaders}\r\n\r\n`);
+      if (head && head.length > 0) clientSocket.write(head);
+      if (upstreamHead && upstreamHead.length > 0) clientSocket.write(upstreamHead);
+      upstreamSocket.pipe(clientSocket);
+      clientSocket.pipe(upstreamSocket);
+      const closeBoth = () => {
+        upstreamSocket.destroy();
+        clientSocket.destroy();
+      };
+      upstreamSocket.on("error", closeBoth);
+      clientSocket.on("error", closeBoth);
+      upstreamSocket.on("close", closeBoth);
+      clientSocket.on("close", closeBoth);
+    });
+    upstream.on("response", (upstreamResponse) => {
+      const chunks = [];
+      upstreamResponse.on("data", (chunk) => chunks.push(chunk));
+      upstreamResponse.on("end", () => {
+        const body = Buffer.concat(chunks);
+        clientSocket.end(
+          `HTTP/1.1 ${upstreamResponse.statusCode ?? 502} ${upstreamResponse.statusMessage ?? "Error"}\r\nconnection: close\r\ncontent-length: ${body.length}\r\n\r\n${body.toString("utf8")}`,
+        );
+      });
+    });
+    upstream.on("error", () => clientSocket.destroy());
+    if (head && head.length > 0) upstream.write(head);
+    upstream.end();
+  });
+
   return {
     server,
     listen: () => new Promise((resolve) => server.listen(0, "127.0.0.1", resolve)),
@@ -372,16 +419,27 @@ test("Live v0.5 Stage 2 pairing evidence: fresh node pairs, heartbeats, uploads 
       (res) => {
         const chunks = [];
         res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+        res.on("end", () => resolve({ status: res.statusCode, session: null }));
       },
     );
-    request.on("upgrade", () => reject(new Error("unexpected successful upgrade")));
+    request.on("upgrade", (res, socket, head) => {
+      assert.equal(res.statusCode, 101);
+      const messages = [];
+      const parse = createFrameParser({ isClient: true, onMessage: (text) => messages.push(text) });
+      socket.on("data", (chunk) => parse(chunk));
+      setTimeout(() => {
+        socket.destroy();
+        resolve({ status: res.statusCode, session: messages[0] ?? null });
+      }, 250);
+    });
     request.on("error", reject);
     request.end();
   });
-  assert.equal(upgradeResult.status, 503);
-  assert.match(upgradeResult.body, /reverse-unavailable/);
-  console.log("[Evidence] Reverse control surface reachable through the public ingress and fails closed after machine auth (Stage 3 arrives later)");
+  assert.equal(upgradeResult.status, 101);
+  const sessionFrame = JSON.parse(upgradeResult.session ?? "{}");
+  assert.equal(sessionFrame.type, "session");
+  assert.equal(sessionFrame.protocol, "orbit-reverse-v1");
+  console.log("[Evidence] Reverse control session established through the public ingress after machine authentication");
 
   console.log("\n=== v0.5 Stage 2 live evidence complete: paired node bootstrapped and maintained its machine relationship entirely through the public machine ingress ===");
 });

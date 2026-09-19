@@ -35,7 +35,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import process from "node:process";
 import { NodeClient } from "../src/node/client.mjs";
+import { ReverseClient } from "../src/node/reverse-client.mjs";
 import { RouteIngress } from "../src/node/route-ingress.mjs";
+import { deriveKeyId } from "../src/registry/crypto.mjs";
 import { assertStateFilePermissions, loadNodeStore, loadNodeStoreAsync } from "../src/node/store.mjs";
 
 function requireEnv(name) {
@@ -185,6 +187,7 @@ switch (command) {
     // on its own (P1-04). Only the shutdown watchdog may unref.
     let mainTimer = null;
     let ingress = null;
+    let reverseClient = null;
     const cadenceMs = client.heartbeatCadenceSeconds * 1000;
 
     const routeIngressDisabled = process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_DISABLED === "1";
@@ -249,6 +252,27 @@ switch (command) {
           console.log(`dsh-orbit-node: route ingress listening on ${scheme}://${ingressListen}:${ingress.port} (target ${dshTarget})`);
         }
 
+        // RFC-0012 D4: a reverse-mode node maintains its outbound control
+        // session with the Hub. Direct-mode nodes never open one.
+        if (store.routeMode === "reverse") {
+          reverseClient = new ReverseClient({
+            hubBaseUrl: client.store.hubBaseUrl,
+            caCertificates: client.caCertificates ?? null,
+            dshTarget,
+            getCredentials: () =>
+              client.store.state === "active" && client.store.privateKeyHex
+                ? {
+                    nodeId: client.store.nodeId,
+                    keyId: deriveKeyId(client.store.publicKeyHex),
+                    privateKeyHex: client.store.privateKeyHex,
+                  }
+                : null,
+            onEvent: (event, detail) => console.log(`dsh-orbit-node: reverse ${event}${detail ? ` (${JSON.stringify(detail)})` : ""}`),
+          });
+          reverseClient.start();
+          console.log("dsh-orbit-node: reverse control client started (routeMode=reverse)");
+        }
+
         console.log(`dsh-orbit-node: running against ${client.status().hubBaseUrl} (cadence ${client.heartbeatCadenceSeconds}s, state ${client.status().state})`);
         const loop = async () => {
           try {
@@ -278,6 +302,11 @@ switch (command) {
       if (ingress) {
         try {
           await ingress.close();
+        } catch {}
+      }
+      if (reverseClient) {
+        try {
+          reverseClient.stop();
         } catch {}
       }
       setTimeout(() => process.exit(0), 200).unref();
