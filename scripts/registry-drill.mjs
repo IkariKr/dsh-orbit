@@ -422,8 +422,33 @@ function removeDrillProxySecret() {
   const stat = lstatSync(DRILL_PROXY_SECRET_PATH);
   if (stat.isFile() && readFileSync(DRILL_PROXY_SECRET_PATH, "utf8").trim() === DRILL_PROXY_SECRET) {
     rmSync(DRILL_PROXY_SECRET_PATH, { force: true });
-    mkdirSync(DRILL_PROXY_SECRET_PATH, { recursive: true });
+  } else if (stat.isDirectory() && readdirSync(DRILL_PROXY_SECRET_PATH).length === 0) {
+    rmSync(DRILL_PROXY_SECRET_PATH, { recursive: true, force: true });
   }
+}
+
+function removeDrillRuntimeResidue() {
+  const paths = [
+    RAW_EVIDENCE_PATH,
+    AGING_CLOCK_PATH,
+    BROWSER_BOOTSTRAP_CHECKPOINT_PATH,
+    BROWSER_CHECKPOINT_PATH,
+    BROWSER_BINDINGS_PATH,
+    BROWSER_NODE_BINDING_PATH,
+    BROWSER_STOP_PATH,
+    BROWSER_BRIDGE_LOG_PATH,
+    DRILL_CA_KEY_PATH,
+    DRILL_CA_PATH,
+    DRILL_CERT_PATH,
+    DRILL_CERT_KEY_PATH,
+    DRILL_CSR_PATH,
+    DRILL_EXT_PATH,
+  ];
+  for (const path of paths) rmSync(path, { force: true });
+  rmSync(join(REPO, "data", "orbit-drill", "tls"), { recursive: true, force: true });
+  rmSync(join(REPO, "data", "orbit-drill"), { recursive: true, force: true });
+  rmSync(join(REPO, "data"), { recursive: true, force: true });
+  removeDrillProxySecret();
 }
 
 function browserBridgeArgs() {
@@ -853,16 +878,19 @@ async function main() {
   const keep = args.includes("--keep");
   let stackStarted = false;
   runCleanup = async () => {
+    const failures = [];
     try {
       await stopBrowserBridge();
     } catch (error) {
-      console.error(`drill cleanup: browser bridge: ${error.message}`);
+      failures.push(`browser bridge: ${error.message}`);
     }
-    if (keep) return;
-    await stopNode("dsh-a", "/data/dsh-a", { strict: false });
-    await stopNode("dsh-b", "/data/dsh-b", { strict: false });
-    if (stackStarted) sh(`docker compose -f ${COMPOSE} down`, { expect: null });
-    removeDrillProxySecret();
+    if (!keep) {
+      try { await stopNode("dsh-a", "/data/dsh-a", { strict: false }); } catch (error) { failures.push(`dsh-a: ${error.message}`); }
+      try { await stopNode("dsh-b", "/data/dsh-b", { strict: false }); } catch (error) { failures.push(`dsh-b: ${error.message}`); }
+      try { if (stackStarted) sh(`docker compose -f ${COMPOSE} down`); } catch (error) { failures.push(`compose: ${error.message}`); }
+      try { removeDrillRuntimeResidue(); } catch (error) { failures.push(`runtime residue: ${error.message}`); }
+    }
+    if (failures.length > 0) throw new Error(`drill cleanup failed: ${failures.join("; ")}`);
   };
 
   // The drill Hub performs an immediate maintenance pass at startup, so
@@ -1450,7 +1478,7 @@ async function main() {
   evidence.success = true;
 
   await runCleanup();
-  evidence.cleanup = keep ? "kept by --keep" : "owned Node daemons stopped; compose down executed";
+  evidence.cleanup = keep ? "kept by --keep" : "owned Node daemons stopped; compose down executed; runtime residue removed";
   mkdirSync(dirname(RAW_EVIDENCE_PATH), { recursive: true });
   writeFileSync(RAW_EVIDENCE_PATH, JSON.stringify(evidence, null, 2), { encoding: "utf8", mode: 0o640 });
   console.log(JSON.stringify(evidence, null, 2));
@@ -1464,6 +1492,7 @@ main().then(
       await runCleanup();
     } catch (cleanupError) {
       console.error(`DRILL CLEANUP FAILED: ${cleanupError.stack ?? cleanupError}`);
+      process.exitCode = 2;
     }
     mkdirSync(dirname(RAW_EVIDENCE_PATH), { recursive: true });
     writeFileSync(RAW_EVIDENCE_PATH, JSON.stringify({ ...evidence, finishedAt: new Date().toISOString(), success: false, error: String(error) }, null, 2), { encoding: "utf8", mode: 0o640 });

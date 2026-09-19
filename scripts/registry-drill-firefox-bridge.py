@@ -204,9 +204,11 @@ def install_windows_root(ca_path: Path) -> tuple[str, str]:
 
 
 def remove_windows_root(thumbprint: str, ownership: str) -> None:
-    # Retain only this uniquely fingerprinted drill anchor; ownership is recorded
-    # in the bridge log/checkpoint so residue is explicit and auditable.
-    return
+    if ownership != "installed-retained" or os.name != "nt":
+        return
+    removed = certutil_run(["-f", "-user", "-delstore", "Root", thumbprint])
+    if removed.returncode != 0:
+        raise RuntimeError(f"owned drill Root anchor cleanup failed for {thumbprint}")
 
 
 def wait_for(wait: WebDriverWait, condition):

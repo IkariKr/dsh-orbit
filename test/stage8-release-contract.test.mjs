@@ -370,4 +370,6 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
   const drill = await text("scripts/registry-drill.mjs");
   assert.match(drill, /chmodSync\(DRILL_CERT_KEY_PATH, 0o644\)/);
   assert.match(drill, /unprivileged UIDs/);
+  assert.match(drill, /removeDrillRuntimeResidue/);
+  assert.match(drill, /runtime residue removed/);
 });
