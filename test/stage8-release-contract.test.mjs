@@ -378,4 +378,8 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
   assert.match(drill, /runtime residue removed/);
   const emitter = await text("scripts/emit-stage8-mounted-evidence.mjs");
   assert.match(emitter, /rmSync\(rawPath, \{ force: true \}\)/);
+  const bridge = await text("scripts/registry-drill-firefox-bridge.py");
+  assert.match(bridge, /firefox-profile-nss/);
+  assert.doesNotMatch(bridge, /CurrentUser\\\\Root|addstore|delstore|installed-retained/);
+  assert.doesNotMatch(bridge, /cookie-jars-before-verify/);
 });

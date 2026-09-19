@@ -86,48 +86,74 @@ class ConnectHandler(socketserver.BaseRequestHandler):
                 pass
 
 
-def certutil_run(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    certutil = shutil.which("certutil.exe")
-    if not certutil:
-        raise RuntimeError("Firefox trust setup unavailable: certutil.exe was not found")
-    command = [certutil, *arguments]
-    process = subprocess.Popen(
-        command,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=creationflags,
+def resolve_nss_certutil() -> str:
+    configured = os.environ.get("DSH_ORBIT_NSS_CERTUTIL")
+    candidates = [configured, shutil.which("nss-certutil"), shutil.which("certutil")]
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = str(Path(candidate))
+        if path.lower() in seen or not Path(path).exists():
+            continue
+        seen.add(path.lower())
+        try:
+            probe = subprocess.run(
+                [path, "-H"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=5,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        help_text = b"\n".join([probe.stdout or b"", probe.stderr or b""]).decode(errors="replace")
+        if "certutil -A" in help_text and "certutil -N" in help_text:
+            return path
+    raise RuntimeError(
+        "BLOCKED: Firefox profile trust setup unavailable: Mozilla NSS certutil was not found; "
+        "set DSH_ORBIT_NSS_CERTUTIL to an NSS certutil executable. "
+        "OS Root trust-store mutation is forbidden."
     )
+
+
+def nss_certutil_run(certutil: str, arguments: list[str]) -> None:
     try:
-        returncode = process.wait(timeout=CERTUTIL_TIMEOUT_SECONDS)
+        result = subprocess.run(
+            [certutil, *arguments],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=CERTUTIL_TIMEOUT_SECONDS,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
     except subprocess.TimeoutExpired as error:
-        # Popen.wait(timeout=...) avoids subprocess.run's post-timeout
-        # communicate() path, which can itself block when certutil has opened
-        # a certificate UI/store handle. Kill the owned process and its tree,
-        # then fail closed without waiting for inherited UI children.
-        try:
-            process.kill()
-        except OSError:
-            pass
-        try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            if os.name == "nt":
-                try:
-                    subprocess.run(
-                        ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        timeout=5,
-                        check=False,
-                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                    )
-                except (OSError, subprocess.TimeoutExpired):
-                    pass
-        raise RuntimeError(f"certutil timed out after {CERTUTIL_TIMEOUT_SECONDS}s: {' '.join(arguments[:4])}") from error
-    return subprocess.CompletedProcess(command, returncode)
+        raise RuntimeError(f"NSS certutil timed out: {' '.join(arguments[:4])}") from error
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "NSS certutil failed").strip().splitlines()[-1][:240]
+        raise RuntimeError(f"NSS certutil failed ({result.returncode}): {detail}")
+
+
+def install_profile_ca(profile_dir: Path, ca_path: Path) -> str:
+    certutil = resolve_nss_certutil()
+    database = f"sql:{profile_dir}"
+    nickname = f"dsh-orbit-drill-ca-{hashlib.sha256(ca_path.read_bytes()).hexdigest()[:16]}"
+    nss_certutil_run(certutil, ["-N", "--empty-password", "-d", database])
+    nss_certutil_run(certutil, ["-A", "-d", database, "-n", nickname, "-t", "C,,", "-i", str(ca_path)])
+    listed = subprocess.run(
+        [certutil, "-L", "-d", database, "-n", nickname],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=CERTUTIL_TIMEOUT_SECONDS,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if listed.returncode != 0:
+        raise RuntimeError("Firefox profile CA import could not be verified")
+    return nickname
 
 
 def utc_now() -> str:
@@ -174,81 +200,6 @@ def safe_url_for_log(value: str) -> str:
         return f"{parsed.scheme}://{authority}{parsed.path or '/'}"
     except (TypeError, ValueError):
         return "<unavailable>"
-
-
-def certificate_thumbprint(ca_path: Path) -> str:
-    result = subprocess.run(
-        ["openssl", "x509", "-in", str(ca_path), "-noout", "-fingerprint", "-sha1"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip().split("=", 1)[-1].replace(":", "").upper()
-
-
-def root_anchor_present(thumbprint: str) -> bool:
-    if os.name != "nt":
-        return False
-    probe = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", f"$ErrorActionPreference='Stop'; @(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {{$_.Thumbprint -eq '{thumbprint}'}}).Count"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=CERTUTIL_TIMEOUT_SECONDS,
-        text=True,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    return probe.returncode == 0 and probe.stdout.strip() == "1"
-
-
-def install_windows_root(ca_path: Path) -> tuple[str, str]:
-    """Reuse or install a uniquely identified drill CA and retain it explicitly."""
-    thumbprint = certificate_thumbprint(ca_path)
-    if root_anchor_present(thumbprint):
-        return thumbprint, "preexisting"
-    installed = certutil_run(["-f", "-user", "-addstore", "Root", str(ca_path)])
-    if installed.returncode != 0:
-        raw_detail = installed.stderr or installed.stdout or b"certutil addstore failed"
-        detail = raw_detail.decode(errors="replace").strip().splitlines()[-1][:240]
-        raise RuntimeError(f"certutil addstore failed ({installed.returncode}): {detail}")
-    return thumbprint, "installed-retained"
-
-
-def remove_windows_root(thumbprint: str, ownership: str) -> None:
-    if ownership != "installed-retained" or os.name != "nt":
-        return
-    if not re.fullmatch(r"[0-9A-Fa-f]{40}", thumbprint):
-        raise RuntimeError("owned drill Root anchor cleanup received an invalid thumbprint")
-    if not root_anchor_present(thumbprint):
-        return
-    command = (
-        "$ErrorActionPreference='Stop'; "
-        f"$thumb='{thumbprint.upper()}'; "
-        "$matches=@(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {$_.Thumbprint -eq $thumb}); "
-        "if ($matches.Count -gt 1) { throw 'owned drill Root anchor was not unique' }; "
-        "if ($matches.Count -eq 1) { "
-        "  $path=$matches[0].PSPath; "
-        "  try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop } catch { "
-        "    $remaining=@(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {$_.Thumbprint -eq $thumb}); "
-        "    if ($remaining.Count -ne 0) { throw } "
-        "  } "
-        "}; "
-        "if (@(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {$_.Thumbprint -eq $thumb}).Count -ne 0) { throw 'owned drill Root anchor remained after cleanup' }"
-    )
-    try:
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=CERTUTIL_TIMEOUT_SECONDS,
-            text=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except subprocess.TimeoutExpired as error:
-        raise RuntimeError(f"owned drill Root anchor cleanup timed out for {thumbprint}") from error
-    if result.returncode != 0:
-        raise RuntimeError(f"owned drill Root anchor cleanup failed for {thumbprint}")
 
 
 def wait_for(wait: WebDriverWait, condition):
@@ -502,15 +453,15 @@ def run(args: argparse.Namespace) -> int:
     challenge_digest = hashlib.sha256(challenge.encode("utf-8")).hexdigest()
 
     ca_path = Path(args.ca_path)
-    log(f"installing-ca:{ca_path.name}")
-    thumbprint, root_ownership = install_windows_root(ca_path)
-    log(f"ca-trusted:{thumbprint}:{root_ownership}")
     profile_dir = Path(tempfile.mkdtemp(prefix="dsh-orbit-firefox-"))
-    gecko_log = log_path.with_name("geckodriver.log")
     driver = None
     service = None
     proxy_server = None
+    trust_mode = "firefox-profile-nss"
     try:
+        log(f"installing-profile-ca:{ca_path.name}")
+        ca_nickname = install_profile_ca(profile_dir, ca_path)
+        log(f"profile-ca-trusted:{ca_nickname}")
         proxy_server = LocalConnectProxy(("127.0.0.1", 0), ConnectHandler, parsed_gateway.port)
         proxy_thread = threading.Thread(target=proxy_server.serve_forever, daemon=True)
         proxy_thread.start()
@@ -522,7 +473,7 @@ def run(args: argparse.Namespace) -> int:
         # on the previous /styles.css document while the SPA is still booting.
         options.add_argument("-profile")
         options.add_argument(str(profile_dir))
-        options.set_preference("security.enterprise_roots.enabled", True)
+        options.set_preference("security.enterprise_roots.enabled", False)
         options.set_preference("network.trr.mode", 5)
         options.set_preference("network.proxy.type", 1)
         options.set_preference("network.proxy.share_proxy_settings", True)
@@ -533,7 +484,7 @@ def run(args: argparse.Namespace) -> int:
         options.set_preference("network.proxy.no_proxies_on", "")
         options.accept_insecure_certs = False
         log("starting-firefox")
-        service = Service(resolve_geckodriver(), log_output=str(gecko_log))
+        service = Service(resolve_geckodriver(), log_output=subprocess.DEVNULL)
         try:
             driver = webdriver.Firefox(service=service, options=options)
         except Exception as error:
@@ -590,7 +541,7 @@ def run(args: argparse.Namespace) -> int:
             "plaintextOneTimeVerified": True,
             "browserProducer": "runner-owned-firefox-selenium",
             "challengeDigest": challenge_digest,
-            "rootAnchorOwnership": root_ownership,
+            "trustMode": trust_mode,
             "recordedAt": utc_now(),
         }
         write_json(Path(args.bootstrap_path), bootstrap)
@@ -741,11 +692,16 @@ def run(args: argparse.Namespace) -> int:
         log(f"cookie-selector-observed:count={len(selector_cookies)}")
         node_a_host = urlparse(open_urls["a"]).hostname or ""
         node_b_host = urlparse(open_urls["b"]).hostname or ""
+        drill_a = [cookie for cookie in cookies_a if cookie.get("name") == "drill_node"]
+        drill_b = [cookie for cookie in cookies_b if cookie.get("name") == "drill_node"]
+        selector_drill = [cookie for cookie in selector_cookies if cookie.get("name") == "drill_node"]
         log(
-            "cookie-jars-before-verify:"
-            f"a={[(cookie.get('name'), cookie.get('value'), cookie.get('domain')) for cookie in cookies_a]}:"
-            f"b={[(cookie.get('name'), cookie.get('value'), cookie.get('domain')) for cookie in cookies_b]}:"
-            f"selector={[(cookie.get('name'), cookie.get('value'), cookie.get('domain')) for cookie in selector_cookies]}"
+            "cookie-isolation-inputs:"
+            f"aCount={len(drill_a)}:aExpected={any(cookie.get('value') == 'A' for cookie in drill_a)}:"
+            f"aHostOnly={all(str(cookie.get('domain', '')).lstrip('.').lower() == node_a_host.lower() for cookie in drill_a)}:"
+            f"bCount={len(drill_b)}:bExpected={any(cookie.get('value') == 'B' for cookie in drill_b)}:"
+            f"bHostOnly={all(str(cookie.get('domain', '')).lstrip('.').lower() == node_b_host.lower() for cookie in drill_b)}:"
+            f"selectorDownstreamCookiePresent={len(selector_drill) > 0}"
         )
         cookie_isolated = verify_cookie_jar_isolation(cookies_a, cookies_b, selector_cookies, node_a_host, node_b_host)
         log("cookie-isolation-verified")
@@ -766,7 +722,7 @@ def run(args: argparse.Namespace) -> int:
             "nodeIds": node_ids,
             "browserProducer": "runner-owned-firefox-selenium",
             "challengeDigest": challenge_digest,
-            "rootAnchorOwnership": root_ownership,
+            "trustMode": trust_mode,
             "recordedAt": utc_now(),
         }
         write_json(Path(args.lifecycle_path), lifecycle)
@@ -810,13 +766,11 @@ def run(args: argparse.Namespace) -> int:
                 log(f"cleanup-geckodriver-failed:{type(error).__name__}:{redact_error(error)}")
                 raise
         try:
-            remove_windows_root(thumbprint, root_ownership)
-            log(f"cleanup-root-done:{root_ownership}")
+            shutil.rmtree(profile_dir)
+            log("cleanup-profile-done")
         except Exception as error:
-            log(f"cleanup-root-failed:{type(error).__name__}:{redact_error(error)}")
+            log(f"cleanup-profile-failed:{type(error).__name__}:{redact_error(error)}")
             raise
-        shutil.rmtree(profile_dir, ignore_errors=True)
-        log("cleanup-profile-done")
 
 
 def main() -> int:

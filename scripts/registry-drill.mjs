@@ -297,8 +297,8 @@ function validateBrowserBindings(checkpoint, label) {
   if (checkpoint.browserProducer !== "runner-owned-firefox-selenium") {
     throw new Error(`${label} must be produced by runner-owned Firefox bridge`);
   }
-  if (!['preexisting', 'installed-retained'].includes(checkpoint.rootAnchorOwnership)) {
-    throw new Error(`${label} must record explicit Root anchor ownership`);
+  if (checkpoint.trustMode !== "firefox-profile-nss") {
+    throw new Error(`${label} must record run-scoped Firefox profile NSS trust`);
   }
   const expectedChallengeDigest = createHash("sha256").update(BROWSER_CHALLENGE).digest("hex");
   if (checkpoint.challengeDigest !== expectedChallengeDigest) {

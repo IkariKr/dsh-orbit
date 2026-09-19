@@ -72,7 +72,10 @@ Verification must not install temporary test/drill CA certificates into the host
 Windows System/CurrentUser Root stores or equivalent persistent OS trust stores.
 TLS verification remains mandatory: Node/CLI clients use an explicit run-scoped
 CA bundle, while Firefox/Selenium uses a runner-owned temporary profile with the
-CA imported only into that profile's NSS certificate database.
+CA imported only into that profile's NSS certificate database. The browser
+runner requires Mozilla NSS `certutil`; set `DSH_ORBIT_NSS_CERTUTIL` to that
+executable when it is not on `PATH`. Windows' built-in `certutil.exe` is not a
+valid substitute for profile-local NSS trust.
 
 Unknown CA, wrong SAN, wrong hostname, and other negative TLS cases must still
 fail closed. `accept_insecure_certs`, certificate-error ignore flags,

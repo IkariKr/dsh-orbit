@@ -39,7 +39,11 @@ behind.
 4. **Firefox/Selenium must use a runner-owned temporary browser profile.**
    When Firefox must trust a private verification CA, the CA must be imported
    only into that temporary profile's NSS certificate database. The browser
-   profile must be owned by the current run and deleted after the run.
+   profile must be owned by the current run and deleted after the run. The
+   runner uses Mozilla NSS `certutil`; on Windows, set `DSH_ORBIT_NSS_CERTUTIL`
+   to the NSS executable when it is not available on `PATH`. Windows' built-in
+   `certutil.exe` is not an acceptable substitute because it operates on OS
+   certificate stores rather than the runner-owned Firefox profile database.
 
 5. **Browser trust must remain strict.**
    The temporary-profile trust must still enforce certificate chain validation,
@@ -48,9 +52,10 @@ behind.
 
 6. **No interactive certificate installation is allowed.**
    Verification must not depend on a Windows trust prompt, certificate UI, or
-   operator confirmation to install a CA. If a required test cannot be executed
-   without persistent OS Root-store mutation, that test must report
-   `BLOCKED` and stop. It must not weaken TLS to continue.
+   operator confirmation to install a CA. If Mozilla NSS `certutil` or another
+   approved profile-local trust mechanism is unavailable, or if a required test
+   cannot be executed without persistent OS Root-store mutation, that test must
+   report `BLOCKED` and stop. It must not weaken TLS to continue.
 
 7. **Trust material is run-owned residue.**
    Temporary CA private keys, leaf private keys, certificates, browser profiles,
