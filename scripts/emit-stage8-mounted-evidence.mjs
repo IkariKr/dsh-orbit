@@ -43,6 +43,8 @@ if (
   fail("raw browser evidence is not runner-owned Firefox/Selenium");
 }
 if (!raw.browserBridge?.challengeDigest) fail("raw browser challenge binding is missing");
+const browserGatewayUrl = raw.browser?.gatewayUrl ?? raw.browserBootstrap?.gatewayUrl ?? null;
+if (!browserGatewayUrl) fail("raw browser gateway binding is missing");
 if (raw.tls?.validation !== "enabled" || !raw.tls?.caFingerprint || !raw.tls?.leafFingerprint) fail("raw TLS binding is incomplete");
 assertMountedMatrixShape(raw.requiredMatrix, { requirePass: true });
 
@@ -86,7 +88,7 @@ const smoke = {
     browserBridgeExitCode: raw.browserBridgeExit?.code ?? null,
   },
   gateway: raw.tls ? {
-    url: "https://127.0.0.1:8443",
+    url: browserGatewayUrl,
     tlsValidation: raw.tls.validation,
     caFingerprint: raw.tls.caFingerprint,
     leafFingerprint: raw.tls.leafFingerprint,

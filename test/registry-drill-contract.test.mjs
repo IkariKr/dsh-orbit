@@ -64,6 +64,8 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(emitter, /raw\.browserBridge\?\.producer/);
   assert.match(emitter, /browserChallengeDigest/);
   assert.match(emitter, /browserTrustMode/);
+  assert.match(emitter, /browserGatewayUrl/);
+  assert.doesNotMatch(emitter, /url:\s*"https:\/\/127\.0\.0\.1:8443"/);
   assert.match(driver, /browserProducer: checkpoint\.browserProducer/);
   assert.match(driver, /challengeDigest: checkpoint\.challengeDigest/);
   assert.match(driver, /trustMode: checkpoint\.trustMode/);
