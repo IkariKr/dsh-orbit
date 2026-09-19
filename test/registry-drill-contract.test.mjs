@@ -83,6 +83,8 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(bridge, /installed-retained/);
   assert.match(bridge, /log_output=str\(gecko_log\)/);
   assert.match(bridge, /firefox-start-failed:/);
+  assert.match(bridge, /cleanup-start/);
+  assert.match(bridge, /cleanup-root-done:/);
   assert.match(bridge, /rootAnchorOwnership/);
   assert.match(bridge, /redact_error_text/);
   assert.match(bridge, /safe_url_for_log/);

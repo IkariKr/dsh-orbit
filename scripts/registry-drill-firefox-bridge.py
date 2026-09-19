@@ -767,9 +767,15 @@ def run(args: argparse.Namespace) -> int:
             time.sleep(POLL_SECONDS)
         return 0
     finally:
+        log("cleanup-start")
         if proxy_server is not None:
-            proxy_server.shutdown()
-            proxy_server.server_close()
+            try:
+                proxy_server.shutdown()
+                proxy_server.server_close()
+                log("cleanup-proxy-done")
+            except Exception as error:
+                log(f"cleanup-proxy-failed:{type(error).__name__}:{redact_error(error)}")
+                raise
         if driver is not None:
             quit_error = []
 
@@ -786,10 +792,23 @@ def run(args: argparse.Namespace) -> int:
                 log("driver-quit-timeout; forcing owned geckodriver shutdown")
             elif quit_error:
                 log(f"driver-quit-error:{type(quit_error[0]).__name__}")
+            else:
+                log("cleanup-driver-done")
         if service is not None:
-            stop_owned_process(getattr(service, "process", None), "geckodriver")
-        remove_windows_root(thumbprint, root_ownership)
+            try:
+                stop_owned_process(getattr(service, "process", None), "geckodriver")
+                log("cleanup-geckodriver-done")
+            except Exception as error:
+                log(f"cleanup-geckodriver-failed:{type(error).__name__}:{redact_error(error)}")
+                raise
+        try:
+            remove_windows_root(thumbprint, root_ownership)
+            log(f"cleanup-root-done:{root_ownership}")
+        except Exception as error:
+            log(f"cleanup-root-failed:{type(error).__name__}:{redact_error(error)}")
+            raise
         shutil.rmtree(profile_dir, ignore_errors=True)
+        log("cleanup-profile-done")
 
 
 def main() -> int:
