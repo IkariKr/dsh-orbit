@@ -525,7 +525,7 @@ def run(args: argparse.Namespace) -> int:
         options.set_preference("network.proxy.no_proxies_on", "")
         options.accept_insecure_certs = False
         log("starting-firefox")
-        service = Service(resolve_geckodriver(), log_output=gecko_log)
+        service = Service(resolve_geckodriver(), log_output=str(gecko_log))
         try:
             driver = webdriver.Firefox(service=service, options=options)
         except Exception as error:
