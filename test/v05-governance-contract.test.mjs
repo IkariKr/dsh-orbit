@@ -91,6 +91,8 @@ test("v0.5 construction design package is anchored to the accepted v0.4 closure"
   assert.match(sop, /Gate A — Architecture Review/);
   assert.match(sop, /Gate B — Reverse transport\/security review/);
   assert.match(sop, /Gate C — Candidate Review/);
+  assert.match(sop, /accepted Stage 0 design SHA becomes the v0\.5 construction design baseline/);
+  assert.match(sop, /Do not start Stage 1 from an earlier authorization-only commit/);
   assert.match(sop, /test\/evidence\/v05\//);
   assert.match(sop, /evidence-only closure/i);
 });
