@@ -74,6 +74,8 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.ok(bridge.includes('navigate(driver, gateway + "/", "gateway-management")'));
   assert.match(bridge, /wait_for_navigation_element\(driver, By\.TAG_NAME, "body", "gateway-management"/);
   assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "session-status", "gateway-session"/);
+  assert.match(bridge, /expected_path="\/"/);
+  assert.match(bridge, /_client_config\.timeout = WEBDRIVER_COMMAND_TIMEOUT_SECONDS/);
 
   assert.match(bridge, /root_anchor_present/);
   assert.match(bridge, /installed-retained/);

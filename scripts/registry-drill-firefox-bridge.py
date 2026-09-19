@@ -247,12 +247,17 @@ def wait_for(wait: WebDriverWait, condition):
     return wait.until(condition)
 
 
-def wait_for_navigation_element(driver, by, value: str, label: str, log=None, timeout: int = 30):
+def wait_for_navigation_element(driver, by, value: str, label: str, log=None, timeout: int = 30, expected_path: str | None = None):
+    def condition(current_driver):
+        if expected_path is not None:
+            current_url = current_driver.current_url
+            if urlparse(current_url).path != expected_path:
+                return False
+        return EC.presence_of_element_located((by, value))(current_driver)
+
     try:
-        element = WebDriverWait(driver, timeout, poll_frequency=POLL_SECONDS).until(
-            EC.presence_of_element_located((by, value))
-        )
-    except WebDriverException as error:
+        element = WebDriverWait(driver, timeout, poll_frequency=POLL_SECONDS).until(condition)
+    except Exception as error:
         try:
             snapshot = driver.execute_script(
                 """
@@ -264,11 +269,11 @@ def wait_for_navigation_element(driver, by, value: str, label: str, log=None, ti
                 };
                 """
             )
-        except WebDriverException:
+        except Exception:
             snapshot = {}
         raise RuntimeError(f"{label} did not render before timeout: {snapshot!r}") from error
     if log is not None:
-        log(f"{label}-ready:url={driver.current_url!r}:ready={driver.execute_script('return document.readyState')}")
+        log(f"{label}-ready:url={safe_url_for_log(driver.current_url)!r}:ready={driver.execute_script('return document.readyState')}")
     return element
 
 
@@ -519,6 +524,7 @@ def run(args: argparse.Namespace) -> int:
         log("starting-firefox")
         service = Service(resolve_geckodriver(), log_output=subprocess.DEVNULL)
         driver = webdriver.Firefox(service=service, options=options)
+        driver.command_executor._client_config.timeout = WEBDRIVER_COMMAND_TIMEOUT_SECONDS
         log("firefox-started")
         driver.set_page_load_timeout(60)
         wait = WebDriverWait(driver, WAIT_SECONDS, poll_frequency=POLL_SECONDS)
@@ -534,8 +540,8 @@ def run(args: argparse.Namespace) -> int:
         # Navigate to the same origin without userinfo after Firefox has
         # cached the real Basic Auth challenge response for this host.
         navigate(driver, gateway + "/", "gateway-management")
-        wait_for_navigation_element(driver, By.TAG_NAME, "body", "gateway-management", log=log)
-        wait_for_navigation_element(driver, By.ID, "session-status", "gateway-session", log=log)
+        wait_for_navigation_element(driver, By.TAG_NAME, "body", "gateway-management", log=log, expected_path="/")
+        wait_for_navigation_element(driver, By.ID, "session-status", "gateway-session", log=log, expected_path="/")
         log(f"gateway-loaded:title={driver.title!r}:url={driver.current_url!r}")
         # Keep the management document active until its session and one-time
         # token checkpoints are complete. Selector and Node authorities are
