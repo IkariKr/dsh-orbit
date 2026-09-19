@@ -224,7 +224,12 @@ def remove_windows_root(thumbprint: str, ownership: str) -> None:
         f"$thumb='{thumbprint.upper()}'; "
         "$matches=@(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {$_.Thumbprint -eq $thumb}); "
         "if ($matches.Count -gt 1) { throw 'owned drill Root anchor was not unique' }; "
-        "if ($matches.Count -eq 1) { Remove-Item -LiteralPath $matches[0].PSPath -Force }; "
+        "if ($matches.Count -eq 1) { "
+        "  $path=$matches[0].PSPath; "
+        "  try { Remove-Item -LiteralPath $path -Force -ErrorAction Stop } catch { "
+        "    if (@(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {$_.Thumbprint -eq $thumb}).Count -ne 0) { throw } "
+        "  } "
+        "}; "
         "if (@(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {$_.Thumbprint -eq $thumb}).Count -ne 0) { throw 'owned drill Root anchor remained after cleanup' }"
     )
     try:
