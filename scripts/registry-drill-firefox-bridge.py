@@ -525,8 +525,12 @@ def run(args: argparse.Namespace) -> int:
         options.set_preference("network.proxy.no_proxies_on", "")
         options.accept_insecure_certs = False
         log("starting-firefox")
-        service = Service(resolve_geckodriver(), log_output=subprocess.DEVNULL)
-        driver = webdriver.Firefox(service=service, options=options)
+        service = Service(resolve_geckodriver(), log_output=gecko_log)
+        try:
+            driver = webdriver.Firefox(service=service, options=options)
+        except Exception as error:
+            log(f"firefox-start-failed:{type(error).__name__}:{redact_error(error)}")
+            raise
         driver.command_executor._client_config.timeout = WEBDRIVER_COMMAND_TIMEOUT_SECONDS
         log("firefox-started")
         driver.set_page_load_timeout(60)
