@@ -89,6 +89,9 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.doesNotMatch(bridge, /Retain the drill anchor/);
   assert.match(bridge, /challengeDigest/);
   assert.match(bridge, /cookieIsolationVerified/);
+  assert.match(bridge, /cookie-isolation-start/);
+  assert.match(bridge, /cookie-open-a-observed/);
+  assert.match(bridge, /cookie-selector-observed/);
   assert.doesNotMatch(bridge, /ignore.*certificate|--ignore-certificate-errors|rejectUnauthorized.*false/i);
 });
 

@@ -672,12 +672,19 @@ def run(args: argparse.Namespace) -> int:
             return 0
         selector_open_b = True
 
-        driver.get(open_urls["a"])
+        log("cookie-isolation-start")
+        navigate(driver, open_urls["a"], "cookie-open-a")
+        wait_for_navigation_element(driver, By.TAG_NAME, "body", "cookie-open-a", log=log)
         cookies_a = driver.get_cookies()
-        driver.get(open_urls["b"])
+        log(f"cookie-open-a-observed:count={len(cookies_a)}")
+        navigate(driver, open_urls["b"], "cookie-open-b")
+        wait_for_navigation_element(driver, By.TAG_NAME, "body", "cookie-open-b", log=log)
         cookies_b = driver.get_cookies()
-        driver.get(selector_url)
+        log(f"cookie-open-b-observed:count={len(cookies_b)}")
+        navigate(driver, selector_url, "cookie-selector")
+        wait_for_navigation_element(driver, By.ID, "selector-view", "cookie-selector", log=log)
         selector_cookies = driver.get_cookies()
+        log(f"cookie-selector-observed:count={len(selector_cookies)}")
         node_a_host = urlparse(open_urls["a"]).hostname or ""
         node_b_host = urlparse(open_urls["b"]).hostname or ""
         cookie_isolated = verify_cookie_jar_isolation(cookies_a, cookies_b, selector_cookies, node_a_host, node_b_host)
