@@ -92,6 +92,7 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(bridge, /Cert:\\\\CurrentUser\\\\Root/);
   assert.match(bridge, /Remove-Item -LiteralPath/);
   assert.match(bridge, /owned drill Root anchor cleanup failed/);
+  assert.match(bridge, /if \(\$matches\.Count -gt 1\)/);
   assert.match(emitter, /rmSync\(rawPath/);
   assert.doesNotMatch(bridge, /Retain the drill anchor/);
   assert.match(bridge, /challengeDigest/);
