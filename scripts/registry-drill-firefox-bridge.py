@@ -219,6 +219,8 @@ def remove_windows_root(thumbprint: str, ownership: str) -> None:
         return
     if not re.fullmatch(r"[0-9A-Fa-f]{40}", thumbprint):
         raise RuntimeError("owned drill Root anchor cleanup received an invalid thumbprint")
+    if not root_anchor_present(thumbprint):
+        return
     command = (
         "$ErrorActionPreference='Stop'; "
         f"$thumb='{thumbprint.upper()}'; "
