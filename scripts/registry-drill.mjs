@@ -1302,13 +1302,13 @@ async function main() {
   sh(`docker restart ${hubContainer}`);
   await waitFor("Hub process restart", async () => (await hubGetHealth()) === 200, { attempts: 40, intervalMs: 1000 });
   // Caddy and machine-ingress share the Hub container's network namespace.
-  // Rebind both owned sidecars after the Hub restart so the private machine
-  // listener and browser gateway are reconstructed before recovery.
+  // Restarting the Hub invalidates that namespace for the sidecars, so recreate
+  // both owned adapters rather than restarting stale container objects.
+  sh(`docker compose -f ${COMPOSE} up -d --no-deps --force-recreate machine-ingress caddy`);
   const machineIngressContainer = sh(`docker compose -f ${COMPOSE} ps -q machine-ingress`).trim().split("\n")[0];
-  if (!machineIngressContainer) throw new Error("machine-ingress container is missing after Hub restart");
-  sh(`docker restart ${machineIngressContainer}`);
+  const recoveredCaddyContainer = sh(`docker compose -f ${COMPOSE} ps -q caddy`).trim().split("\n")[0];
+  if (!machineIngressContainer || !recoveredCaddyContainer) throw new Error("Hub sidecars are missing after namespace recreation");
   await waitFor("machine ingress after Hub restart", async () => (await machineIngressGetHealth("dsh-a")) === 200, { attempts: 40, intervalMs: 1000 });
-  sh(`docker restart ${caddyContainer}`);
   await waitFor("gateway after Hub restart", async () => (await gatewayFetch("/").catch(() => null))?.status === 200, { attempts: 40, intervalMs: 1000 });
   const postHubSession = await gatewayFetch("/hub/session", { method: "POST" });
   const postHubSessionBody = await postHubSession.json();
