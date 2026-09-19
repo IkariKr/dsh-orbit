@@ -334,8 +334,16 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
   const auth = JSON.parse(await text("docs/release-attestations/v0.4-stage8-construction-authorization-2026-09-18.json"));
   const repo = new URL("../", import.meta.url);
   const authorizationRoot = "6f766acfc67dff41afe15f228078938f44922a87";
+  // Recorded externally after the closure commit was created
+  // (closureShaRecordedExternallyAfterCommit). Descendants of the accepted
+  // closure are post-closure governance/construction: the candidate boundary
+  // below no longer applies to them, but they must keep the accepted closure
+  // in their ancestry.
+  const stage8AcceptedClosure = "9891ab858a9c953a211978580910efcc2158bcd7";
+  const stage8ClosureCandidate = "cf38544e6a25cbfc2504d3fb833d09557e9f9ae2";
   const current = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
   const parent = gitCommitParent(current);
+  const postClosure = current !== stage8AcceptedClosure && gitIsAncestor(stage8AcceptedClosure, current);
   const releaseAttestation = (path) => /^docs\/release-attestations\/v0\.4\.0-rc\.[^/]+\.md$/.test(path);
   const allowed = (path) =>
     path === "CHANGELOG.md" || path === "README.md" || path === "package.json" || path === "package-lock.json" ||
@@ -370,6 +378,12 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
   assert.equal(gitIsAncestor(auth.governancePredecessor, candidate), true);
   if (current === authorizationRoot) {
     assert.ok(statusPaths.every(allowed), `pre-freeze changes outside candidate allowlist: ${statusPaths.join(", ")}`);
+  } else if (postClosure) {
+    assert.equal(
+      gitCommitParent(stage8AcceptedClosure),
+      stage8ClosureCandidate,
+      "the accepted Stage 8 closure must remain a direct child of the frozen candidate",
+    );
   } else {
     assert.equal(gitIsAncestor(authorizationRoot, candidate), true);
     const committed = execFileSync("git", ["diff", "--name-only", `${authorizationRoot}..${candidate}`], { cwd: repo, encoding: "utf8" }).trim();
