@@ -367,7 +367,7 @@ def wait_for_selector_cards(driver, stop_path: Path, expected: int = 2, log=None
             if snapshot.get("errors"):
                 message = snapshot["errors"][0][:240]
                 raise RuntimeError(f"selector endpoint request failed: {message!r}")
-            if snapshot.get("cards", 0) >= expected:
+            if snapshot.get("cards", 0) >= expected and len(snapshot.get("links", [])) >= expected:
                 return snapshot
         except WebDriverException as error:
             if log is not None:

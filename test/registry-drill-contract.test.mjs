@@ -69,6 +69,7 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.doesNotMatch(bridge, /page_load_strategy = "none"/);
   assert.match(bridge, /def wait_for_navigation_element\(/);
   assert.match(bridge, /selector-load-complete/);
+  assert.match(bridge, /len\(snapshot\.get\("links", \[\]\)\) >= expected/);
   assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "selector-view", "selector"/);
   assert.match(bridge, /wait_for_navigation_element\(driver, By\.ID, "selector-view", "selector-reload"/);
   assert.ok(bridge.includes('navigate(driver, gateway + "/", "gateway-management")'));
