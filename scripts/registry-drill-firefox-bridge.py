@@ -206,8 +206,29 @@ def install_windows_root(ca_path: Path) -> tuple[str, str]:
 def remove_windows_root(thumbprint: str, ownership: str) -> None:
     if ownership != "installed-retained" or os.name != "nt":
         return
-    removed = certutil_run(["-f", "-user", "-delstore", "Root", thumbprint])
-    if removed.returncode != 0:
+    if not re.fullmatch(r"[0-9A-Fa-f]{40}", thumbprint):
+        raise RuntimeError("owned drill Root anchor cleanup received an invalid thumbprint")
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        f"$thumb='{thumbprint.upper()}'; "
+        "$matches=@(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {$_.Thumbprint -eq $thumb}); "
+        "if ($matches.Count -ne 1) { throw 'owned drill Root anchor was not uniquely present' }; "
+        "Remove-Item -LiteralPath $matches[0].PSPath -Force; "
+        "if (@(Get-ChildItem 'Cert:\\CurrentUser\\Root' | Where-Object {$_.Thumbprint -eq $thumb}).Count -ne 0) { throw 'owned drill Root anchor remained after cleanup' }"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=CERTUTIL_TIMEOUT_SECONDS,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as error:
+        raise RuntimeError(f"owned drill Root anchor cleanup timed out for {thumbprint}") from error
+    if result.returncode != 0:
         raise RuntimeError(f"owned drill Root anchor cleanup failed for {thumbprint}")
 
 
