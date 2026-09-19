@@ -21,6 +21,21 @@ async function createTempDir(prefix = "orbit-s7-test-") {
   return await mkdtemp(join(tmpdir(), prefix));
 }
 
+// Windows keeps WAL sidecar handles alive briefly after close; a deterministic
+// retry keeps temp cleanup from racing the OS handle release.
+async function rmTempDir(dir) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (error.code !== "EBUSY" && error.code !== "ENOTEMPTY" && error.code !== "EPERM") throw error;
+      if (attempt >= 9) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+}
+
 function seedFullV4Node(db, nodeId = "node_11111111111111111111111111111111") {
   const at = "2026-09-06T12:00:00.000Z";
   db.prepare(
@@ -42,16 +57,76 @@ function seedFullV4Node(db, nodeId = "node_11111111111111111111111111111111") {
   return { nodeId, keyId, hubKeyId, hubKeys };
 }
 
-test("S7-F1: Migration from v3 -> v4 -> v5 preserves state, route_targets, and hub_route_keys idempotently", async () => {
+test("S7-F1: Migration from v3 -> v4 -> v5 -> v6 preserves state, route_targets, and hub_route_keys idempotently", async () => {
   const dir = await createTempDir("orbit-s7-f1-");
   try {
     const dbPath = join(dir, "registry.db");
     const raw = openRegistryDatabase(dbPath);
-    // Rewind to v3
+    // Rewind to v3 (including the v6 enrollment-domain reversal)
     raw.exec("DROP TABLE hub_route_keys");
     raw.exec("DROP TABLE route_targets");
     raw.exec("PRAGMA foreign_keys = OFF");
     raw.exec(`
+      CREATE TABLE nodes_v5 (
+        node_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state IN ('active', 'tombstoned')),
+        minted_at TEXT NOT NULL,
+        tombstoned_at TEXT,
+        tombstone_reason TEXT,
+        registry_contact TEXT NOT NULL DEFAULT 'unknown' CHECK (registry_contact IN ('fresh', 'stale', 'lost', 'unknown')),
+        authenticated TEXT NOT NULL DEFAULT 'unknown' CHECK (authenticated IN ('ok', 'revoked', 'unknown')),
+        dsh_healthy TEXT NOT NULL DEFAULT 'unknown' CHECK (dsh_healthy IN ('ok', 'degraded', 'unknown')),
+        orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
+        reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable IN ('unknown', 'ok', 'unreachable')),
+        alert_flags TEXT NOT NULL DEFAULT '[]',
+        last_heartbeat_at TEXT,
+        capabilities TEXT NOT NULL DEFAULT '[]',
+        capabilities_stale INTEGER NOT NULL DEFAULT 1,
+        last_seen TEXT,
+        last_seen_source TEXT,
+        orbit_version TEXT NOT NULL DEFAULT '',
+        orbit_revision TEXT,
+        dsh_version TEXT NOT NULL DEFAULT '',
+        compatibility_profile TEXT
+      );
+      INSERT INTO nodes_v5 (
+        node_id, state, minted_at, tombstoned_at, tombstone_reason,
+        registry_contact, authenticated, dsh_healthy, orbit_compatible, reachable,
+        alert_flags, last_heartbeat_at, capabilities, capabilities_stale, last_seen,
+        last_seen_source, orbit_version, orbit_revision, dsh_version, compatibility_profile
+      ) SELECT
+        node_id, state, minted_at, tombstoned_at, tombstone_reason,
+        registry_contact, authenticated, dsh_healthy, orbit_compatible, reachable,
+        alert_flags, last_heartbeat_at, capabilities, capabilities_stale, last_seen,
+        last_seen_source, orbit_version, orbit_revision, dsh_version, compatibility_profile
+      FROM nodes;
+      DROP TABLE nodes;
+      ALTER TABLE nodes_v5 RENAME TO nodes;
+      CREATE TABLE enrollment_tokens_v5 (
+        token_id TEXT PRIMARY KEY,
+        token_digest TEXT NOT NULL UNIQUE,
+        purpose TEXT NOT NULL CHECK (purpose IN ('enroll', 'reenroll')),
+        bound_node_id TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        consumed_by TEXT
+      );
+      INSERT INTO enrollment_tokens_v5 SELECT * FROM enrollment_tokens;
+      DROP TABLE enrollment_tokens;
+      ALTER TABLE enrollment_tokens_v5 RENAME TO enrollment_tokens;
+      CREATE TABLE enrollment_results_v5 (
+        idempotency_key TEXT PRIMARY KEY,
+        token_digest TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('enroll', 'reenroll')),
+        node_id TEXT,
+        result_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO enrollment_results_v5 SELECT * FROM enrollment_results;
+      DROP TABLE enrollment_results;
+      ALTER TABLE enrollment_results_v5 RENAME TO enrollment_results;
       CREATE TABLE nodes_v3 (
         node_id TEXT PRIMARY KEY,
         state TEXT NOT NULL CHECK (state IN ('active', 'tombstoned')),
@@ -82,19 +157,23 @@ test("S7-F1: Migration from v3 -> v4 -> v5 preserves state, route_targets, and h
     raw.exec("PRAGMA user_version = 3");
     raw.close();
 
-    // Reopen to trigger v3 -> v4 -> v5 migration
+    // Reopen to trigger v3 -> v4 -> v5 -> v6 migration
     const upgraded = openRegistryDatabase(dbPath);
     assert.equal(upgraded.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
     const tables = upgraded.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all().map((r) => r.name);
     assert.ok(tables.includes("route_targets"));
     assert.ok(tables.includes("hub_route_keys"));
+    const nodeColumns = upgraded.prepare("PRAGMA table_info(nodes)").all().map((column) => column.name);
+    assert.ok(nodeColumns.includes("route_mode"), "v6 migration must add nodes.route_mode");
     // Reopen is idempotent
+    upgraded.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
     upgraded.close();
     const reopened = openRegistryDatabase(dbPath);
     assert.equal(reopened.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
+    reopened.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
     reopened.close();
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rmTempDir(dir);
   }
 });
 

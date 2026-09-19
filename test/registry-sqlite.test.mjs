@@ -72,6 +72,78 @@ async function makeLegacyPath(path, version) {
   const nodeId = "node_" + "a".repeat(32);
   db.prepare("INSERT INTO nodes (node_id, state, minted_at, authenticated) VALUES (?, 'active', 't', 'ok')").run(nodeId);
   db.prepare("INSERT INTO reports (node_id, uploaded_at, orbit_version, dsh_version, compatibility, identity_json, checks_json, report_json) VALUES (?, 't', '0.3.0', 'd', 'pass', '{}', '{}', '{}')").run(nodeId);
+  if (version < 6) {
+    // Downgrade the v6 delta to the v5 shapes (RFC-0012 D11 columns and
+    // CHECK domains) so older legacy databases validate before migration.
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.exec(`
+      CREATE TABLE nodes_v5 (
+        node_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK (state IN ('active', 'tombstoned')),
+        minted_at TEXT NOT NULL,
+        tombstoned_at TEXT,
+        tombstone_reason TEXT,
+        registry_contact TEXT NOT NULL DEFAULT 'unknown' CHECK (registry_contact IN ('fresh', 'stale', 'lost', 'unknown')),
+        authenticated TEXT NOT NULL DEFAULT 'unknown' CHECK (authenticated IN ('ok', 'revoked', 'unknown')),
+        dsh_healthy TEXT NOT NULL DEFAULT 'unknown' CHECK (dsh_healthy IN ('ok', 'degraded', 'unknown')),
+        orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
+        reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable IN ('unknown', 'ok', 'unreachable')),
+        alert_flags TEXT NOT NULL DEFAULT '[]',
+        last_heartbeat_at TEXT,
+        capabilities TEXT NOT NULL DEFAULT '[]',
+        capabilities_stale INTEGER NOT NULL DEFAULT 1,
+        last_seen TEXT,
+        last_seen_source TEXT,
+        orbit_version TEXT NOT NULL DEFAULT '',
+        orbit_revision TEXT,
+        dsh_version TEXT NOT NULL DEFAULT '',
+        compatibility_profile TEXT
+      );
+      INSERT INTO nodes_v5 (
+        node_id, state, minted_at, tombstoned_at, tombstone_reason,
+        registry_contact, authenticated, dsh_healthy, orbit_compatible, reachable,
+        alert_flags, last_heartbeat_at, capabilities, capabilities_stale, last_seen,
+        last_seen_source, orbit_version, orbit_revision, dsh_version, compatibility_profile
+      ) SELECT
+        node_id, state, minted_at, tombstoned_at, tombstone_reason,
+        registry_contact, authenticated, dsh_healthy, orbit_compatible, reachable,
+        alert_flags, last_heartbeat_at, capabilities, capabilities_stale, last_seen,
+        last_seen_source, orbit_version, orbit_revision, dsh_version, compatibility_profile
+      FROM nodes;
+      DROP TABLE nodes;
+      ALTER TABLE nodes_v5 RENAME TO nodes;
+    `);
+    db.exec(`
+      CREATE TABLE enrollment_tokens_v5 (
+        token_id TEXT PRIMARY KEY,
+        token_digest TEXT NOT NULL UNIQUE,
+        purpose TEXT NOT NULL CHECK (purpose IN ('enroll', 'reenroll')),
+        bound_node_id TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        consumed_by TEXT
+      );
+      INSERT INTO enrollment_tokens_v5 SELECT * FROM enrollment_tokens;
+      DROP TABLE enrollment_tokens;
+      ALTER TABLE enrollment_tokens_v5 RENAME TO enrollment_tokens;
+    `);
+    db.exec(`
+      CREATE TABLE enrollment_results_v5 (
+        idempotency_key TEXT PRIMARY KEY,
+        token_digest TEXT NOT NULL,
+        request_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('enroll', 'reenroll')),
+        node_id TEXT,
+        result_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO enrollment_results_v5 SELECT * FROM enrollment_results;
+      DROP TABLE enrollment_results;
+      ALTER TABLE enrollment_results_v5 RENAME TO enrollment_results;
+    `);
+    db.exec("PRAGMA foreign_keys = ON");
+  }
   if (version < 5) {
     db.exec("DROP TABLE hub_route_keys");
   }
@@ -346,6 +418,60 @@ test("a v4 database migrates in place to the current schema with hub_route_keys"
         )
         .run(nodeId, "k1", "a".repeat(64), "b".repeat(96));
       assert.equal(upgraded.prepare("SELECT key_id FROM hub_route_keys WHERE node_id = ?").get(nodeId).key_id, "k1");
+    } finally {
+      if (upgraded) {
+        upgraded.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+        upgraded.close();
+      }
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a v5 database migrates in place to the v6 schema preserving rows and adding route_mode", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-registry-v5-"));
+  try {
+    const path = join(dir, "registry.db");
+    const { nodeId } = await makeLegacyPath(path, 5);
+
+    let upgraded = null;
+    try {
+      upgraded = openRegistryDatabase(path);
+      assert.equal(upgraded.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
+      // Existing v0.4 rows survive and land on direct (RFC-0012 D11).
+      const node = upgraded.prepare("SELECT node_id, state, route_mode FROM nodes WHERE node_id = ?").get(nodeId);
+      assert.equal(node.node_id, nodeId);
+      assert.equal(node.state, "active");
+      assert.equal(node.route_mode, "direct");
+      // CHECK domains: pair purpose accepted only when unbound.
+      upgraded
+        .prepare(
+          "INSERT INTO enrollment_tokens (token_id, token_digest, purpose, bound_node_id, created_at, expires_at) VALUES ('ptok', 'd', 'pair', NULL, 't', 't')",
+        )
+        .run();
+      assert.throws(() =>
+        upgraded
+          .prepare(
+            "INSERT INTO enrollment_tokens (token_id, token_digest, purpose, bound_node_id, created_at, expires_at) VALUES ('ptok2', 'd2', 'pair', 'node_x', 't', 't')",
+          )
+          .run(),
+      );
+      assert.throws(() =>
+        upgraded
+          .prepare(
+            "INSERT INTO enrollment_results (idempotency_key, token_digest, request_id, kind, node_id, result_json, created_at) VALUES ('ik', 'd', 'r', 'bogus', NULL, '{}', 't')",
+          )
+          .run(),
+      );
+      upgraded
+        .prepare(
+          "INSERT INTO enrollment_results (idempotency_key, token_digest, request_id, kind, node_id, result_json, created_at) VALUES ('ik', 'd', 'r', 'pair', NULL, '{}', 't')",
+        )
+        .run();
+      assert.throws(() =>
+        upgraded.prepare("INSERT INTO nodes (node_id, state, minted_at, route_mode) VALUES ('node_x', 'active', 't', 'auto')").run(),
+      );
     } finally {
       if (upgraded) {
         upgraded.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();

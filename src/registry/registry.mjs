@@ -103,6 +103,36 @@ function requireIdentityJson(body) {
   return { orbitVersion, orbitRevision: revision, dshVersion, compatibilityProfile: profile };
 }
 
+// RFC-0012 D2/D3.3: pairing hands out the canonical public Hub base URL the
+// node persists as its `hubBaseUrl`. Same normalization as the node-side
+// canonicalizer (no path/query/fragment, lowercased host, trailing slash);
+// plaintext http is allowed only on loopback (RFC-0012 D2 gateway rules).
+function canonicalizePairingHubBaseUrl(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const url = new URL(String(value));
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`pairing hub base URL protocol must be http(s), got ${JSON.stringify(url.protocol)}`);
+  }
+  if (url.protocol === "http:") {
+    const host = url.hostname.toLowerCase();
+    const loopback = host === "localhost" || host === "[::1]" || host === "::1" || /^127(?:\.\d+){3}$/.test(host);
+    if (!loopback) {
+      throw new Error("pairing hub base URL allows plaintext http only on loopback");
+    }
+  }
+  if (url.pathname !== "/" && url.pathname !== "") {
+    throw new Error(`pairing hub base URL must carry no path (got ${JSON.stringify(url.pathname)})`);
+  }
+  if (url.search !== "" || url.hash !== "") {
+    throw new Error("pairing hub base URL must carry no query or fragment");
+  }
+  const defaultPort = url.protocol === "https:" ? "443" : "80";
+  const port = url.port !== "" && url.port !== defaultPort ? `:${url.port}` : "";
+  return `${url.protocol}//${url.hostname.toLowerCase()}${port}/`;
+}
+
 export class Registry {
   constructor({
     db,
@@ -114,6 +144,7 @@ export class Registry {
     routeDomain = DEFAULT_ROUTE_DOMAIN,
     trustedExternalScheme = null,
     caCertificates = null,
+    pairingHubBaseUrl = null,
   }) {
     this.db = db;
     this.now = now;
@@ -134,6 +165,7 @@ export class Registry {
     this.routeDomain = validateRouteDomain(routeDomain);
     this.trustedExternalScheme = trustedExternalScheme;
     this.caCertificates = caCertificates;
+    this.pairingHubBaseUrl = canonicalizePairingHubBaseUrl(pairingHubBaseUrl);
     this.routeProbeFailures = new Map();
     this.reconcileCapabilities();
   }
@@ -158,8 +190,8 @@ export class Registry {
   // hub.nodes.reenroll): digest-only persistence, plaintext returned once.
 
   mintEnrollmentToken({ actor, purpose, boundNodeId = null, ttlSeconds = TOKEN_TTL_SECONDS_DEFAULT }) {
-    if (purpose !== "enroll" && purpose !== "reenroll") {
-      denied(400, "bad-request", `token purpose must be enroll or reenroll (got ${JSON.stringify(purpose)})`);
+    if (purpose !== "enroll" && purpose !== "reenroll" && purpose !== "pair") {
+      denied(400, "bad-request", `token purpose must be enroll, reenroll, or pair (got ${JSON.stringify(purpose)})`);
     }
     // RFC-0005 D2: TTL is fixed at 1-60 minutes, integer only; anything
     // else fails closed (an enrollment token must stay short-lived).
@@ -176,7 +208,7 @@ export class Registry {
         denied(409, "not-tombstoned", "re-enrollment tokens can only be minted for a tombstoned nodeId");
       }
     } else if (boundNodeId !== null) {
-      denied(400, "bad-request", "enroll-purpose tokens must not carry boundNodeId");
+      denied(400, "bad-request", `${purpose}-purpose tokens must not carry boundNodeId`);
     }
     const plaintextToken = randomHex(16);
     const tokenId = `etok_${randomHex(8)}`;
@@ -365,6 +397,103 @@ export class Registry {
 
   registryContactParameters() {
     return { heartbeatCadenceSeconds: this.heartbeatCadenceSeconds };
+  }
+
+  // ------------------------------------------------------------------
+  // Pairing (RFC-0012 D3): one-time bootstrap for a fresh NAT-restricted
+  // installation. Reuses the RFC-0005 token/idempotency primitives with
+  // purpose 'pair' (pair rows are unbound); it is NOT a second identity
+  // model — the new node receives a normal RFC-0001 nodeId, normal
+  // Ed25519 machine key, and normal RFC-0008 Hub route identity. TLS +
+  // the single-use token authenticate the request (no nodeId exists yet,
+  // so no machine signature is possible). Pairing never restores a
+  // historical nodeId: tombstoned recovery stays RFC-0005 reenroll-only.
+
+  pair({ token, pairingRequestId, publicKey, actor = "system" }) {
+    requireString(token, "token");
+    requireString(pairingRequestId, "pairingRequestId");
+    requireString(publicKey, "publicKey");
+    requireWire(token, TOKEN_PATTERN, "token");
+    requireWire(pairingRequestId, REQUEST_ID_PATTERN, "pairingRequestId");
+    requireWire(publicKey, PUBLIC_KEY_PATTERN, "publicKey");
+    if (!this.pairingHubBaseUrl) {
+      denied(503, "pairing-unconfigured", "pairing requires a configured pairing hub base URL");
+    }
+
+    const entry = this.db.prepare("SELECT * FROM enrollment_tokens WHERE token_digest = ?").get(sha256Hex(token));
+    if (!entry) {
+      denied(401, "unknown-token", "no pairing token matches");
+    }
+    if (entry.purpose !== "pair") {
+      denied(400, "purpose-mismatch", "token is not a pair-purpose token");
+    }
+    if (entry.bound_node_id !== null) {
+      denied(400, "bad-request", "pair-purpose tokens must be unbound");
+    }
+    // A consumed token is judged by the recorded idempotency result FIRST:
+    // an exact successful replay is served even past token expiry, because
+    // TTL governs first-time acceptance only (RFC-0012 D3.3).
+    const idempotencyKey = `${entry.token_digest}:${pairingRequestId}:${publicKey}`;
+    if (entry.consumed_at !== null) {
+      return this.replayOrDeny(entry, "pair", idempotencyKey);
+    }
+    if (entry.expires_at <= nowIso(this.now())) {
+      denied(401, "token-expired", "pairing token has expired");
+    }
+    const recorded = this.db
+      .prepare("SELECT * FROM enrollment_results WHERE idempotency_key = ? AND kind = 'pair'")
+      .get(idempotencyKey);
+    if (recorded) {
+      return JSON.parse(recorded.result_json);
+    }
+    // RFC-0012 D3.4: an installation that already holds a durable active
+    // node identity cannot pair again; that is an explicit reconcile error.
+    const keyId = deriveKeyId(publicKey);
+    const existingIdentity = this.db
+      .prepare(
+        "SELECT nk.node_id FROM node_keys nk JOIN nodes n ON n.node_id = nk.node_id WHERE nk.key_id = ? AND nk.public_key = ? AND nk.state = 'active' AND n.state = 'active'",
+      )
+      .get(keyId, publicKey);
+    if (existingIdentity) {
+      denied(409, "reconcile-required", "an active node already exists for this node key; pairing cannot duplicate an existing identity");
+    }
+
+    const result = withTransaction(this.db, () => {
+      const fresh = this.db.prepare("SELECT consumed_at FROM enrollment_tokens WHERE token_id = ?").get(entry.token_id);
+      if (fresh.consumed_at !== null) {
+        return this.replayOrDeny(entry, "pair", idempotencyKey);
+      }
+      const nodeId = `node_${randomHex(16)}`;
+      const at = nowIso(this.now());
+      this.db.prepare("UPDATE enrollment_tokens SET consumed_at = ?, consumed_by = ? WHERE token_id = ?").run(at, nodeId, entry.token_id);
+      this.db
+        .prepare(
+          "INSERT INTO nodes (node_id, state, minted_at, authenticated, capabilities, capabilities_stale, route_mode) VALUES (?, 'active', ?, 'ok', '[]', 1, 'reverse')",
+        )
+        .run(nodeId, at);
+      this.db
+        .prepare("INSERT INTO node_keys (node_id, key_id, public_key, state, created_at) VALUES (?, ?, ?, 'active', ?)")
+        .run(nodeId, keyId, publicKey, at);
+      // RFC-0008 provisioning happens inside the same atomic transaction.
+      this.ensureHubRouteKey(nodeId);
+      const resultJson = JSON.stringify({
+        nodeId,
+        keyId,
+        tokenId: entry.token_id,
+        routeMode: "reverse",
+        hubBaseUrl: this.pairingHubBaseUrl,
+        heartbeatCadenceSeconds: this.heartbeatCadenceSeconds,
+        reverseProtocol: "orbit-reverse-v1",
+      });
+      this.db
+        .prepare(
+          "INSERT INTO enrollment_results (idempotency_key, token_digest, request_id, kind, node_id, result_json, created_at) VALUES (?, ?, ?, 'pair', ?, ?, ?)",
+        )
+        .run(idempotencyKey, entry.token_digest, pairingRequestId, nodeId, resultJson, at);
+      this.recordAudit(`${actor}:${nodeId}`, "node.paired", { nodeId, keyId, tokenId: entry.token_id, routeMode: "reverse" });
+      return JSON.parse(resultJson);
+    });
+    return result;
   }
 
   // ------------------------------------------------------------------

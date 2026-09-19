@@ -1,13 +1,13 @@
-// SQLite/WAL registry persistence for the v0.4 registry (RFC-0005 D7, RFC-0010 D2).
-// Single writer connection with BEGIN IMMEDIATE; readers use the WAL
-// snapshot. The table set is exactly the fixed contract: nodes,
-// node_keys, enrollment_tokens, enrollment_results, seen_nonces,
+// SQLite/WAL registry persistence for the v0.4/v0.5 registry (RFC-0005 D7,
+// RFC-0010 D2, RFC-0012 D11). Single writer connection with BEGIN IMMEDIATE;
+// readers use the WAL snapshot. The table set is exactly the fixed contract:
+// nodes, node_keys, enrollment_tokens, enrollment_results, seen_nonces,
 // reports, events, audit, browser_sessions, route_targets.
 
 import { chmodSync, existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export class RegistryDatabaseError extends Error {
   constructor(code, message, { cause = null } = {}) {
@@ -39,6 +39,7 @@ const EXPECTED_TABLE_COLUMNS = {
     "orbit_revision",
     "dsh_version",
     "compatibility_profile",
+    "route_mode",
   ],
   node_keys: [
     "node_id",
@@ -306,6 +307,78 @@ function canonicalSchemaMetadata(version = SCHEMA_VERSION) {
   const canonical = new DatabaseSync(":memory:");
   try {
     for (const statement of schemaStatements) canonical.exec(statement);
+    if (version < 6) {
+      // v5 shapes: nodes without route_mode; enrollment purpose/kind
+      // domains without pair (RFC-0012 D11).
+      canonical.exec("PRAGMA foreign_keys = OFF");
+      canonical.exec(`
+        CREATE TABLE nodes_v5 (
+          node_id TEXT PRIMARY KEY,
+          state TEXT NOT NULL CHECK (state IN ('active', 'tombstoned')),
+          minted_at TEXT NOT NULL,
+          tombstoned_at TEXT,
+          tombstone_reason TEXT,
+          registry_contact TEXT NOT NULL DEFAULT 'unknown' CHECK (registry_contact IN ('fresh', 'stale', 'lost', 'unknown')),
+          authenticated TEXT NOT NULL DEFAULT 'unknown' CHECK (authenticated IN ('ok', 'revoked', 'unknown')),
+          dsh_healthy TEXT NOT NULL DEFAULT 'unknown' CHECK (dsh_healthy IN ('ok', 'degraded', 'unknown')),
+          orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
+          reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable IN ('unknown', 'ok', 'unreachable')),
+          alert_flags TEXT NOT NULL DEFAULT '[]',
+          last_heartbeat_at TEXT,
+          capabilities TEXT NOT NULL DEFAULT '[]',
+          capabilities_stale INTEGER NOT NULL DEFAULT 1,
+          last_seen TEXT,
+          last_seen_source TEXT,
+          orbit_version TEXT NOT NULL DEFAULT '',
+          orbit_revision TEXT,
+          dsh_version TEXT NOT NULL DEFAULT '',
+          compatibility_profile TEXT
+        );
+        INSERT INTO nodes_v5 (
+          node_id, state, minted_at, tombstoned_at, tombstone_reason,
+          registry_contact, authenticated, dsh_healthy, orbit_compatible, reachable,
+          alert_flags, last_heartbeat_at, capabilities, capabilities_stale, last_seen,
+          last_seen_source, orbit_version, orbit_revision, dsh_version, compatibility_profile
+        ) SELECT
+          node_id, state, minted_at, tombstoned_at, tombstone_reason,
+          registry_contact, authenticated, dsh_healthy, orbit_compatible, reachable,
+          alert_flags, last_heartbeat_at, capabilities, capabilities_stale, last_seen,
+          last_seen_source, orbit_version, orbit_revision, dsh_version, compatibility_profile
+        FROM nodes;
+        DROP TABLE nodes;
+        ALTER TABLE nodes_v5 RENAME TO nodes;
+      `);
+      canonical.exec(`
+        CREATE TABLE enrollment_tokens_v5 (
+          token_id TEXT PRIMARY KEY,
+          token_digest TEXT NOT NULL UNIQUE,
+          purpose TEXT NOT NULL CHECK (purpose IN ('enroll', 'reenroll')),
+          bound_node_id TEXT,
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          consumed_at TEXT,
+          consumed_by TEXT
+        );
+        INSERT INTO enrollment_tokens_v5 SELECT * FROM enrollment_tokens;
+        DROP TABLE enrollment_tokens;
+        ALTER TABLE enrollment_tokens_v5 RENAME TO enrollment_tokens;
+      `);
+      canonical.exec(`
+        CREATE TABLE enrollment_results_v5 (
+          idempotency_key TEXT PRIMARY KEY,
+          token_digest TEXT NOT NULL,
+          request_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('enroll', 'reenroll')),
+          node_id TEXT,
+          result_json TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        INSERT INTO enrollment_results_v5 SELECT * FROM enrollment_results;
+        DROP TABLE enrollment_results;
+        ALTER TABLE enrollment_results_v5 RENAME TO enrollment_results;
+      `);
+      canonical.exec("PRAGMA foreign_keys = ON");
+    }
     if (version < 5) {
       canonical.exec("DROP TABLE hub_route_keys");
     }
@@ -348,7 +421,7 @@ function canonicalSchemaMetadata(version = SCHEMA_VERSION) {
     } else if (version === 2) {
       canonical.exec("ALTER TABLE nodes DROP COLUMN last_heartbeat_at");
       canonical.exec("ALTER TABLE browser_sessions DROP COLUMN expiry_audited_at");
-    } else if (version !== 3 && version !== 4 && version !== SCHEMA_VERSION) {
+    } else if (version !== 3 && version !== 4 && version !== 5 && version !== SCHEMA_VERSION) {
       throw new RegistryDatabaseError("malformed-schema", `no canonical schema is defined for version ${version}`);
     }
     return schemaMetadata(canonical, version);
@@ -414,6 +487,13 @@ function wrapDatabaseError(error, path, phase) {
 // to registryContact = unknown.
 // v3 -> v4: reachable CHECK relaxed to unknown|ok|unreachable domain;
 // route_targets table added for v0.4 Endpoint Selector (RFC-0010 D2).
+// v4 -> v5: hub_route_keys table added (RFC-0008 per-node Hub route identity).
+// v5 -> v6: nodes gains operator-owned route_mode (direct|reverse, all
+// existing nodes direct); enrollment_tokens.purpose and
+// enrollment_results.kind extend with 'pair' (pair rows unbound) so
+// RFC-0012 pairing reuses the durable token/idempotency primitives.
+// CHECK-domain changes require table rebuilds; accepted v0.4 rows are
+// preserved column-for-column (RFC-0012 D11).
 const upgradeSteps = {
   1: ["ALTER TABLE nodes ADD COLUMN alert_flags TEXT NOT NULL DEFAULT '[]'"],
   2: [
@@ -512,6 +592,78 @@ const upgradeSteps = {
       PRIMARY KEY (node_id, key_id)
     )`,
   ],
+  5: [
+    `CREATE TABLE nodes_v6 (
+      node_id TEXT PRIMARY KEY,
+      state TEXT NOT NULL CHECK (state IN ('active', 'tombstoned')),
+      minted_at TEXT NOT NULL,
+      tombstoned_at TEXT,
+      tombstone_reason TEXT,
+      registry_contact TEXT NOT NULL DEFAULT 'unknown' CHECK (registry_contact IN ('fresh', 'stale', 'lost', 'unknown')),
+      authenticated TEXT NOT NULL DEFAULT 'unknown' CHECK (authenticated IN ('ok', 'revoked', 'unknown')),
+      dsh_healthy TEXT NOT NULL DEFAULT 'unknown' CHECK (dsh_healthy IN ('ok', 'degraded', 'unknown')),
+      orbit_compatible TEXT NOT NULL DEFAULT 'unknown' CHECK (orbit_compatible IN ('pass', 'fail', 'stale', 'unknown')),
+      reachable TEXT NOT NULL DEFAULT 'unknown' CHECK (reachable IN ('unknown', 'ok', 'unreachable')),
+      alert_flags TEXT NOT NULL DEFAULT '[]',
+      last_heartbeat_at TEXT,
+      capabilities TEXT NOT NULL DEFAULT '[]',
+      capabilities_stale INTEGER NOT NULL DEFAULT 1,
+      last_seen TEXT,
+      last_seen_source TEXT,
+      orbit_version TEXT NOT NULL DEFAULT '',
+      orbit_revision TEXT,
+      dsh_version TEXT NOT NULL DEFAULT '',
+      compatibility_profile TEXT,
+      route_mode TEXT NOT NULL DEFAULT 'direct' CHECK (route_mode IN ('direct', 'reverse'))
+    )`,
+    `INSERT INTO nodes_v6 (
+      node_id, state, minted_at, tombstoned_at, tombstone_reason,
+      registry_contact, authenticated, dsh_healthy, orbit_compatible, reachable,
+      alert_flags, last_heartbeat_at, capabilities, capabilities_stale, last_seen,
+      last_seen_source, orbit_version, orbit_revision, dsh_version, compatibility_profile
+    ) SELECT
+      node_id, state, minted_at, tombstoned_at, tombstone_reason,
+      registry_contact, authenticated, dsh_healthy, orbit_compatible, reachable,
+      alert_flags, last_heartbeat_at, capabilities, capabilities_stale, last_seen,
+      last_seen_source, orbit_version, orbit_revision, dsh_version, compatibility_profile
+    FROM nodes`,
+    "DROP TABLE nodes",
+    "ALTER TABLE nodes_v6 RENAME TO nodes",
+    `CREATE TABLE enrollment_tokens_v6 (
+      token_id TEXT PRIMARY KEY,
+      token_digest TEXT NOT NULL UNIQUE,
+      purpose TEXT NOT NULL CHECK (purpose IN ('enroll', 'reenroll', 'pair')),
+      bound_node_id TEXT,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      consumed_at TEXT,
+      consumed_by TEXT,
+      CHECK (purpose <> 'pair' OR bound_node_id IS NULL)
+    )`,
+    `INSERT INTO enrollment_tokens_v6 (
+      token_id, token_digest, purpose, bound_node_id, created_at, expires_at, consumed_at, consumed_by
+    ) SELECT
+      token_id, token_digest, purpose, bound_node_id, created_at, expires_at, consumed_at, consumed_by
+    FROM enrollment_tokens`,
+    "DROP TABLE enrollment_tokens",
+    "ALTER TABLE enrollment_tokens_v6 RENAME TO enrollment_tokens",
+    `CREATE TABLE enrollment_results_v6 (
+      idempotency_key TEXT PRIMARY KEY,
+      token_digest TEXT NOT NULL,
+      request_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('enroll', 'reenroll', 'pair')),
+      node_id TEXT,
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`,
+    `INSERT INTO enrollment_results_v6 (
+      idempotency_key, token_digest, request_id, kind, node_id, result_json, created_at
+    ) SELECT
+      idempotency_key, token_digest, request_id, kind, node_id, result_json, created_at
+    FROM enrollment_results`,
+    "DROP TABLE enrollment_results",
+    "ALTER TABLE enrollment_results_v6 RENAME TO enrollment_results",
+  ],
 };
 
 const schemaStatements = [
@@ -536,7 +688,8 @@ const schemaStatements = [
     orbit_version TEXT NOT NULL DEFAULT '',
     orbit_revision TEXT,
     dsh_version TEXT NOT NULL DEFAULT '',
-    compatibility_profile TEXT
+    compatibility_profile TEXT,
+    route_mode TEXT NOT NULL DEFAULT 'direct' CHECK (route_mode IN ('direct', 'reverse'))
   )`,
   `
   CREATE TABLE node_keys (
@@ -554,19 +707,20 @@ const schemaStatements = [
   CREATE TABLE enrollment_tokens (
     token_id TEXT PRIMARY KEY,
     token_digest TEXT NOT NULL UNIQUE,
-    purpose TEXT NOT NULL CHECK (purpose IN ('enroll', 'reenroll')),
+    purpose TEXT NOT NULL CHECK (purpose IN ('enroll', 'reenroll', 'pair')),
     bound_node_id TEXT,
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     consumed_at TEXT,
-    consumed_by TEXT
+    consumed_by TEXT,
+    CHECK (purpose <> 'pair' OR bound_node_id IS NULL)
   )`,
   `
   CREATE TABLE enrollment_results (
     idempotency_key TEXT PRIMARY KEY,
     token_digest TEXT NOT NULL,
     request_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('enroll', 'reenroll')),
+    kind TEXT NOT NULL CHECK (kind IN ('enroll', 'reenroll', 'pair')),
     node_id TEXT,
     result_json TEXT NOT NULL,
     created_at TEXT NOT NULL
