@@ -37,7 +37,7 @@ Explicitly excluded from 0.3: inbound connection acceptance for NAT-restricted d
 
 ## 0.4: endpoint selector
 
-v0.4 remains limited to **server-reachable** registered nodes. The accepted construction contract is [RFC-0010](rfc/0010-node-endpoint-and-routing.md), [RFC-0011](rfc/0011-browser-node-selection.md), and the [multistage SOP](sop/v0.4-endpoint-selector-multistage-sop.md). The `v0.4.0-rc.2` release-closing candidate remains subject to fresh evidence and independent Final Review.
+v0.4 remains limited to **server-reachable** registered nodes. The accepted construction contract is [RFC-0010](rfc/0010-node-endpoint-and-routing.md), [RFC-0011](rfc/0011-browser-node-selection.md), and the [multistage SOP](sop/v0.4-endpoint-selector-multistage-sop.md). The `v0.4.0-rc.2` release-closing evidence closure (`9891ab858a9c953a211978580910efcc2158bcd7`, evidence phase E8.7) passed independent Final Review on 2026-09-19: v0.4 Stage 8 is CLOSED and v0.4 engineering acceptance is PASS (see `docs/release-attestations/v0.4-stage8-final-review-2026-09-19.md`). Tag/release, production promotion, and DNS cutover each remain separately authorized.
 
 - one familiar selector entry point for multiple registered DSH nodes;
 - explicit node selection by navigation to a deterministic per-node route authority under the Orbit wildcard route domain;
@@ -50,9 +50,19 @@ DSH-specific authentication remains behind the node-local compatibility seam. Th
 
 ## 0.5: reverse-connected nodes
 
+Construction is authorized by `V05-CONSTRUCTION-20260919-A1`
+(`docs/release-attestations/v0.5-construction-authorization-2026-09-19.md`),
+built on the accepted v0.4 closure `9891ab858a9c953a211978580910efcc2158bcd7`.
+
 - outbound node-to-hub connection for devices behind NAT or restrictive networks (the only place reverse connection is designed);
 - pairing and device authorization (distinct from 0.3 enrollment: 0.3 enrolls server-reachable nodes, 0.5 pairs NAT-restricted devices);
 - reconnect and presence handling without requiring a public endpoint per device.
+
+Frozen scope for 0.5 construction:
+
+- **MUST**: an RFC-first reverse-connection design record (outbound channel, pairing, device authorization) before product construction; the three bullets above; candidate-freeze compliance with fresh candidate-bound evidence; operator SOP and reference documentation.
+- **SHOULD**: minimal presence/status surfacing in the existing selector UI so reverse-paired nodes are first-class in current views; heartbeat/presence integration with the existing contact-aging model; deployment and troubleshooting documentation for NAT-restricted deployments.
+- **OUT OF SCOPE**: a new route authority system beyond RFC-0010; a new selector system beyond RFC-0011; a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy; unrelated UI refactor; unrelated runtime refactor; multi-node sessions and fleet workflows (0.6 / 0.7); tag/release, production promotion, and DNS cutover without separate authorization.
 
 ## 0.6: multi-node sessions
 
