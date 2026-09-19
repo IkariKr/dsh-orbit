@@ -354,6 +354,9 @@ async function requireBrowserBootstrapCheckpoint({ wait = false } = {}) {
     gatewayUrl: GATEWAY_URL,
     caFingerprint: evidence.tls.caFingerprint,
     leafFingerprint: evidence.tls.leafFingerprint,
+    browserProducer: checkpoint.browserProducer,
+    challengeDigest: checkpoint.challengeDigest,
+    trustMode: checkpoint.trustMode,
   };
 }
 
@@ -393,6 +396,9 @@ async function requireBrowserCheckpoint({ wait = false, nodeIds = [] } = {}) {
     caFingerprint: evidence.tls.caFingerprint,
     leafFingerprint: evidence.tls.leafFingerprint,
     nodeIds: [...checkpoint.nodeIds],
+    browserProducer: checkpoint.browserProducer,
+    challengeDigest: checkpoint.challengeDigest,
+    trustMode: checkpoint.trustMode,
   };
 }
 

@@ -61,6 +61,12 @@ test("Stage 8 harness freezes the exact matrix and raw evidence contract", async
   assert.match(emitter, /raw\.commit !== revision/);
   assert.match(emitter, /rawEvidenceSha256/);
   assert.match(emitter, /rawEvidenceBytes/);
+  assert.match(emitter, /raw\.browserBridge\?\.producer/);
+  assert.match(emitter, /browserChallengeDigest/);
+  assert.match(emitter, /browserTrustMode/);
+  assert.match(driver, /browserProducer: checkpoint\.browserProducer/);
+  assert.match(driver, /challengeDigest: checkpoint\.challengeDigest/);
+  assert.match(driver, /trustMode: checkpoint\.trustMode/);
   assert.match(emitter, /assertMountedMatrixShape\(raw\.requiredMatrix, \{ requirePass: true \}\)/);
   assert.match(emitter, /nodeIds\.length !== 2/);
   assert.match(emitter, /runner-owned Firefox\/Selenium/);

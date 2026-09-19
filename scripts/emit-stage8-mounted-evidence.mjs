@@ -64,8 +64,25 @@ const smoke = {
     runnerCommit: raw.commit,
     rawEvidenceSha256: rawSha256,
     rawEvidenceBytes: rawBuffer.byteLength,
-    browserProducer: raw.browser?.browserProducer ?? raw.browserBootstrap?.browserProducer ?? null,
-    browserChallengeBound: Boolean(raw.browserBridge?.challengeDigest),
+    browserProducer:
+      raw.browser?.browserProducer ??
+      raw.browserBootstrap?.browserProducer ??
+      raw.browserBridge?.producer ??
+      null,
+    browserChallengeDigest:
+      raw.browser?.challengeDigest ??
+      raw.browserBootstrap?.challengeDigest ??
+      raw.browserBridge?.challengeDigest ??
+      null,
+    browserChallengeBound: Boolean(
+      raw.browser?.challengeDigest ??
+      raw.browserBootstrap?.challengeDigest ??
+      raw.browserBridge?.challengeDigest,
+    ),
+    browserTrustMode:
+      raw.browser?.trustMode ??
+      raw.browserBootstrap?.trustMode ??
+      null,
     browserBridgeExitCode: raw.browserBridgeExit?.code ?? null,
   },
   gateway: raw.tls ? {

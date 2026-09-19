@@ -335,9 +335,11 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
   const repo = new URL("../", import.meta.url);
   const authorizationRoot = "6f766acfc67dff41afe15f228078938f44922a87";
   const current = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  const parent = gitCommitParent(current);
+  const releaseAttestation = (path) => /^docs\/release-attestations\/v0\.4\.0-rc\.[^/]+\.md$/.test(path);
   const allowed = (path) =>
     path === "CHANGELOG.md" || path === "README.md" || path === "package.json" || path === "package-lock.json" ||
-    (path.startsWith("docs/") && path !== "docs/release-attestations/v0.4.0-rc.x.md") ||
+    (path.startsWith("docs/") && !releaseAttestation(path)) ||
     (path.startsWith("test/") && !path.startsWith("test/evidence/stage8/")) ||
     [
       "scripts/stage8-mounted-matrix.mjs",
@@ -348,24 +350,39 @@ test("Stage 8 construction root and candidate boundary are mechanically anchored
       "docker-registry/drill.Caddyfile",
       "docker-registry/dsh-drill.Caddyfile",
     ].includes(path);
+  const closureAllowed = (path) => releaseAttestation(path) || path.startsWith("test/evidence/stage8/");
+  const parentToCurrent = parent
+    ? execFileSync("git", ["diff", "--name-only", `${parent}..${current}`], { cwd: repo, encoding: "utf8" }).trim()
+    : "";
+  const closurePaths = parentToCurrent ? parentToCurrent.split(/\r?\n/).filter(Boolean) : [];
+  const isEvidenceClosure =
+    closurePaths.length > 0 &&
+    closurePaths.some((path) => releaseAttestation(path) || path.startsWith("test/evidence/stage8/")) &&
+    closurePaths.every(closureAllowed);
+  const candidate = isEvidenceClosure ? parent : current;
   const status = execFileSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: repo, encoding: "utf8" }).trimEnd();
   const statusPaths = status ? status.split(/\r?\n/).map((line) => line.slice(3).trim()).filter(Boolean) : [];
   const ignoredRuntime = execFileSync("git", ["ls-files", "--others", "--ignored", "--exclude-standard", "--", "data", "secrets"], { cwd: repo, encoding: "utf8" }).trim();
   assert.equal(auth.constructionLineage.candidateSelected, false);
   assert.equal(auth.constructionLineage.candidateMustBeFrozenBeforeEvidence, true);
-  assert.equal(gitIsAncestor(auth.acceptedRuntimeBase, current), true);
-  assert.equal(gitIsAncestor(auth.governancePredecessor, current), true);
+  assert.ok(candidate, "candidate commit must be identifiable");
+  assert.equal(gitIsAncestor(auth.acceptedRuntimeBase, candidate), true);
+  assert.equal(gitIsAncestor(auth.governancePredecessor, candidate), true);
   if (current === authorizationRoot) {
     assert.ok(statusPaths.every(allowed), `pre-freeze changes outside candidate allowlist: ${statusPaths.join(", ")}`);
   } else {
-    assert.equal(gitIsAncestor(authorizationRoot, current), true);
-    const committed = execFileSync("git", ["diff", "--name-only", `${authorizationRoot}..HEAD`], { cwd: repo, encoding: "utf8" }).trim();
+    assert.equal(gitIsAncestor(authorizationRoot, candidate), true);
+    const committed = execFileSync("git", ["diff", "--name-only", `${authorizationRoot}..${candidate}`], { cwd: repo, encoding: "utf8" }).trim();
     const committedPaths = committed ? committed.split(/\r?\n/).filter(Boolean) : [];
     assert.ok(committedPaths.length > 0, "frozen candidate must contain construction changes");
     assert.ok(committedPaths.every(allowed), `candidate paths outside allowlist: ${committedPaths.join(", ")}`);
-    assert.equal(status, "", "frozen candidate worktree must be clean before evidence execution");
+    if (isEvidenceClosure) {
+      assert.equal(parent, candidate, "evidence closure must be a direct child of the frozen candidate");
+      assert.ok(closurePaths.every(closureAllowed), `closure paths outside allowlist: ${closurePaths.join(", ")}`);
+    }
+    assert.equal(status, "", isEvidenceClosure ? "evidence closure worktree must be clean" : "frozen candidate worktree must be clean before evidence execution");
   }
-  assert.equal(statusPaths.some((path) => path.startsWith("test/evidence/stage8/") || path === "docs/release-attestations/v0.4.0-rc.x.md" || path.startsWith("data/")), false, "pre-freeze worktree must not contain candidate evidence, attestation, or run residue");
+  assert.equal(statusPaths.some((path) => path.startsWith("test/evidence/stage8/") || releaseAttestation(path) || path.startsWith("data/")), false, "worktree must not contain uncommitted candidate evidence, attestation, or run residue");
   assert.equal(ignoredRuntime, "", `ignored runtime residue must be cleaned before evidence execution: ${ignoredRuntime}`);
   const drill = await text("scripts/registry-drill.mjs");
   assert.match(drill, /chmodSync\(DRILL_CERT_KEY_PATH, 0o644\)/);
