@@ -239,8 +239,17 @@ switch (command) {
         client.store = store;
         await client.recoverAfterRestart();
 
-        if (!routeIngressDisabled) {
+        // D6.1: ONE process-level ORBIT-ROUTE-V1 nonce/replay cache shared
+        // by the direct route ingress and the reverse channel pool, so a
+        // proof accepted on one transport can never replay on the other.
+        // With the route ingress disabled there is no direct transport in
+        // this process, so the pool owning the cache still satisfies the
+        // single-cache invariant.
+        if (!sharedRouteNonceCache) {
           sharedRouteNonceCache = new RouteNonceCache();
+        }
+
+        if (!routeIngressDisabled) {
           ingress = new RouteIngress({
             nodeId: () => client.store.nodeId,
             routeDomain,
@@ -257,13 +266,33 @@ switch (command) {
           console.log(`dsh-orbit-node: route ingress listening on ${scheme}://${ingressListen}:${ingress.port} (target ${dshTarget})`);
         }
 
-        // RFC-0012 D4: a reverse-mode node maintains its outbound control
-        // session with the Hub. Direct-mode nodes never open one.
+        // RFC-0012 D4/D5: a reverse-mode node maintains its outbound control
+        // session with the Hub plus the bounded data-channel pool bound to
+        // that session. Direct-mode nodes never open either.
         if (store.routeMode === "reverse") {
+          const channelPool = new ReverseChannelPool({
+            hubBaseUrl: client.store.hubBaseUrl,
+            getCredentials: () =>
+              client.store.state === "active" && client.store.privateKeyHex
+                ? {
+                    nodeId: client.store.nodeId,
+                    keyId: deriveKeyId(client.store.publicKeyHex),
+                    privateKeyHex: client.store.privateKeyHex,
+                  }
+                : null,
+            caCertificates: client.caCertificates ?? null,
+            getSessionId: () => reverseClient?.sessionId ?? null,
+            routeDomain,
+            dshTarget,
+            getTrustKeys: () => client.store.hubRouteKeys ?? [],
+            nonceCache: sharedRouteNonceCache,
+            onEvent: (event, detail) => console.log(`dsh-orbit-node: reverse channel ${event}${detail ? ` (${JSON.stringify(detail)})` : ""}`),
+          });
           reverseClient = new ReverseClient({
             hubBaseUrl: client.store.hubBaseUrl,
             caCertificates: client.caCertificates ?? null,
             dshTarget,
+            channelPool,
             getCredentials: () =>
               client.store.state === "active" && client.store.privateKeyHex
                 ? {

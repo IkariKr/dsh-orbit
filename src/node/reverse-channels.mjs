@@ -17,6 +17,7 @@
 import tls from "node:tls";
 import net from "node:net";
 import http from "node:http";
+import https from "node:https";
 import { randomBytes } from "node:crypto";
 import { signSigningString, sha256Hex } from "../registry/crypto.mjs";
 import { buildSigningString, MACHINE_V1_LABEL, computeRouteAuthority } from "../registry/protocol.mjs";
@@ -94,12 +95,13 @@ export class ReverseChannelPool {
     if (this.stopped || !this.sessionId) return;
     const total = this.channels.size;
     const idle = this.idleCount();
-    const missing = Math.min(this.idleTarget - idle, this.maxChannels - total);
+    const connecting = [...this.channels].filter((channel) => channel.state === "connecting").length;
+    const missing = Math.min(this.idleTarget - idle - connecting, this.maxChannels - total);
     for (let i = 0; i < missing; i += 1) {
       this.openChannel();
     }
     // A refused/failed upgrade leaves the pool short; retry shortly.
-    if (this.idleCount() < this.idleTarget && !this.replenishTimer) {
+    if (idle + connecting < this.idleTarget && !this.replenishTimer) {
       this.replenishTimer = setTimeout(() => {
         this.replenishTimer = null;
         this.replenish();

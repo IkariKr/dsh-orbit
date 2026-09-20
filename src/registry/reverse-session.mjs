@@ -47,6 +47,7 @@ export class ReverseSession {
     this.closed = false;
     this.lastPongAt = manager.now().getTime();
     this.pingTimer = null;
+    this.pongTimer = null;
     this.awaitingPong = false;
 
     socket.write(
@@ -60,8 +61,8 @@ export class ReverseSession {
       type: "session",
       protocol: REVERSE_PROTOCOL,
       reverseSessionId: this.reverseSessionId,
-      idleTarget: REVERSE_IDLE_TARGET_DEFAULT,
-      maxChannels: REVERSE_MAX_CHANNELS_DEFAULT,
+      idleTarget: this.manager.idleTarget,
+      maxChannels: this.manager.maxChannels,
     });
 
     this.parse = createFrameParser({
@@ -72,6 +73,10 @@ export class ReverseSession {
       onPong: () => {
         this.lastPongAt = this.manager.now().getTime();
         this.awaitingPong = false;
+        if (this.pongTimer) {
+          clearTimeout(this.pongTimer);
+          this.pongTimer = null;
+        }
       },
       onClose: () => this.close(CLOSE_NORMAL, "node-close", { fromPeer: true }),
       onError: () => this.close(CLOSE_PROTOCOL, "protocol-error"),
@@ -90,15 +95,18 @@ export class ReverseSession {
     }, this.manager.readyTimeoutMs);
     this.readyTimer.unref?.();
 
-    // D4.3: hub pings every 20s; a missing pong for 10s closes the session.
+    // D4.3: hub pings every 20s; a missing pong closes the session after
+    // exactly pongTimeoutMs (per-ping one-shot deadline).
     this.pingTimer = setInterval(() => {
       if (this.closed) return;
-      if (this.awaitingPong && this.manager.now().getTime() - this.lastPongAt > this.manager.pongTimeoutMs) {
-        this.close(CLOSE_AWAY, "pong-timeout");
-        return;
-      }
       this.awaitingPong = true;
       this.sendFrame(encodeFrame({ opcode: 0x9 }));
+      this.pongTimer = setTimeout(() => {
+        if (this.awaitingPong && !this.closed) {
+          this.close(CLOSE_AWAY, "pong-timeout");
+        }
+      }, this.manager.pongTimeoutMs);
+      this.pongTimer.unref?.();
     }, this.manager.pingIntervalMs);
     this.pingTimer.unref?.();
   }
@@ -191,6 +199,7 @@ export class ReverseSession {
     this.state = "closed";
     if (this.readyTimer) clearTimeout(this.readyTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
+    if (this.pongTimer) clearTimeout(this.pongTimer);
     const current = this.manager.current.get(this.nodeId);
     if (current === this) {
       this.manager.current.delete(this.nodeId);
@@ -220,7 +229,7 @@ export class ReverseSession {
 }
 
 export class ReverseSessionManager {
-  constructor({ now = () => new Date(), onSessionClosed = null, onPromoted = null, onRouteReadyChange = null, readyTimeoutMs = READY_TIMEOUT_MS, pingIntervalMs = PING_INTERVAL_MS, pongTimeoutMs = PONG_TIMEOUT_MS } = {}) {
+  constructor({ now = () => new Date(), onSessionClosed = null, onPromoted = null, onRouteReadyChange = null, readyTimeoutMs = READY_TIMEOUT_MS, pingIntervalMs = PING_INTERVAL_MS, pongTimeoutMs = PONG_TIMEOUT_MS, idleTarget = REVERSE_IDLE_TARGET_DEFAULT, maxChannels = REVERSE_MAX_CHANNELS_DEFAULT } = {}) {
     this.now = now;
     this.current = new Map(); // nodeId -> ready session
     this.pending = new Map(); // nodeId -> Set(pending sessions)
@@ -230,6 +239,8 @@ export class ReverseSessionManager {
     this.readyTimeoutMs = readyTimeoutMs;
     this.pingIntervalMs = pingIntervalMs;
     this.pongTimeoutMs = pongTimeoutMs;
+    this.idleTarget = idleTarget;
+    this.maxChannels = maxChannels;
   }
 
   // Entry point after ORBIT-MACHINE-V1 authentication succeeded. The raw

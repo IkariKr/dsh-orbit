@@ -16,8 +16,8 @@
 // rides the TCP socket itself (writableLength / drain) — no extra wire
 // vocabulary beyond RFC-0012 D6.
 
-import { createFrameParser, encodeFrame } from "./reverse-ws.mjs";
-import { computeSecWebSocketAccept } from "./reverse-ws.mjs";
+import { randomBytes } from "node:crypto";
+import { createFrameParser, encodeFrame, computeSecWebSocketAccept } from "./reverse-ws.mjs";
 
 export const CHANNEL_FRAME_MAX_BYTES = 64 * 1024;
 export const CHANNEL_SOFT_MARK_BYTES = 512 * 1024;
@@ -58,9 +58,10 @@ export class ReverseFlowAbortedError extends Error {
 let channelSequence = 0;
 
 class Flow {
-  constructor({ channel, requestId }) {
+  constructor({ channel, requestId, limits }) {
     this.channel = channel;
     this.requestId = requestId;
+    this.limits = limits;
     this.aborted = false;
     this.abortCode = null;
     this.responseResolve = null;
@@ -69,11 +70,26 @@ class Flow {
     this.bodyWaiters = [];
     this.bodyEnded = false;
     this.idleResolve = null;
+    // D7 receive-side accounting (node -> hub response direction): the hub
+    // consumes eagerly, so TCP backpressure alone cannot bound the queue —
+    // enforce soft/hard/stall on the queued bytes and pause the socket.
+    this.queuedBytes = 0;
+    this.lastConsumedAt = Date.now();
+    this.stallTimer = setInterval(() => {
+      if (this.aborted || this.bodyEnded) return;
+      if (this.queuedBytes > 0 && Date.now() - this.lastConsumedAt >= this.limits.stallTimeoutMs) {
+        this.fail("flow-stall", "no response consumption progress while above the soft mark");
+        this.channel.close("flow-stall");
+      }
+    }, Math.min(1000, this.limits.stallTimeoutMs));
+    this.stallTimer.unref?.();
   }
 
   fail(code, message) {
     if (this.aborted) return;
     this.aborted = true;
+    if (this.stallTimer) clearInterval(this.stallTimer);
+    if (this.channel.socket.isPaused?.()) this.channel.socket.resume?.();
     this.abortCode = code;
     this.responseReject?.(new ReverseFlowAbortedError(code, message));
     for (const waiter of this.bodyWaiters) waiter.reject(new ReverseFlowAbortedError(code, message));
@@ -92,23 +108,45 @@ class Flow {
 
   pushBody(bytes) {
     if (this.aborted || this.bodyEnded) return;
+    this.queuedBytes += bytes.length;
+    this.lastConsumedAt = Date.now();
+    if (this.queuedBytes > this.limits.hardCapBytes) {
+      this.fail("flow-overrun", "response queue exceeded the hard cap");
+      this.channel.close("flow-overrun");
+      return;
+    }
     if (this.bodyWaiters.length > 0) {
       const waiter = this.bodyWaiters.shift();
       waiter.resolve(bytes);
       return;
     }
     this.bodyQueue.push(bytes);
+    // D7 soft mark: pause the channel socket; resume below the resume mark.
+    if (this.queuedBytes >= this.limits.softMarkBytes && !this.channel.socket.isPaused?.()) {
+      this.channel.socket.pause?.();
+    }
+  }
+
+  consume(count) {
+    this.lastConsumedAt = Date.now();
+    this.queuedBytes = Math.max(0, this.queuedBytes - count);
+    if (this.queuedBytes < this.limits.resumeBelowBytes && this.channel.socket.isPaused?.()) {
+      this.channel.socket.resume?.();
+    }
   }
 
   endBody() {
     if (this.bodyEnded) return;
     this.bodyEnded = true;
+    if (this.stallTimer) clearInterval(this.stallTimer);
+    if (this.channel.socket.isPaused?.()) this.channel.socket.resume?.();
     for (const waiter of this.bodyWaiters) waiter.resolve(null);
     this.bodyWaiters = [];
     this.idleResolve?.();
   }
 
   async nextBodyChunk() {
+    if (this.aborted) throw new ReverseFlowAbortedError(this.abortCode ?? "flow-aborted", "flow aborted");
     if (this.bodyQueue.length > 0) return this.bodyQueue.shift();
     if (this.bodyEnded) return null;
     return new Promise((resolve, reject) => {
@@ -188,13 +226,19 @@ export class ReverseChannel {
         return;
       }
       if (parsed.type === "idle") {
-        if (this.flow) {
-          // Idle mid-flow is a desync: fail closed.
-          this.flow.fail("channel-desync", "idle reported mid-flow");
+        // The node reports the channel fully torn down. If the response
+        // body was not completed first, this is a desync: fail closed.
+        const flow = this.flow;
+        if (flow && !flow.bodyEnded) {
+          flow.fail("channel-desync", "idle reported mid-flow");
           this.close("channel-desync");
           return;
         }
+        // Normal completion: the flow's own queue keeps serving its
+        // consumer; the channel itself returns to the idle pool.
+        this.flow = null;
         this.state = "idle";
+        flow?.idleResolve?.();
         this.manager.onChannelIdle(this);
         return;
       }
@@ -216,7 +260,6 @@ export class ReverseChannel {
         return;
       }
       if (parsed.type === "abort") {
-        console.error(`DBG hub got node abort code=${parsed.code}`);
         this.flow.fail(parsed.code ?? "node-abort", "node aborted the flow");
         // Fail closed on node-initiated abort: close the channel; the node
         // replenishes its pool with a fresh one.
@@ -343,13 +386,22 @@ export class ReverseChannelManager {
     }
   }
 
-  // One flow = one idle channel, marked busy. If none is idle, wait up to
-  // capacityWaitMs for the node to replenish its pool; then 503.
-  async acquireChannel(nodeId) {
+  // One flow = one idle channel, claimed atomically (state flips to busy
+  // inside the synchronous claim path — concurrent callers can never be
+  // handed the same channel). If none is idle, wait up to capacityWaitMs
+  // for the node to replenish its pool; then 503 reverse-capacity.
+  claimIdleChannel(nodeId) {
     const idle = this.idleChannels(nodeId);
     if (idle.length > 0) {
+      idle[0].state = "busy";
       return idle[0];
     }
+    return null;
+  }
+
+  async acquireChannel(nodeId) {
+    const claimed = this.claimIdleChannel(nodeId);
+    if (claimed) return claimed;
     const startedAt = this.now();
     while (this.now() - startedAt < this.capacityWaitMs) {
       await new Promise((resolve) => {
@@ -362,8 +414,8 @@ export class ReverseChannelManager {
         waiters.add(waiter);
         setTimeout(resolve, Math.max(10, this.capacityWaitMs - (this.now() - startedAt))).unref?.();
       });
-      const channel = this.idleChannels(nodeId)[0];
-      if (channel) return channel;
+      const claimedNow = this.claimIdleChannel(nodeId);
+      if (claimedNow) return claimedNow;
     }
     throw new ReverseCapacityError();
   }
@@ -405,8 +457,8 @@ export class ReverseChannelManager {
   // The caller MUST consume the body; abandoning it aborts the flow.
   async executeReverseHttp(nodeId, { method, rawTarget, routeAuthority, routeProof, headers, body }) {
     const channel = await this.acquireChannel(nodeId);
-    const requestId = `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
-    const flow = new Flow({ channel, requestId });
+    const requestId = randomBytes(16).toString("hex");
+    const flow = new Flow({ channel, requestId, limits: this.limits });
     channel.markBusy(flow);
 
     const finish = async () => {
@@ -418,6 +470,16 @@ export class ReverseChannelManager {
     };
 
     try {
+      // D6.1: the Hub applies RFC-0010 header sanitation before OPEN —
+      // client X-Orbit-*, gateway assertion, management credentials, and
+      // browser cookies never travel to the node or its DSH runtime.
+      const sanitizedHeaders = (headers ?? []).filter(([name]) => {
+        const lower = String(name).toLowerCase();
+        if (lower.startsWith("x-orbit-") || lower.startsWith("x-dsh-")) return false;
+        if (lower === "cookie" || lower === "authorization" || lower === "connection") return false;
+        if (lower === "proxy-authorization" || lower === "proxy-connection") return false;
+        return true;
+      });
       channel.sendJson({
         type: "open",
         requestId,
@@ -425,7 +487,7 @@ export class ReverseChannelManager {
         method,
         rawTarget,
         routeAuthority,
-        headers: headers ?? [],
+        headers: sanitizedHeaders,
         routeProof,
       });
 
@@ -499,9 +561,7 @@ export class ReverseChannelManager {
             const chunk = await flow.nextBodyChunk();
             if (chunk === null) return;
             yield chunk;
-            // Bounded consumption: a stalled consumer stalls the node's
-            // own socket writes, and the node's 2 MiB hard cap / 30s stall
-            // closes the channel — fail closed, never buffer unbounded.
+            flow.consume(chunk.length);
           }
         } finally {
           flow.endBody();

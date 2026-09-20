@@ -743,6 +743,8 @@ export function createHubServer({ registry, options = {} }) {
   // session IDs, keys, or signatures (RFC-0012 D13).
   const reverseChannels = options.reverseChannels ?? new ReverseChannelManager();
   const reverseSessions = options.reverseSessions ?? new ReverseSessionManager({
+    idleTarget: reverseChannels.idleTarget,
+    maxChannels: reverseChannels.maxChannels,
     onPromoted: (nodeId, routeReady) => console.log(`reverse session ready node=${nodeId} routeReady=${routeReady}`),
     onRouteReadyChange: (nodeId, routeReady) => console.log(`reverse route readiness node=${nodeId} routeReady=${routeReady}`),
     onSessionClosed: (session, reason) => {

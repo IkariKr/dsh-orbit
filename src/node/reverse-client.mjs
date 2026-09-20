@@ -16,6 +16,7 @@
 import tls from "node:tls";
 import net from "node:net";
 import http from "node:http";
+import https from "node:https";
 import { randomBytes } from "node:crypto";
 import { buildSigningString, MACHINE_V1_LABEL } from "../registry/protocol.mjs";
 import { signSigningString, sha256Hex } from "../registry/crypto.mjs";
