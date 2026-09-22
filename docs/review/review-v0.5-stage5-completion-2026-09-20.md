@@ -1,7 +1,7 @@
 # DSH Orbit v0.5 Stage 5 完工报告
 
-日期：2026-09-21
-报告类型：Stage 5 construction completion report，Round 1 与 Round 2 findings remediated，提交 Independent Round 3 review；书面状态：**ROUND 2 REMEDIATION VERIFIED / REVIEW REQUESTED**
+日期：2026-09-22
+报告类型：Stage 5 construction completion report，Round 1 与 Round 2 findings remediated，Independent Round 3 review accepted；书面状态：**PASS / ACCEPTED — STAGE 6 AUTHORIZED**
 
 > 本报告对照 `docs/rfc/0012-reverse-connected-nodes.md` 和
 > `docs/sop/v0.5-reverse-connected-nodes-multistage-sop.md` 编写。
@@ -14,11 +14,13 @@
 - Branch：`chore/v0.5-stage2-public-machine-ingress`
 - Accepted Stage 0 design baseline：`5738c0ce6a4ec11bee62f9cfae44dd6463816768`（Gate A GO 记录于 `402d899`）
 - Gate B 已授权 Stage 5 开始：`docs/review/review-v0.5-gate-b-2026-09-20.md`，Stage 1–4 accepted construction HEAD 为 `9edc70faecae20e73258a42ecb78c0c7347edc35`
-- Current committed HEAD：`d9490aca1d33f3b093dc9da7733434bc4d817c5d`
-- Same-name remote ref：`d9490aca1d33f3b093dc9da7733434bc4d817c5d`
+- Current committed HEAD：`c1fd3cc66f7c686df26c72276591da16387ec48f`
+- Same-name remote ref：`c1fd3cc66f7c686df26c72276591da16387ec48f`
 - `HEAD...origin/chore/v0.5-stage2-public-machine-ingress` divergence：`0 0`
-- Local upstream：**未配置**（`git rev-parse @{u}` 返回 no upstream）
-- Worktree：**dirty**；产品代码和 Stage 5 测试存在未提交修改/新增文件
+- Local upstream：**未配置**；外部 review 使用同名 remote ref，审查记录已确认 HEAD 与 remote 一致
+- Worktree：**clean** at the accepted Stage 5 review commit
+- Independent Stage 5 Round 3 review：`docs/review/review-v0.5-stage5-independent-r3-2026-09-22.md` — **PASS / ACCEPTED**
+- Stage 6：**AUTHORIZED TO BEGIN** by Round 3 review
 - Candidate freeze：**未执行**
 - Gate C：**NOT REACHED**；Stage 6 和 Stage 7 尚未完成，因此尚未到达 Gate C 前置条件
 - Stage 8：**未开始，且在 Gate C GO 前禁止开始**
@@ -294,7 +296,7 @@ git rev-list --left-right --count HEAD...origin/...: 0 0
 
 - P0：0 个已知未解决项；
 - P1：Round 2 新增的 D10 data-channel credential identity 缺失已修复：Hub 从完成认证的 `auth.key.key_id` 注册 channel，channel 持久保存 `{ nodeId, keyId, sessionId }`，revocation 独立按 exact `{ nodeId, keyId }` 关闭 data channel，并通过 mixed control/data overlap live regression；Round 1 及更早 P1 均保持已修复并回归通过；
-- P2：Round 2 D9 pool-availability clarity 已按实现选项闭合：增加当前 generation 的非破坏性 registered-channel predicate，明确 busy channel 仍进入 bounded assignment wait，zero registered channel 才 fail closed；该选择未修改原始 RFC/Review provenance，仍需 Independent Round 3 review 确认；其余 Stage 6/7/Gate C/mounted qualification 项仍未执行。
+- P2：Round 2 D9 pool-availability clarity 已按实现选项闭合：增加当前 generation 的非破坏性 registered-channel predicate，明确 busy channel 仍进入 bounded assignment wait，zero registered channel 才 fail closed；该选择未修改原始 RFC/Review provenance，已由 Independent Round 3 review 独立确认 CLOSED；其余 Stage 6/7/Gate C/mounted qualification 项仍未执行。
 
 上述为 construction self-audit，不是独立 Gate C authorization。
 
@@ -302,7 +304,7 @@ git rev-list --left-right --count HEAD...origin/...: 0 0
 
 以下事项明确保持 `NOT_EXECUTED`，不得在本报告中解释为 PASS：
 
-1. Stage 6 authenticated operator route-mode mutation API；
+1. Stage 6 authenticated operator route-mode mutation API（现已授权开始，但尚未施工）；
 2. Stage 6 operator-driven credential rotation/reconnect lifecycle and reenroll qualification; Stage 5 overlap-expiry immediate revoke teardown is implemented and locally verified, but the complete Stage 6 lifecycle remains NOT_EXECUTED；
 3. Stage 6 reenroll same node ID + fresh Hub route identity live evidence；
 4. Stage 7 full hardening qualification matrix；
@@ -322,7 +324,7 @@ git rev-list --left-right --count HEAD...origin/...: 0 0
 
 ### Stage 5 local construction disposition
 
-**PASS — Round 2 remediation implementation/test verification complete; Independent Round 3 review required.**
+**PASS / ACCEPTED — Independent Stage 5 Round 3 review completed at `c1fd3cc`; Stage 6 construction authorized.**
 
 Round 2 disposition:
 
@@ -336,37 +338,18 @@ Round 2 disposition:
 理由：
 
 - SOP 顺序要求 `Stage 5 → Stage 6 → Stage 7 hardening/candidate freeze → Gate C → Stage 8`；
-- 当前 worktree dirty，尚未形成唯一 candidate SHA；
-- branch 没有 configured upstream；
-- 还未满足 SOP candidate freeze 的 clean/pushed/local=remote 前置条件；
+- 当前阶段虽已在 `c1fd3cc` 形成 clean/pushed review SHA，但这不是 candidate freeze；
+- SOP candidate freeze 还需要 Stage 7 hardening、exact 48-field candidate-bound matrix 以及独立 Gate C review；
 - Stage 6 operator lifecycle、reenroll qualification、Stage 7 hardening 和 exact 48-field candidate-bound evidence 尚未完成；
 - 因此 Gate C 不是 HOLD review decision，而是尚未到达的治理阶段；
 - mounted evidence 只能在 Gate C GO 后开始。
 
+### Round 3 acceptance record
+
+Independent Stage 5 Round 3 review at `c1fd3cc66f7c686df26c72276591da16387ec48f` returned **PASS / ACCEPTED**, with P0/P1/P2 all zero. It independently re-ran the 61-test focused matrix, `npm run check` (470/465/0/5), hygiene/security scans, and seven first-principles manager seam probes. The review authorizes Stage 6 only; it does not authorize candidate freeze, Gate C, or Stage 8.
+
 ### Required next review action
 
-请 reviewer 针对本报告所指向的**当前 exact worktree**重新检查：
+Stage 6 must now be constructed and independently reviewed before Stage 7. The next review must target the new Stage 6 implementation commit, while preserving this Stage 5 acceptance record and all original Round 1–3 provenance.
 
-1. `git diff 5738c0c..HEAD` 以及所有未提交修改；
-2. Stage 5 D7 双向 backpressure/stall 和 ordinary HTTP body response backpressure；
-3. session-bound capacity waiter / takeover cancellation；
-4. HTTP/WS concrete flow capacity waiter：arrival within 2s and timeout-to-503；
-5. reverse selector displayed reachable 与 live route readiness 一致，registryContact 独立；
-6. credential overlap expiry 按旧 key 精确关闭 control session、data channel、active flow，新 key 不误关；
-7. mixed `control=K_new / data=K_old` overlap 与 exact-key data teardown；
-8. revoked old key 新 reverse control/data upgrade denial；
-9. D9 current-generation non-destructive registered-channel predicate，busy wait 与 zero-channel fail-closed 语义；
-10. non-101 delayed body、browser abort、tracker recovery；
-11. no fallback、immutable snapshot、direct regression、header/cookie sanitation；
-12. SOP Stage 5 scope 与 no 0.6/0.7 expansion；
-13. current full test result：470 / 465 / 0 / 5；
-14. 明确返回 Stage 5 Round 3 review conclusion，并列出 NOT_EXECUTED；Gate C 当前应保持 `NOT REACHED`。
-
-在独立 review 返回并授权前：
-
-- 不提交/冻结 candidate；
-- 不开始 Stage 6；
-- 不开始 Stage 8 mounted evidence；
-- 不宣称 Gate C GO。
-
-**报告完成后停止施工，等待 Independent Stage 5 Review Round 3。**
+Stage 6 authorization does not authorize candidate freeze, Gate C, mounted evidence, tag/release publication, production promotion, or DNS cutover.
