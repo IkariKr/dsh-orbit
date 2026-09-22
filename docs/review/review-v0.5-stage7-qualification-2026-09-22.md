@@ -6,6 +6,11 @@
 > 本记录对照 `docs/rfc/0012-reverse-connected-nodes.md` 与
 > `docs/sop/v0.5-reverse-connected-nodes-multistage-sop.md` 编写。
 > 本记录不是 candidate freeze，不是 Gate C GO，不授权 Stage 8 mounted evidence。
+>
+> Superseded-note（2026-09-22 post-freeze addendum）：被后续
+> `docs/review/review-v0.5-candidate-freeze-and-gate-c-audit-2026-09-22.md`
+> 与 `docs/review/review-v0.5-gate-c-rereview-2026-09-23-e6cb335.md` supersede；
+> candidate freeze 与 Gate C 的当前状态以后者为准。
 
 ## 1. Provenance and gate boundary
 
