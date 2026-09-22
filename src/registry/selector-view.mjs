@@ -7,6 +7,18 @@ import { computeRouteAuthority } from "./protocol.mjs";
 import { evaluateRouteEligibility } from "./route-proxy.mjs";
 
 export const SELECTOR_REASON_MAP = Object.freeze({
+  "reverse-session-offline": {
+    code: "reverse-offline",
+    message: "Reverse connection is offline",
+  },
+  "reverse-route-unreachable": {
+    code: "reverse-unreachable",
+    message: "Reverse route or local DSH is unreachable",
+  },
+  "reverse-capacity": {
+    code: "reverse-capacity",
+    message: "Reverse route has no available data channel",
+  },
   "node-not-active": {
     code: "node-inactive",
     message: "Node is not active",
@@ -54,9 +66,21 @@ export function mapEligibilityReason(serverReason) {
   };
 }
 
-export function buildSelectorNodeRow(registry, nodeRow, { routeDomain, trustedScheme = "https" } = {}) {
+export function buildSelectorNodeRow(
+  registry,
+  nodeRow,
+  { routeDomain, trustedScheme = "https", reverseSessions = null, reverseChannels = null } = {},
+) {
   const nodeId = nodeRow.node_id;
-  const eligibility = evaluateRouteEligibility(registry, nodeId);
+  const routeMode = nodeRow.route_mode === "reverse" ? "reverse" : "direct";
+  const eligibility = evaluateRouteEligibility(registry, nodeId, { reverseSessions, reverseChannels });
+  // Reverse reachability is a live transport fact, not the persisted direct
+  // probe dimension. Keep registryContact independent while making the
+  // displayed health state agree with the same readiness authority used by
+  // route eligibility.
+  const displayedReachable = routeMode === "reverse"
+    ? (eligibility.reverseRouteReady === true ? "ok" : "unreachable")
+    : nodeRow.reachable;
 
   let capabilities = [];
   try {
@@ -84,7 +108,7 @@ export function buildSelectorNodeRow(registry, nodeRow, { routeDomain, trustedSc
     },
     health: {
       registryContact: nodeRow.registry_contact,
-      reachable: nodeRow.reachable,
+      reachable: displayedReachable,
       orbitCompatible: nodeRow.orbit_compatible,
       capabilities: capabilities.map((c) => ({ name: c.name, version: c.version })),
       capabilitiesStale: Boolean(nodeRow.capabilities_stale),
@@ -93,6 +117,12 @@ export function buildSelectorNodeRow(registry, nodeRow, { routeDomain, trustedSc
     },
     route: {
       eligible: eligibility.eligible,
+      routeMode: nodeRow.route_mode === "reverse" ? "reverse" : "direct",
+      reversePresence: eligibility.reversePresence ?? (
+        nodeRow.route_mode === "reverse"
+          ? (reverseSessions?.getPresence(nodeId, "reverse") ?? "offline")
+          : (reverseSessions?.getPresence(nodeId, "direct") ?? "unknown")
+      ),
       reasonCode,
       reason,
       openUrl,
@@ -187,14 +217,22 @@ export function renderUnavailableHtml({ reasonMessage = "Selected node is unavai
 </html>`;
 }
 
-export function buildSelectorReadModel(registry, { routeDomain, trustedScheme = "https" } = {}) {
+export function buildSelectorReadModel(
+  registry,
+  { routeDomain, trustedScheme = "https", reverseSessions = null, reverseChannels = null } = {},
+) {
   const nodes = registry.db
     .prepare("SELECT * FROM nodes ORDER BY minted_at ASC, node_id ASC")
     .all();
 
   return {
     nodes: nodes.map((nodeRow) =>
-      buildSelectorNodeRow(registry, nodeRow, { routeDomain, trustedScheme }),
+      buildSelectorNodeRow(registry, nodeRow, {
+        routeDomain,
+        trustedScheme,
+        reverseSessions,
+        reverseChannels,
+      }),
     ),
   };
 }

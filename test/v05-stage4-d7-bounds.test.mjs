@@ -219,6 +219,8 @@ test("hub-side OPEN sanitation: browser cookies and gateway assertion headers ne
       ["x-orbit-route-signature", "forged"],
       ["x-dsh-authenticated-proxy", "gateway-secret"],
       ["x-dsh-operator-id", "operator"],
+      ["x-gateway-auth", "gateway-assertion"],
+      ["x-gateway-secret", "gateway-secret"],
       ["accept", "text/html"],
     ],
   });
@@ -226,11 +228,13 @@ test("hub-side OPEN sanitation: browser cookies and gateway assertion headers ne
   await collectBody(result.body);
   await result.finish();
   const recorded = dsh.recorded.at(-1);
-  const headerNames = Object.keys(recorded.headers).map((name) => name.toLowerCase());
-  for (const forbidden of ["cookie", "x-orbit-route-signature", "x-dsh-authenticated-proxy", "x-dsh-operator-id"]) {
-    assert.equal(headerNames.includes(forbidden), false, `${forbidden} must be sanitized before OPEN`);
-  }
-  assert.equal(headerNames.includes("accept"), true);
+  assert.equal(recorded.headers.cookie, "other=1");
+  assert.equal(recorded.headers["x-orbit-route-signature"], undefined);
+  assert.equal(recorded.headers["x-dsh-authenticated-proxy"], undefined);
+  assert.equal(recorded.headers["x-dsh-operator-id"], undefined);
+  assert.equal(recorded.headers["x-gateway-auth"], undefined);
+  assert.equal(recorded.headers["x-gateway-secret"], undefined);
+  assert.equal(recorded.headers.accept, "text/html");
   client.stop();
   await dsh.close();
   await close();

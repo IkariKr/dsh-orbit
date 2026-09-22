@@ -6,10 +6,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import http from "node:http";
+import { PassThrough } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { randomHex, generateNodeKeyPair, signSigningString } from "../src/registry/crypto.mjs";
 import { buildRouteSigningString, computeRouteAuthority } from "../src/registry/protocol.mjs";
-import { validateReversePoolBounds, ReverseChannelManager, ReverseCapacityError, ReverseFlowAbortedError } from "../src/registry/reverse-channel.mjs";
+import { validateReversePoolBounds, ReverseChannelManager, ReverseCapacityError, ReverseFlowAbortedError, ReverseSessionStaleError } from "../src/registry/reverse-channel.mjs";
 import { ReverseClient } from "../src/node/reverse-client.mjs";
 import { ReverseChannelPool } from "../src/node/reverse-channels.mjs";
 import { RouteNonceCache } from "../src/registry/route-auth.mjs";
@@ -199,6 +200,46 @@ test("channel upgrade requires the current ready session binding; another node's
   await topology.cleanup();
 });
 
+test("capacity waiters are generation-bound and cancelled on session takeover", async () => {
+  const manager = new ReverseChannelManager({ capacityWaitMs: 5000 });
+  const stale = manager.acquireChannel("node_" + "a".repeat(32), { sessionId: "old-session" });
+  await sleep(20);
+  manager.closeChannelsForSession("old-session", "takeover");
+  await assert.rejects(stale, (error) => error instanceof ReverseSessionStaleError);
+  assert.equal(manager.idleWaiters.size, 0);
+});
+
+test("credential revocation closes only exact-key channels and is idempotent", () => {
+  const manager = new ReverseChannelManager({ idleTarget: 1, maxChannels: 4 });
+  const sockets = [];
+  const register = (nodeId, keyId, sessionId) => {
+    const socket = new PassThrough();
+    sockets.push(socket);
+    return manager.registerChannel({
+      nodeId,
+      keyId,
+      sessionId,
+      socket,
+      secWebSocketKey: "dGhlIHNhbXBsZSBub25jZQ==",
+    });
+  };
+  const oldKey = register("node-a", "old-key", "session-a");
+  const newKey = register("node-a", "new-key", "session-a");
+  const otherNode = register("node-b", "old-key", "session-b");
+  assert.equal(oldKey.keyId, "old-key");
+  assert.equal(newKey.keyId, "new-key");
+  assert.equal(otherNode.keyId, "old-key");
+
+  const closed = manager.closeChannelsForCredential("node-a", "old-key", "rotation-overlap-ended");
+  assert.deepEqual(closed, [oldKey.id]);
+  assert.equal(oldKey.closed, true);
+  assert.equal(newKey.closed, false);
+  assert.equal(otherNode.closed, false);
+  assert.deepEqual(manager.closeChannelsForCredential("node-a", "old-key", "rotation-overlap-ended"), []);
+
+  for (const socket of sockets) socket.destroy();
+});
+
 test("a stale session binding is denied after a control takeover", async (t) => {
   const topology = await startTopology(t);
   const { registry, reverseSessions, nodeId, client } = topology;
@@ -228,6 +269,26 @@ test("acquireChannel fails 503 reverse-capacity when the node has no idle channe
     () => manager.acquireChannel("node_" + "a".repeat(32)),
     (error) => error instanceof ReverseCapacityError && error.code === "reverse-capacity",
   );
+  assert.equal(manager.idleWaiters.size, 0, "timed-out capacity waiters must be removed");
+});
+
+test("malformed authenticated OPEN closes the node channel without touching DSH", async (t) => {
+  const topology = await startTopology(t);
+  const { pool, nodeId, dsh } = topology;
+  const channel = [...pool.channels][0];
+  assert.ok(channel);
+  const before = dsh.recorded.length;
+  channel.state = "idle";
+  pool.onChannelText(channel, JSON.stringify({
+    type: "open",
+    requestId: "request-1",
+    mode: "http",
+    headers: ["not-a-pair"],
+  }));
+  await waitFor(() => !pool.channels.has(channel), { label: "malformed OPEN channel close" });
+  assert.equal(dsh.recorded.length, before);
+  void nodeId;
+  await topology.cleanup();
 });
 
 test("full reverse HTTP flow: root GET through the channel reaches DSH with sanitized headers and returns idle", async (t) => {

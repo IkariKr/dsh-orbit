@@ -27,6 +27,7 @@ export async function createTestServer(registry, options = {}) {
     baseUrl,
     reverseSessions: hub.reverseSessions,
     reverseChannels: hub.reverseChannels,
+    wsTracker: hub.wsTracker,
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections?.();

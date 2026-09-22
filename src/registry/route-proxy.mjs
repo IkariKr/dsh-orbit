@@ -146,35 +146,82 @@ export function parseRouteAuthority(hostHeader, configuredRouteDomain) {
   return null;
 }
 
-// Evaluate RFC-0010 5-condition eligibility:
-// 1. node.state === active
-// 2. operator-approved routeTarget exists
-// 3. reachable === ok
-// 4. per-node Hub route identity is active
-// 5. web.routes is present and backed by fresh compatibility evidence
-export function evaluateRouteEligibility(registry, nodeId) {
+// Evaluate the existing RFC-0010 eligibility policy with an explicit
+// transport choice. The returned snapshot is the only routing decision a
+// flow may use: later registry/session changes affect new flows only.
+export function evaluateRouteEligibility(
+  registry,
+  nodeId,
+  { reverseSessions = null, reverseChannels = null } = {},
+) {
   const nodeRow = registry.getNodeRow(nodeId);
   if (!nodeRow || nodeRow.state !== "active") {
     return { eligible: false, reason: "node-not-active" };
   }
 
+  const routeMode = nodeRow.route_mode === "reverse" ? "reverse" : "direct";
   const routeTarget = registry.getRouteTarget(nodeId);
-  if (!routeTarget || !routeTarget.origin) {
-    return { eligible: false, reason: "no-route-target" };
-  }
+  // Take one current-session snapshot for all reverse decisions. Reading
+  // presence, readiness, and sessionId through separate calls can otherwise
+  // combine two generations during a takeover and bind a flow to the wrong
+  // transport state.
+  const reverseSessionInfo = routeMode === "reverse"
+    ? (reverseSessions?.getSessionInfo(nodeId) ?? null)
+    : null;
+  const reverseState = routeMode === "reverse"
+    ? {
+        reversePresence: reverseSessionInfo ? "online" : "offline",
+        reverseRouteReady: reverseSessionInfo?.routeReady === true,
+      }
+    : {};
 
-  if (nodeRow.reachable !== "ok") {
-    return { eligible: false, reason: `node-not-reachable: ${nodeRow.reachable}` };
+  if (routeMode === "direct") {
+    if (!routeTarget || !routeTarget.origin) {
+      return { eligible: false, reason: "no-route-target" };
+    }
+    if (nodeRow.reachable !== "ok") {
+      return { eligible: false, reason: `node-not-reachable: ${nodeRow.reachable}` };
+    }
+  } else {
+    if (reverseState.reversePresence !== "online") {
+      return { eligible: false, reason: "reverse-session-offline", routeMode, ...reverseState };
+    }
+    if (!reverseState.reverseRouteReady) {
+      return { eligible: false, reason: "reverse-route-unreachable", routeMode, ...reverseState };
+    }
+    // D9 requires a non-destructive pool-availability predicate. This
+    // checks that the current generation has a registered channel, not that
+    // one is idle: a busy channel can still become available during the
+    // bounded concrete-assignment wait, while zero channels is fail-closed.
+    if (typeof reverseChannels?.hasChannelForSession !== "function" ||
+        !reverseChannels.hasChannelForSession(nodeId, reverseSessionInfo.reverseSessionId)) {
+      return {
+        eligible: false,
+        reason: "reverse-capacity",
+        routeMode,
+        ...reverseState,
+      };
+    }
   }
 
   const activeKey = registry.getActiveHubRouteKey(nodeId);
   if (!activeKey || activeKey.state !== "active") {
-    return { eligible: false, reason: "no-active-hub-route-key" };
+    return {
+      eligible: false,
+      reason: "no-active-hub-route-key",
+      routeMode,
+      ...(routeMode === "reverse" ? reverseState : {}),
+    };
   }
 
   // web.routes presence & fresh compatibility evidence
   if (nodeRow.capabilities_stale === 1 || nodeRow.orbit_compatible === "stale" || nodeRow.orbit_compatible === "unknown") {
-    return { eligible: false, reason: "compatibility-evidence-stale" };
+    return {
+      eligible: false,
+      reason: "compatibility-evidence-stale",
+      routeMode,
+      ...(routeMode === "reverse" ? reverseState : {}),
+    };
   }
 
   let capabilities = [];
@@ -185,14 +232,25 @@ export function evaluateRouteEligibility(registry, nodeId) {
   }
   const hasWebRoutes = Array.isArray(capabilities) && capabilities.some((cap) => cap.name === "web.routes");
   if (!hasWebRoutes) {
-    return { eligible: false, reason: "web-routes-capability-missing" };
+    return {
+      eligible: false,
+      reason: "web-routes-capability-missing",
+      routeMode,
+      ...(routeMode === "reverse" ? reverseState : {}),
+    };
   }
 
+  const reverseSessionId = routeMode === "reverse" ? reverseSessionInfo?.reverseSessionId ?? null : null;
   return {
     eligible: true,
+    routeMode,
+    ...(routeMode === "reverse"
+      ? reverseState
+      : { reversePresence: reverseSessions?.getPresence(nodeId, routeMode) ?? "unknown", reverseRouteReady: null }),
     snapshot: {
       nodeId,
-      routeTargetOrigin: routeTarget.origin,
+      routeMode,
+      ...(routeMode === "direct" ? { routeTargetOrigin: routeTarget.origin } : { reverseSessionId }),
       activeKey,
     },
   };
@@ -240,12 +298,249 @@ export function sanitizeClientHeaders(headers) {
       continue;
     }
     // Strip gateway assertion and principal headers
-    if (lower === "x-dsh-authenticated-proxy" || lower === "x-dsh-operator-id" || lower === "x-csrf-token") {
+    if (
+      lower === "x-dsh-authenticated-proxy" ||
+      lower === "x-dsh-operator-id" ||
+      lower === "x-csrf-token" ||
+      lower === "x-gateway-auth" ||
+      lower === "x-gateway-secret"
+    ) {
       continue;
     }
     out[key] = val;
   }
   return out;
+}
+
+// Reverse OPEN uses ordered header pairs so duplicate fields survive the
+// transport. The public Host is selected from the deterministic authority,
+// never from a browser-supplied value.
+export function sanitizeClientHeaderPairs(rawHeaders, { websocket = false } = {}) {
+  const pairs = [];
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    const name = rawHeaders[index];
+    const value = rawHeaders[index + 1];
+    const lower = String(name).toLowerCase();
+    if (lower === "host") continue;
+    if (lower.startsWith("x-orbit-route-")) continue;
+    if (
+      lower === "x-dsh-authenticated-proxy" ||
+      lower === "x-dsh-operator-id" ||
+      lower === "x-csrf-token" ||
+      lower === "x-gateway-auth" ||
+      lower === "x-gateway-secret"
+    ) continue;
+    if (lower === "cookie") {
+      const sanitized = String(value)
+        .split(";")
+        .map((part) => part.trim())
+        .filter((part) => !part.toLowerCase().startsWith("dsh-orbit-hub-session="))
+        .join("; ");
+      if (sanitized) pairs.push([name, sanitized]);
+      continue;
+    }
+    if (!websocket && lower === "connection") continue;
+    pairs.push([name, value]);
+  }
+  return pairs;
+}
+
+function routeProofFor({ snapshot, routeAuthority, method, rawTarget, nowMs }) {
+  const nonce = randomHex(16);
+  const { headers } = signRouteRequest({
+    privateKeyHex: snapshot.activeKey.private_key,
+    keyId: snapshot.activeKey.key_id,
+    nodeId: snapshot.nodeId,
+    routeAuthority,
+    method,
+    rawTarget,
+    nowMs,
+    nonce,
+  });
+  return {
+    nodeId: snapshot.nodeId,
+    keyId: headers["x-orbit-route-key"],
+    timestamp: Number(headers["x-orbit-route-timestamp"]),
+    nonce: headers["x-orbit-route-nonce"],
+    signature: headers["x-orbit-route-signature"],
+  };
+}
+
+function responseHeaderPairsToObject(pairs) {
+  const headers = {};
+  for (const entry of pairs ?? []) {
+    if (!Array.isArray(entry) || entry.length !== 2) continue;
+    const [name, value] = entry;
+    const existing = headers[name];
+    if (existing === undefined) headers[name] = value;
+    else if (Array.isArray(existing)) existing.push(value);
+    else headers[name] = [existing, value];
+  }
+  return headers;
+}
+
+function waitForResponseDrain(res) {
+  if (res.destroyed || res.writableEnded) return Promise.reject(new Error("browser response closed"));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      res.removeListener("drain", onDrain);
+      res.removeListener("close", onClose);
+      res.removeListener("error", onError);
+    };
+    const finish = (error = null) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const onDrain = () => finish();
+    const onClose = () => finish(new Error("browser response closed"));
+    const onError = (error) => finish(error);
+    res.once("drain", onDrain);
+    res.once("close", onClose);
+    res.once("error", onError);
+  });
+}
+
+function streamReverseResponse(res, result) {
+  const responseHeaders = responseHeaderPairsToObject(result.headers);
+  res.writeHead(result.status, responseHeaders);
+  let settled = false;
+  const abort = () => {
+    if (settled || res.writableEnded) return;
+    settled = true;
+    result.abort?.("browser-abort");
+  };
+  res.once("aborted", abort);
+  res.once("close", abort);
+  return (async () => {
+    try {
+      for await (const chunk of result.body) {
+        if (settled) return;
+        if (!res.write(chunk)) await waitForResponseDrain(res);
+      }
+      if (!settled) res.end();
+      await result.finish?.();
+    } catch (error) {
+      result.abort?.("browser-abort");
+      if (!res.writableEnded) res.destroy(error);
+      try { await result.finish?.(); } catch {}
+      throw error;
+    } finally {
+      settled = true;
+      res.removeListener("aborted", abort);
+      res.removeListener("close", abort);
+    }
+  })();
+}
+
+// Stream one selected RFC-0010 HTTP flow over the existing reverse channel.
+export async function proxyReverseHttpRequest({
+  req,
+  res,
+  snapshot,
+  routeAuthority,
+  reverseChannels,
+  configuredRouteDomain = null,
+  trustedScheme = "https",
+  nowMs = Date.now(),
+}) {
+  const rawTarget = req.url;
+  if (!isValidOriginFormTarget(rawTarget)) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { code: "invalid-target", message: "only origin-form request-target is supported" } }));
+    return;
+  }
+  const method = req.method || "GET";
+  const routeProof = routeProofFor({ snapshot, routeAuthority, method, rawTarget, nowMs });
+  let rejectBrowserAbort;
+  const browserAbort = new Promise((_, reject) => { rejectBrowserAbort = reject; });
+  const abortBrowser = () => rejectBrowserAbort?.(new Error("browser-abort"));
+  req.once("aborted", abortBrowser);
+  res.once("close", abortBrowser);
+  try {
+    const result = await reverseChannels.executeReverseHttp(snapshot.nodeId, {
+      sessionId: snapshot.reverseSessionId,
+      method,
+      rawTarget,
+      routeAuthority,
+      routeProof,
+      headers: sanitizeClientHeaderPairs(req.rawHeaders ?? [], { websocket: false }),
+      body: req,
+      abortPromise: browserAbort,
+    });
+    await streamReverseResponse(res, result);
+    req.removeListener("aborted", abortBrowser);
+    req.removeListener("close", abortBrowser);
+    res.removeListener("close", abortBrowser);
+  } catch (error) {
+    req.removeListener("aborted", abortBrowser);
+    req.removeListener("close", abortBrowser);
+    res.removeListener("close", abortBrowser);
+    if (res.headersSent || res.writableEnded) return;
+    const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
+    const status = error?.code === "reverse-capacity" ? 503 : 503;
+    if (isHtmlAccept(req.headers?.accept)) {
+      const html = renderUnavailableHtml({
+        reasonMessage: error?.code === "reverse-capacity" ? "Selected reverse route has no available data channel" : "Reverse route is unavailable",
+        routeAuthority,
+        selectorUrl,
+      });
+      res.writeHead(status, { "content-type": "text/html; charset=utf-8", "content-length": Buffer.byteLength(html) });
+      res.end(html);
+      return;
+    }
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { code: error?.code ?? "node-unavailable", message: "Selected node is unavailable", selectorUrl } }));
+  }
+}
+
+// Stream one selected RFC-0010 WebSocket flow over the existing reverse channel.
+export async function proxyReverseWebSocketUpgrade({
+  req,
+  socket,
+  head,
+  snapshot,
+  routeAuthority,
+  reverseChannels,
+  tracker = null,
+  configuredRouteDomain = null,
+  trustedScheme = "https",
+  nowMs = Date.now(),
+}) {
+  const rawTarget = req.url;
+  if (!isValidOriginFormTarget(rawTarget)) {
+    sendSocketHttpError(socket, 400, "Bad Request", {}, { error: { code: "invalid-target", message: "only origin-form request-target is supported" } });
+    return;
+  }
+  const method = req.method || "GET";
+  const routeProof = routeProofFor({ snapshot, routeAuthority, method, rawTarget, nowMs });
+  let releaseTracker = null;
+  if (tracker) releaseTracker = tracker.track(snapshot.nodeId, socket);
+  try {
+    const result = await reverseChannels.executeReverseWebSocket(snapshot.nodeId, {
+      sessionId: snapshot.reverseSessionId,
+      socket,
+      head,
+      method,
+      rawTarget,
+      routeAuthority,
+      routeProof,
+      headers: sanitizeClientHeaderPairs(req.rawHeaders ?? [], { websocket: true }),
+    });
+    // A transparent non-101 response has no long-lived browser socket for the
+    // tracker to observe reliably; release its slot once the response is sent.
+    if (result?.status !== 101) releaseTracker?.();
+  } catch (error) {
+    releaseTracker?.();
+    if (socket.destroyed || socket.writableEnded) return;
+    const selectorUrl = getSelectorReturnUrl(configuredRouteDomain, trustedScheme);
+    sendSocketHttpError(socket, error?.code === "reverse-capacity" ? 503 : 502, error?.code === "reverse-capacity" ? "Service Unavailable" : "Bad Gateway", {}, {
+      error: { code: error?.code ?? "node-unavailable", message: "Selected node is unavailable", selectorUrl },
+    });
+  }
 }
 
 // Stream HTTP request to Node RouteIngress with ORBIT-ROUTE-V1

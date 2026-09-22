@@ -17,7 +17,9 @@ import {
   HubWebSocketTracker,
   isValidOriginFormTarget,
   proxyHttpRequest,
+  proxyReverseHttpRequest,
   proxyWebSocketUpgrade,
+  proxyReverseWebSocketUpgrade,
   sendSocketHttpError,
 } from "./route-proxy.mjs";
 import { buildSelectorReadModel, mapEligibilityReason, isHtmlAccept, renderUnavailableHtml } from "./selector-view.mjs";
@@ -257,8 +259,12 @@ export function createHubServer({ registry, options = {} }) {
         return;
       }
 
-      // Check 5-condition eligibility
-      const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
+      // Evaluate the single RFC-0010 route policy with an explicit,
+      // immutable direct/reverse transport snapshot.
+      const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId, {
+        reverseSessions,
+        reverseChannels,
+      });
       if (!eligibility.eligible) {
         const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
         const accept = request.headers.accept || "";
@@ -289,17 +295,29 @@ export function createHubServer({ registry, options = {} }) {
         return;
       }
 
-      // Proxy request to node route ingress
-      proxyHttpRequest({
-        req: request,
-        res: response,
-        snapshot: eligibility.snapshot,
-        routeAuthority: hostClass.routeAuthority,
-        configuredRouteDomain: registry.routeDomain,
-        trustedScheme: trustedExternalScheme,
-        caCertificates: registry.caCertificates,
-        nowMs: registry.now().getTime(),
-      });
+      if (eligibility.snapshot.routeMode === "reverse") {
+        void proxyReverseHttpRequest({
+          req: request,
+          res: response,
+          snapshot: eligibility.snapshot,
+          routeAuthority: hostClass.routeAuthority,
+          reverseChannels,
+          configuredRouteDomain: registry.routeDomain,
+          trustedScheme: trustedExternalScheme,
+          nowMs: registry.now().getTime(),
+        });
+      } else {
+        proxyHttpRequest({
+          req: request,
+          res: response,
+          snapshot: eligibility.snapshot,
+          routeAuthority: hostClass.routeAuthority,
+          configuredRouteDomain: registry.routeDomain,
+          trustedScheme: trustedExternalScheme,
+          caCertificates: registry.caCertificates,
+          nowMs: registry.now().getTime(),
+        });
+      }
       return;
     }
 
@@ -630,6 +648,8 @@ export function createHubServer({ registry, options = {} }) {
         const readModel = buildSelectorReadModel(registry, {
           routeDomain: registry.routeDomain,
           trustedScheme: trustedExternalScheme,
+          reverseSessions,
+          reverseChannels,
         });
         return sendJson(response, 200, readModel);
       }
@@ -750,7 +770,28 @@ export function createHubServer({ registry, options = {} }) {
     onSessionClosed: (session, reason) => {
       console.log(`reverse session closed node=${session.nodeId} reason=${reason}`);
       // D4.2: a takeover/close invalidates the old generation's channels.
-      reverseChannels.closeChannelsForSession(session.sessionId, reason);
+      reverseChannels.closeChannelsForSession(session.reverseSessionId, reason);
+    },
+  });
+
+  registry.setRuntimeLifecycleHooks?.({
+    onNodeDeleted: (nodeId, reason) => {
+      reverseSessions.closeSessionsForNode(nodeId, reason ?? "node-deleted");
+      reverseChannels.closeChannelsForNode(nodeId, reason ?? "node-deleted");
+    },
+    onNodeCredentialRevoked: ({ nodeId, keyId, reason }) => {
+      const closeReason = reason ?? "credential-revoked";
+      const sessionIds = reverseSessions.closeSessionsForCredential(nodeId, keyId, closeReason);
+      // Credential revocation is connection-scoped: data upgrades may have
+      // authenticated with a different accepted key than the current control
+      // session, so generation cleanup alone is insufficient (RFC-0012 D10).
+      reverseChannels.closeChannelsForCredential(nodeId, keyId, closeReason);
+      // The normal session close callback performs this cleanup. Repeat it
+      // explicitly for injected session managers without that callback; the
+      // channel close operation is idempotent and remains generation-bound.
+      for (const sessionId of sessionIds) {
+        reverseChannels.closeChannelsForSession(sessionId, closeReason);
+      }
     },
   });
 
@@ -825,6 +866,7 @@ export function createHubServer({ registry, options = {} }) {
     }
     reverseChannels.registerChannel({
       nodeId: auth.node.node_id,
+      keyId: auth.key.key_id,
       sessionId: boundSession,
       socket,
       secWebSocketKey: request.headers["sec-websocket-key"],
@@ -883,8 +925,12 @@ export function createHubServer({ registry, options = {} }) {
         return;
       }
 
-      // Check 5-condition eligibility
-      const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId);
+      // Evaluate the same RFC-0010 policy used by HTTP, freezing the
+      // selected direct/reverse transport for this upgrade.
+      const eligibility = evaluateRouteEligibility(registry, hostClass.nodeId, {
+        reverseSessions,
+        reverseChannels,
+      });
       if (!eligibility.eligible) {
         const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
         sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
@@ -897,20 +943,34 @@ export function createHubServer({ registry, options = {} }) {
         return;
       }
 
-      // Proxy WebSocket upgrade to node route ingress
-      proxyWebSocketUpgrade({
-        req: request,
-        socket,
-        head,
-        snapshot: eligibility.snapshot,
-        routeAuthority: hostClass.routeAuthority,
-        tracker: wsTracker,
-        configuredRouteDomain: registry.routeDomain,
-        trustedScheme: trustedExternalScheme,
-        caCertificates: registry.caCertificates,
-        ...(wsHandshakeTimeoutMs !== undefined ? { handshakeTimeoutMs: wsHandshakeTimeoutMs } : {}),
-        nowMs: registry.now().getTime(),
-      });
+      if (eligibility.snapshot.routeMode === "reverse") {
+        void proxyReverseWebSocketUpgrade({
+          req: request,
+          socket,
+          head,
+          snapshot: eligibility.snapshot,
+          routeAuthority: hostClass.routeAuthority,
+          reverseChannels,
+          tracker: wsTracker,
+          configuredRouteDomain: registry.routeDomain,
+          trustedScheme: trustedExternalScheme,
+          nowMs: registry.now().getTime(),
+        });
+      } else {
+        proxyWebSocketUpgrade({
+          req: request,
+          socket,
+          head,
+          snapshot: eligibility.snapshot,
+          routeAuthority: hostClass.routeAuthority,
+          tracker: wsTracker,
+          configuredRouteDomain: registry.routeDomain,
+          trustedScheme: trustedExternalScheme,
+          caCertificates: registry.caCertificates,
+          ...(wsHandshakeTimeoutMs !== undefined ? { handshakeTimeoutMs: wsHandshakeTimeoutMs } : {}),
+          nowMs: registry.now().getTime(),
+        });
+      }
       return;
     }
 

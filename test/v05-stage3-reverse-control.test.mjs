@@ -372,6 +372,28 @@ test("local DSH readiness changes reachable and presence without touching regist
   await cleanupReverse({ closeServer: close });
 });
 
+test("credential revocation closes only matching reverse generations", () => {
+  const manager = new ReverseSessionManager();
+  const nodeId = "node_" + "a".repeat(32);
+  const closed = [];
+  manager.current.set(nodeId, {
+    nodeId,
+    keyId: "new-key",
+    reverseSessionId: "new-session",
+    close: (_code, reason) => closed.push(["new", reason]),
+  });
+  manager.pending.set(nodeId, new Set([{
+    nodeId,
+    keyId: "old-key",
+    reverseSessionId: "old-session",
+    close: (_code, reason) => closed.push(["old", reason]),
+  }]));
+
+  const closedIds = manager.closeSessionsForCredential(nodeId, "old-key", "rotation-overlap-ended");
+  assert.deepEqual(closedIds, ["old-session"]);
+  assert.deepEqual(closed, [["old", "rotation-overlap-ended"]]);
+});
+
 test("direct-mode nodes: presence falls back to unknown and is never routable", () => {
   const manager = new ReverseSessionManager();
   assert.equal(manager.getPresence("node_" + "a".repeat(32), "direct"), "unknown");

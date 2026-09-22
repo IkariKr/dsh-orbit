@@ -145,6 +145,7 @@ export class Registry {
     trustedExternalScheme = null,
     caCertificates = null,
     pairingHubBaseUrl = null,
+    runtimeLifecycleHooks = null,
   }) {
     this.db = db;
     this.now = now;
@@ -166,8 +167,13 @@ export class Registry {
     this.trustedExternalScheme = trustedExternalScheme;
     this.caCertificates = caCertificates;
     this.pairingHubBaseUrl = canonicalizePairingHubBaseUrl(pairingHubBaseUrl);
+    this.runtimeLifecycleHooks = runtimeLifecycleHooks ?? {};
     this.routeProbeFailures = new Map();
     this.reconcileCapabilities();
+  }
+
+  setRuntimeLifecycleHooks(hooks = {}) {
+    this.runtimeLifecycleHooks = { ...this.runtimeLifecycleHooks, ...(hooks ?? {}) };
   }
 
   reconcileCapabilities({ transactional = true } = {}) {
@@ -935,6 +941,7 @@ export class Registry {
       this.recordAudit(actor, "hub.nodes.delete", { nodeId, reason, requestId });
       this.recordEvent(nodeId, "state", "active", "tombstoned", "operator-delete");
     });
+    this.runtimeLifecycleHooks.onNodeDeleted?.(nodeId, reason);
     return { nodeId, state: "tombstoned", idempotentReplay: false };
   }
 
@@ -1440,6 +1447,7 @@ export class Registry {
     const cutoff = (ms) => new Date(at - ms).toISOString();
     const cadenceMs = this.heartbeatCadenceSeconds * 1000;
 
+    const revokedNodeCredentials = [];
     withTransaction(this.db, () => {
       // Rotation overlap expiry: old keys become revoked (RFC-0006).
       const rotated = this.db
@@ -1449,6 +1457,7 @@ export class Registry {
         this.db
           .prepare("UPDATE node_keys SET state = 'revoked', revoked_at = ?, revocation_reason = 'rotation-overlap-ended' WHERE node_id = ? AND key_id = ?")
           .run(nowIso(this.now()), row.node_id, row.key_id);
+        revokedNodeCredentials.push({ nodeId: row.node_id, keyId: row.key_id, reason: "rotation-overlap-ended" });
       }
 
       // Hub route keys rotation overlap expiry (RFC-0008 rev. 5).
@@ -1597,6 +1606,14 @@ export class Registry {
         this.recordAudit(session.operator_principal, "session.expired", { sessionId: session.session_id });
       }
     });
+
+    // Runtime reverse sessions are process-memory state and cannot be
+    // invalidated by the database update alone. Notify the transport owner
+    // only after the revocation transaction commits, so it never closes a
+    // session for a rollback that did not persist.
+    for (const revoked of revokedNodeCredentials) {
+      this.runtimeLifecycleHooks.onNodeCredentialRevoked?.(revoked);
+    }
   }
 
   close() {

@@ -316,6 +316,24 @@ export class ReverseSessionManager {
     }
   }
 
+  // Credential revocation is narrower than node deletion: only the reverse
+  // generations authenticated with the revoked node key are invalidated.
+  // Return their session IDs so callers with an injected channel manager can
+  // close the matching data channels even without an onSessionClosed hook.
+  closeSessionsForCredential(nodeId, keyId, reason = "credential-revoked") {
+    const matching = [];
+    const current = this.current.get(nodeId);
+    if (current?.keyId === keyId) matching.push(current);
+    const pendingSet = this.pending.get(nodeId);
+    if (pendingSet) {
+      for (const session of pendingSet) {
+        if (session.keyId === keyId && !matching.includes(session)) matching.push(session);
+      }
+    }
+    for (const session of matching) session.close(CLOSE_AWAY, reason);
+    return matching.map((session) => session.reverseSessionId);
+  }
+
   closeAll(reason = "hub-shutdown") {
     for (const nodeId of [...this.current.keys()]) {
       this.closeSessionsForNode(nodeId, reason);
