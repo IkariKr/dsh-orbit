@@ -190,6 +190,7 @@ switch (command) {
     let mainTimer = null;
     let ingress = null;
     let reverseClient = null;
+    let reverseChannelPool = null;
     let sharedRouteNonceCache = null;
     const cadenceMs = client.heartbeatCadenceSeconds * 1000;
 
@@ -266,11 +267,22 @@ switch (command) {
           console.log(`dsh-orbit-node: route ingress listening on ${scheme}://${ingressListen}:${ingress.port} (target ${dshTarget})`);
         }
 
-        // RFC-0012 D4/D5: a reverse-mode node maintains its outbound control
-        // session with the Hub plus the bounded data-channel pool bound to
-        // that session. Direct-mode nodes never open either.
-        if (store.routeMode === "reverse") {
-          const channelPool = new ReverseChannelPool({
+        const stopReverseTransport = () => {
+          if (reverseClient) {
+            try { reverseClient.stop(); } catch {}
+            reverseClient = null;
+          } else if (reverseChannelPool) {
+            try { reverseChannelPool.clearSession(); } catch {}
+          }
+          reverseChannelPool = null;
+        };
+
+        const startReverseTransport = () => {
+          if (reverseClient || client.store.routeMode !== "reverse" || client.store.state !== "active") return;
+          // RFC-0012 D4/D5: the reverse control client owns the bounded data
+          // channel pool. The pool is live process state only; it is never
+          // written to the node store and direct mode never creates it.
+          reverseChannelPool = new ReverseChannelPool({
             hubBaseUrl: client.store.hubBaseUrl,
             getCredentials: () =>
               client.store.state === "active" && client.store.privateKeyHex
@@ -292,7 +304,7 @@ switch (command) {
             hubBaseUrl: client.store.hubBaseUrl,
             caCertificates: client.caCertificates ?? null,
             dshTarget,
-            channelPool,
+            channelPool: reverseChannelPool,
             getCredentials: () =>
               client.store.state === "active" && client.store.privateKeyHex
                 ? {
@@ -305,12 +317,19 @@ switch (command) {
           });
           reverseClient.start();
           console.log("dsh-orbit-node: reverse control client started (routeMode=reverse)");
-        }
+        };
 
+        startReverseTransport();
         console.log(`dsh-orbit-node: running against ${client.status().hubBaseUrl} (cadence ${client.heartbeatCadenceSeconds}s, state ${client.status().state})`);
         const loop = async () => {
           try {
+            const previousRouteMode = client.store.routeMode;
             const outcome = await client.tick();
+            if (outcome.attempted && outcome.ok && outcome.routeMode && outcome.routeMode !== previousRouteMode) {
+              if (outcome.routeMode === "reverse") startReverseTransport();
+              else stopReverseTransport();
+              console.log(`dsh-orbit-node: route mode applied after authenticated heartbeat (${previousRouteMode ?? "direct"} -> ${outcome.routeMode})`);
+            }
             if (outcome.attempted && !outcome.ok) {
               process.stderr.write(`dsh-orbit-node: ${outcome.state}: ${outcome.error?.message ?? "failure"}\n`);
             }

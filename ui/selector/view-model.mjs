@@ -53,6 +53,9 @@ export function createSelectorRowElement(node) {
     ? "stale"
     : (hasWebRoutes ? "pass" : "missing");
   const webRoutesBadge = formatBadge("web.routes", webRoutesVal);
+  const routeMode = escapeHtml(node.route?.routeMode ?? "unknown");
+  const reversePresence = escapeHtml(node.route?.reversePresence ?? "unknown");
+  const routeReason = escapeHtml(node.route?.reason ?? "-");
 
   let actionHtml = "";
   if (node.route?.eligible && node.route?.openUrl) {
@@ -83,6 +86,11 @@ export function createSelectorRowElement(node) {
       ${reachBadge}
       ${compatBadge}
       ${webRoutesBadge}
+    </div>
+    <div class="route-meta" aria-label="Server-provided route status">
+      <span>route mode: <strong>${routeMode}</strong></span>
+      <span>reverse presence: <strong>${reversePresence}</strong></span>
+      <span>reason: <strong>${routeReason}</strong></span>
     </div>
     <div class="card-footer">
       ${actionHtml}

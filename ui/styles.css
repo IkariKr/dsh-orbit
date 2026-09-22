@@ -108,6 +108,7 @@ button.danger { background: var(--bad); color: #fff; border: none; padding: 7px 
 
 .detail-grid dt { color: var(--muted); font-size: 12px; margin-top: 8px; }
 .detail-grid dd { margin: 2px 0 0; font-family: ui-monospace, monospace; }
+.detail-grid select { margin-right: 8px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); padding: 5px 8px; border-radius: 4px; }
 
 .events-list { display: block; }
 .events-list div { display: grid; grid-template-columns: 180px 120px 1fr; gap: 8px; font-size: 12px; border-bottom: 1px solid var(--border); padding: 3px 0; }

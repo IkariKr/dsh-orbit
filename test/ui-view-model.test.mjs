@@ -23,6 +23,11 @@ function sampleNode(overrides = {}) {
   return {
     nodeId: "node_" + "ab".repeat(16),
     state: "active",
+    routeMode: "reverse",
+    reversePresence: "online",
+    reverseRouteReady: true,
+    reverseReason: null,
+    lastReverseTransition: { at: "2026-09-22T10:00:00.000Z", event: "ready", routeReady: true, reason: null },
     health: {
       registryContact: "fresh",
       dshHealthy: "ok",
@@ -141,6 +146,32 @@ test("node detail carries the latest report and the event history verbatim", () 
   assert.equal(detail.events[1].to, "stale");
   assert.equal(detail.latestReport.orbitRevision, "abc123");
   assert.equal(detail.routeTarget?.origin, "https://nas.example:8443");
+});
+
+test("management route observability maps server fields without deriving eligibility", () => {
+  const row = mapNodeRow(sampleNode({
+    routeMode: "reverse",
+    reversePresence: "offline",
+    reverseRouteReady: false,
+    reverseReason: "reverse-session-offline",
+    lastReverseTransition: {
+      at: "2026-09-22T10:01:00.000Z",
+      event: "closed",
+      routeReady: false,
+      reason: "operator-stop",
+    },
+  }));
+  assert.equal(row.routeMode, "reverse");
+  assert.equal(row.reversePresence, "offline");
+  assert.equal(row.reverseRouteReady, false);
+  assert.equal(row.reverseReason, "reverse-session-offline");
+  assert.deepEqual(row.lastReverseTransition, {
+    at: "2026-09-22T10:01:00.000Z",
+    event: "closed",
+    routeReady: false,
+    reason: "operator-stop",
+  });
+  assert.equal(Object.hasOwn(row, "eligible"), false);
 });
 
 test("empty and malformed lists yield explicit empty states, never fake rows", () => {

@@ -27,6 +27,8 @@ const ELEMENT_IDS = [
   "nodes-view",
   "mint-token",
   "mint-result",
+  "mint-pair-token",
+  "pair-mint-result",
   "token-table-body",
   "confirm-dialog",
   "confirm-dialog-message",
@@ -35,6 +37,7 @@ const ELEMENT_IDS = [
   "confirm-ok",
   "route-target-input",
   "route-target-error",
+  "route-mode-input",
 ];
 
 class FakeElement {
@@ -166,6 +169,23 @@ test("app-level: empty states render, the first token IS mintable with zero toke
   assert.equal(dom.getElementById("token-table-body").innerHTML.includes(plaintext), false, "the list must never contain the plaintext");
 });
 
+test("app-level: pairing token action posts pair purpose and keeps plaintext out of metadata list", async (t) => {
+  const { baseUrl } = await withHub(t);
+  const dom = new FakeDom();
+  const ui = createRegistryUi({ document: dom, fetchImpl: browserFetch(baseUrl) });
+  await ui.start();
+  await click(dom.getElementById("nav-tokens"));
+
+  await click(dom.getElementById("mint-pair-token"));
+  const resultHtml = dom.getElementById("pair-mint-result").innerHTML;
+  assert.match(resultHtml, /Pairing token/);
+  const plaintext = resultHtml.match(/data-plaintext-once>([0-9a-f]+)</)?.[1];
+  assert.match(plaintext ?? "", /^[0-9a-f]{32}$/);
+  const metadataHtml = dom.getElementById("token-table-body").innerHTML;
+  assert.match(metadataHtml, />pair</);
+  assert.equal(metadataHtml.includes(plaintext), false);
+});
+
 async function openDialog(dom, nodeId) {
   const handler = dom.getElementById("nodes-list").listeners.click;
   await handler({ target: { dataset: { deleteId: nodeId }, closest: () => null } });
@@ -202,6 +222,43 @@ test("app-level: delete confirmation flow and tombstoned-node reenroll token flo
   const reenrollHtml = dom.getElementById("reenroll-result").innerHTML;
   assert.match(reenrollHtml, /Re-enrollment token for/);
   assert.match(reenrollHtml, /data-plaintext-once>/);
+});
+
+test("app-level: node detail explicitly switches route mode through the UI", async (t) => {
+  const { registry, baseUrl } = await withHub(t);
+  const nodeId = await enrollRawNode(baseUrl, registry);
+  const dom = new FakeDom();
+  const ui = createRegistryUi({ document: dom, fetchImpl: browserFetch(baseUrl) });
+  await ui.start();
+
+  await dom.getElementById("nodes-list").listeners.click({
+    target: {
+      dataset: {},
+      closest: (selector) => (selector === ".node-id" ? { textContent: nodeId } : null),
+    },
+  });
+  assert.match(dom.getElementById("node-detail-view").innerHTML, /route mode/);
+  dom.getElementById("route-mode-input").value = "reverse";
+  await dom.getElementById("node-detail-view").listeners.click({
+    target: { id: "save-route-mode", dataset: { nodeId } },
+  });
+  assert.equal(registry.getNode(nodeId).routeMode, "reverse");
+  assert.match(dom.getElementById("node-detail-view").innerHTML, /value="reverse"/);
+});
+
+test("app-level: management route observability renders server-provided reverse status", async (t) => {
+  const { registry, baseUrl } = await withHub(t);
+  const nodeId = await enrollRawNode(baseUrl, registry);
+  registry.setRouteMode({ actor: "operator", nodeId, routeMode: "reverse" });
+  const dom = new FakeDom();
+  const ui = createRegistryUi({ document: dom, fetchImpl: browserFetch(baseUrl) });
+  await ui.start();
+
+  const listHtml = dom.getElementById("nodes-list").innerHTML;
+  assert.match(listHtml, /route reverse/);
+  assert.match(listHtml, /reverse offline/);
+  assert.match(listHtml, /ready false/);
+  assert.match(listHtml, /reverse-session-offline/);
 });
 
 test("app-level: node detail can set, report validation error, and remove route target through the UI", async (t) => {

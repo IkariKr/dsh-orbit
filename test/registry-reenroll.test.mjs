@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateNodeKeyPair, randomHex } from "../src/registry/crypto.mjs";
+import { deriveKeyId, generateNodeKeyPair, randomHex } from "../src/registry/crypto.mjs";
+import { computeRouteAuthority } from "../src/registry/protocol.mjs";
+import { RouteNonceCache, signRouteRequest, verifyRouteRequest } from "../src/registry/route-auth.mjs";
 import { createTestRegistry, createTestServer, defaultRuntimeIdentity, deleteNode, enrollNode, signedMachineRequest, signedReenrollRequest } from "./helpers/registry-fixture.mjs";
 
-async function withTombstonedNode(t) {
+async function withTombstonedNode(t, { provisionHubRouteKey = false } = {}) {
   const registry = createTestRegistry();
   const server = await createTestServer(registry, {});
   t.after(async () => {
@@ -11,8 +13,9 @@ async function withTombstonedNode(t) {
     registry.close();
   });
   const node = await enrollNode(server.baseUrl, registry);
+  const hubRouteKey = provisionHubRouteKey ? registry.ensureHubRouteKey(node.nodeId) : null;
   deleteNode(registry, node.nodeId);
-  return { registry, server, node };
+  return { registry, server, node, hubRouteKey };
 }
 
 test("kept node identity: reenroll restores the nodeId with a new key and keeps the historical key revoked", async (t) => {
@@ -27,7 +30,9 @@ test("kept node identity: reenroll restores the nodeId with a new key and keeps 
   });
   assert.equal(status, 200);
   assert.equal(body.nodeId, node.nodeId);
-  assert.equal(body.keyId, body.keyId);
+  assert.equal(body.keyId, deriveKeyId(newKeys.publicKeyHex));
+  assert.deepEqual(Object.keys(body).sort(), ["keyId", "nodeId", "registryContact", "tokenId"]);
+  assert.equal(Object.hasOwn(body, "hubRouteKeys"), false);
 
   const summary = registry.getNode(node.nodeId);
   assert.equal(summary.state, "active");
@@ -39,7 +44,7 @@ test("kept node identity: reenroll restores the nodeId with a new key and keeps 
   assert.equal(keyRows[0].revocation_reason, "reenroll-possession");
   assert.equal(keyRows[1].state, "active");
   const auditActions = registry.db.prepare("SELECT action FROM audit WHERE actor = ? ORDER BY at").all(`system:${node.nodeId}`).map((row) => row.action);
-  assert.deepEqual(auditActions, ["node.enrolled", "node.reenrolled"]);
+  assert.deepEqual(auditActions, ["node.enrolled", "hub.route-keys.provision", "node.reenrolled"]);
 
   // The restored node authenticates with its new key and the
   // ORBIT-MACHINE-V1 routes work again.
@@ -52,6 +57,114 @@ test("kept node identity: reenroll restores the nodeId with a new key and keeps 
   });
   assert.equal(beat.status, 200);
 });
+
+test("reenroll provisions a fresh Hub route identity, delivers it on heartbeat, and retains route mode", async (t) => {
+  const { registry, server, node, hubRouteKey: oldHubKey } = await withTombstonedNode(t, { provisionHubRouteKey: true });
+  registry.db.prepare("UPDATE nodes SET route_mode = 'reverse' WHERE node_id = ?").run(node.nodeId);
+  const oldHubKeyId = oldHubKey.key_id;
+  const oldHubKeyPrivate = oldHubKey.private_key;
+  const oldHubKeyPublic = oldHubKey.public_key;
+  const reenrollKeys = generateNodeKeyPair();
+  const minted = registry.mintEnrollmentToken({ actor: "operator", purpose: "reenroll", boundNodeId: node.nodeId });
+  const requestId = randomHex(16);
+  const first = await signedReenrollRequest(server.baseUrl, {
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: { reenrollmentToken: minted.token, reenrollmentRequestId: requestId, newPublicKey: reenrollKeys.publicKeyHex },
+  });
+  assert.equal(first.status, 200);
+  assert.equal(registry.getNode(node.nodeId).routeMode, "reverse");
+
+  const routeRows = registry.db.prepare("SELECT key_id, public_key, private_key, state, revocation_reason FROM hub_route_keys WHERE node_id = ? ORDER BY created_at").all(node.nodeId);
+  assert.equal(routeRows.length, 2);
+  assert.equal(routeRows[0].key_id, oldHubKeyId);
+  assert.equal(routeRows[0].public_key, oldHubKeyPublic);
+  assert.equal(routeRows[0].private_key, oldHubKeyPrivate);
+  assert.equal(routeRows[0].state, "revoked");
+  assert.equal(routeRows[0].revocation_reason, "node-delete");
+  assert.notEqual(routeRows[1].key_id, oldHubKeyId);
+  assert.equal(routeRows[1].state, "provisioned");
+
+  const routeAuthority = computeRouteAuthority(node.nodeId, registry.routeDomain);
+  const oldProof = signRouteRequest({
+    privateKeyHex: oldHubKeyPrivate,
+    keyId: oldHubKeyId,
+    nodeId: node.nodeId,
+    routeAuthority,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    nonce: randomHex(16),
+  });
+  const oldCheck = verifyRouteRequest({
+    headers: oldProof.headers,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    expectedNodeId: node.nodeId,
+    expectedRouteAuthority: routeAuthority,
+    getPublicKey: (keyId) => registry.getHubRouteKeysForNode(node.nodeId).find((key) => key.keyId === keyId) ?? null,
+    nonceCache: new RouteNonceCache(),
+  });
+  assert.equal(oldCheck.ok, false);
+  assert.equal(oldCheck.code, "unknown-key");
+
+  const heartbeat = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/heartbeat",
+    nodeId: node.nodeId,
+    keyId: first.body.keyId,
+    keyHex: reenrollKeys.privateKeyHex,
+    body: { ...defaultRuntimeIdentity(), acceptedHubRouteKeyIds: [] },
+  });
+  assert.equal(heartbeat.status, 200);
+  assert.equal(heartbeat.body.routeMode, "reverse");
+  assert.equal(heartbeat.body.hubRouteKeys.length, 1);
+  assert.equal(heartbeat.body.hubRouteKeys[0].keyId, routeRows[1].key_id);
+  assert.equal(heartbeat.body.hubRouteKeys[0].publicKey, routeRows[1].public_key);
+  assert.equal(Object.hasOwn(heartbeat.body.hubRouteKeys[0], "privateKey"), false);
+
+  const acknowledgement = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/heartbeat",
+    nodeId: node.nodeId,
+    keyId: first.body.keyId,
+    keyHex: reenrollKeys.privateKeyHex,
+    body: { ...defaultRuntimeIdentity(), acceptedHubRouteKeyIds: [routeRows[1].key_id] },
+  });
+  assert.equal(acknowledgement.status, 200);
+  assert.equal(acknowledgement.body.routeMode, "reverse");
+  assert.equal(acknowledgement.body.hubRouteKeys[0].keyId, routeRows[1].key_id);
+  assert.equal(acknowledgement.body.hubRouteKeys[0].state, "active");
+
+  const newProof = signRouteRequest({
+    privateKeyHex: routeRows[1].private_key,
+    keyId: routeRows[1].key_id,
+    nodeId: node.nodeId,
+    routeAuthority,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    nonce: randomHex(16),
+  });
+  const newCheck = verifyRouteRequest({
+    headers: newProof.headers,
+    method: "GET",
+    rawTarget: "/_orbit/route-ready",
+    expectedNodeId: node.nodeId,
+    expectedRouteAuthority: routeAuthority,
+    getPublicKey: (keyId) => acknowledgement.body.hubRouteKeys.find((key) => key.keyId === keyId) ?? null,
+    nonceCache: new RouteNonceCache(),
+  });
+  assert.equal(newCheck.ok, true);
+
+  const replay = await signedReenrollRequest(server.baseUrl, {
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: { reenrollmentToken: minted.token, reenrollmentRequestId: requestId, newPublicKey: reenrollKeys.publicKeyHex },
+  });
+  assert.equal(replay.status, 200);
+  assert.deepEqual(replay.body, first.body);
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS count FROM hub_route_keys WHERE node_id = ?").get(node.nodeId).count, 2);
+});
+
 
 test("the revoked historical key authorizes nothing except the reenroll possession proof", async (t) => {
   const { registry, server, node } = await withTombstonedNode(t);

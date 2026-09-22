@@ -201,6 +201,74 @@ test("enrollment token minted through the API works end-to-end", async (t) => {
   assert.equal(enroll.status, 200);
 });
 
+test("route mode mutation is authenticated, audited, explicit, and CSRF-protected", async (t) => {
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const session = await establishSession(server.baseUrl);
+  const path = `/hub/nodes/${node.nodeId}/route-mode`;
+
+  const missingCsrf = await fetch(server.baseUrl + path, {
+    method: "PUT",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${session.cookie}`, "content-type": "application/json" },
+    body: JSON.stringify({ routeMode: "reverse" }),
+  });
+  assert.equal(missingCsrf.status, 403);
+
+  const invalid = await fetch(server.baseUrl + path, {
+    method: "PUT",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${session.cookie}`, [CSRF_HEADER]: session.csrfToken, "content-type": "application/json" },
+    body: JSON.stringify({ routeMode: "auto" }),
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).error.code, "bad-request");
+
+  const switched = await fetch(server.baseUrl + path, {
+    method: "PUT",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${session.cookie}`, [CSRF_HEADER]: session.csrfToken, "content-type": "application/json" },
+    body: JSON.stringify({ routeMode: "reverse" }),
+  });
+  assert.equal(switched.status, 200);
+  assert.deepEqual(await switched.json(), { nodeId: node.nodeId, routeMode: "reverse", previousRouteMode: "direct", changed: true });
+  assert.equal(registry.getNode(node.nodeId).routeMode, "reverse");
+  const audit = registry.db.prepare("SELECT actor, action, detail_json FROM audit WHERE action = 'hub.nodes.route-mode'").get();
+  assert.equal(audit.actor, "operator");
+  assert.deepEqual(JSON.parse(audit.detail_json), { nodeId: node.nodeId, routeMode: "reverse", previousRouteMode: "direct" });
+  assert.equal(registry.db.prepare("SELECT dimension, from_value, to_value, source FROM events WHERE node_id = ? ORDER BY id DESC LIMIT 1").get(node.nodeId).dimension, "route_mode");
+
+  const replay = await fetch(server.baseUrl + path, {
+    method: "PUT",
+    headers: { ...gatewayHeaders(), cookie: `${SESSION_COOKIE}=${session.cookie}`, [CSRF_HEADER]: session.csrfToken, "content-type": "application/json" },
+    body: JSON.stringify({ routeMode: "reverse" }),
+  });
+  assert.deepEqual(await replay.json(), { nodeId: node.nodeId, routeMode: "reverse", previousRouteMode: "reverse", changed: false });
+});
+
+test("route mode mutation rechecks the current row inside its transaction", () => {
+  const registry = createTestRegistry();
+  const nodeId = "node_" + "a".repeat(32);
+  registry.db.prepare("INSERT INTO nodes (node_id, state, minted_at) VALUES (?, 'active', ?)").run(nodeId, new Date().toISOString());
+  const originalGetNodeRow = registry.getNodeRow.bind(registry);
+  let reads = 0;
+  registry.getNodeRow = (id) => {
+    reads += 1;
+    const row = originalGetNodeRow(id);
+    if (reads === 1) {
+      registry.db.prepare("UPDATE nodes SET route_mode = 'reverse' WHERE node_id = ?").run(id);
+    }
+    return row;
+  };
+  const result = registry.setRouteMode({ actor: "operator", nodeId, routeMode: "direct" });
+  assert.deepEqual(result, { nodeId, routeMode: "direct", previousRouteMode: "reverse", changed: true });
+  assert.equal(reads, 2);
+  assert.equal(registry.getNode(nodeId).routeMode, "direct");
+  const event = registry.db.prepare("SELECT dimension, from_value, to_value, source FROM events WHERE node_id = ? ORDER BY id DESC LIMIT 1").get(nodeId);
+  assert.equal(event.dimension, "route_mode");
+  assert.equal(event.from_value, "reverse");
+  assert.equal(event.to_value, "direct");
+  assert.equal(event.source, "operator");
+  registry.close();
+});
+
 test("node delete through the browser surface tombstones; machine auth for that node is then denied", async (t) => {
   const { registry, server } = await withServer(t);
   const node = await enrollNode(server.baseUrl, registry);

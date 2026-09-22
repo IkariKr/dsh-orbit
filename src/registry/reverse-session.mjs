@@ -163,6 +163,10 @@ export class ReverseSession {
       const previousReady = this.routeReady;
       this.routeReady = message.routeReady;
       if (previousReady !== this.routeReady) {
+        this.manager.recordTransition?.(this.nodeId, "route-readiness", {
+          routeReady: this.routeReady,
+          reason: this.routeReady ? null : "reverse-route-unreachable",
+        });
         this.manager.onRouteReadyChange?.(this.nodeId, this.routeReady);
       }
       return;
@@ -186,6 +190,10 @@ export class ReverseSession {
       previous.markSuperseded();
       previous.close(CLOSE_AWAY, "superseded");
     }
+    this.manager.recordTransition?.(this.nodeId, "session-ready", {
+      routeReady: this.routeReady,
+      reason: this.routeReady ? null : "reverse-route-unreachable",
+    });
     this.manager.onPromoted?.(this.nodeId, this.routeReady);
   }
 
@@ -201,13 +209,20 @@ export class ReverseSession {
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.pongTimer) clearTimeout(this.pongTimer);
     const current = this.manager.current.get(this.nodeId);
-    if (current === this) {
+    const wasCurrent = current === this;
+    if (wasCurrent) {
       this.manager.current.delete(this.nodeId);
     }
     const pendingSet = this.manager.pending.get(this.nodeId);
     if (pendingSet) {
       pendingSet.delete(this);
       if (pendingSet.size === 0) this.manager.pending.delete(this.nodeId);
+    }
+    if (wasCurrent) {
+      this.manager.recordTransition?.(this.nodeId, "session-closed", {
+        routeReady: false,
+        reason,
+      });
     }
     this.manager.onSessionClosed?.(this, reason);
     if (!fromPeer && !this.socket.destroyed) {
@@ -229,13 +244,14 @@ export class ReverseSession {
 }
 
 export class ReverseSessionManager {
-  constructor({ now = () => new Date(), onSessionClosed = null, onPromoted = null, onRouteReadyChange = null, readyTimeoutMs = READY_TIMEOUT_MS, pingIntervalMs = PING_INTERVAL_MS, pongTimeoutMs = PONG_TIMEOUT_MS, idleTarget = REVERSE_IDLE_TARGET_DEFAULT, maxChannels = REVERSE_MAX_CHANNELS_DEFAULT } = {}) {
+  constructor({ now = () => new Date(), onSessionClosed = null, onPromoted = null, onRouteReadyChange = null, recordTransition = null, readyTimeoutMs = READY_TIMEOUT_MS, pingIntervalMs = PING_INTERVAL_MS, pongTimeoutMs = PONG_TIMEOUT_MS, idleTarget = REVERSE_IDLE_TARGET_DEFAULT, maxChannels = REVERSE_MAX_CHANNELS_DEFAULT } = {}) {
     this.now = now;
     this.current = new Map(); // nodeId -> ready session
     this.pending = new Map(); // nodeId -> Set(pending sessions)
     this.onSessionClosed = onSessionClosed;
     this.onPromoted = onPromoted;
     this.onRouteReadyChange = onRouteReadyChange;
+    this.recordTransition = recordTransition;
     this.readyTimeoutMs = readyTimeoutMs;
     this.pingIntervalMs = pingIntervalMs;
     this.pongTimeoutMs = pongTimeoutMs;

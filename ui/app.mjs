@@ -127,6 +127,16 @@ export function createRegistryUi({ document, fetchImpl }) {
     return `${capabilities}${evidence}`;
   }
 
+  function renderRouteObservability(node) {
+    const transition = node.lastReverseTransition;
+    const transitionText = transition
+      ? `${escapeHtml(transition.at ?? "-")} · ${escapeHtml(transition.event ?? "transition")} · ready ${escapeHtml(transition.routeReady ?? "-")} · ${escapeHtml(transition.reason ?? "-")}`
+      : "-";
+    return `<div class="node-meta route-observability">
+      route ${escapeHtml(node.routeMode)} · reverse ${escapeHtml(node.reversePresence ?? "-")} · ready ${escapeHtml(node.reverseRouteReady ?? "-")} · ${escapeHtml(node.reverseReason ?? "-")} · last reverse transition ${transitionText}
+    </div>`;
+  }
+
   function renderNodeRow(node) {
     const alerts = node.health.alertFlags.map((flag) => `<span class="alert-flag">alert: ${escapeHtml(flag)}</span>`).join(" ");
     let actions = "";
@@ -139,6 +149,7 @@ export function createRegistryUi({ document, fetchImpl }) {
       <div>
         <div class="node-id">${escapeHtml(node.nodeId)}</div>
         <div class="node-meta">runtime ${escapeHtml(node.runtimeIdentity.dshVersion ?? "-")} rev ${escapeHtml(node.runtimeIdentity.orbitRevision ?? "-")} · lastSeen ${escapeHtml(node.health.lastSeen ?? "never")} (${escapeHtml(node.health.lastSeenSource ?? "-")}) · lastHeartbeat ${escapeHtml(node.health.lastHeartbeatAt ?? "never")}</div>
+        ${renderRouteObservability(node)}
         ${alerts}
       </div>
       <div>
@@ -166,7 +177,7 @@ export function createRegistryUi({ document, fetchImpl }) {
       .map(
         (token) => `<tr>
           <td>${escapeHtml(token.tokenId)}</td>
-          <td>${escapeHtml(token.purpose)}</td>
+          <td data-field="purpose">${escapeHtml(token.purpose)}</td>
           <td>${escapeHtml(token.boundNodeId ?? "-")}</td>
           <td><span class="${badgeClass("status", token.status)}">${escapeHtml(token.status)}</span></td>
           <td>${escapeHtml(token.createdAt ?? "-")}</td>
@@ -211,6 +222,11 @@ export function createRegistryUi({ document, fetchImpl }) {
       <div class="panel"><h2>${escapeHtml(detail.nodeId)}</h2>
         <dl class="detail-grid">
           <dt>state</dt><dd>${escapeHtml(detail.state)}</dd>
+          <dt>route mode</dt><dd><select id="route-mode-input" data-node-id="${escapeHtml(detail.nodeId)}" ${detail.state === "tombstoned" ? "disabled" : ""}><option value="direct" ${detail.routeMode === "direct" ? "selected" : ""}>direct</option><option value="reverse" ${detail.routeMode === "reverse" ? "selected" : ""}>reverse</option></select><button id="save-route-mode" class="primary" type="button" data-node-id="${escapeHtml(detail.nodeId)}" ${detail.state === "tombstoned" ? "disabled" : ""}>save</button></dd>
+          <dt>reverse presence</dt><dd>${escapeHtml(detail.reversePresence ?? "-")}</dd>
+          <dt>route ready</dt><dd>${escapeHtml(detail.reverseRouteReady ?? "-")}</dd>
+          <dt>route availability</dt><dd>${escapeHtml(detail.reverseReason ?? "-")}</dd>
+          <dt>last reverse transition</dt><dd>${detail.lastReverseTransition ? `${escapeHtml(detail.lastReverseTransition.at ?? "-")} · ${escapeHtml(detail.lastReverseTransition.event ?? "transition")} · ready ${escapeHtml(detail.lastReverseTransition.routeReady ?? "-")} · ${escapeHtml(detail.lastReverseTransition.reason ?? "-")}` : "-"}</dd>
           <dt>runtime identity</dt><dd>orbit ${escapeHtml(detail.runtimeIdentity.orbitVersion ?? "-")} rev ${escapeHtml(detail.runtimeIdentity.orbitRevision ?? "-")} · dsh ${escapeHtml(detail.runtimeIdentity.dshVersion ?? "-")} · profile ${escapeHtml(detail.runtimeIdentity.compatibilityProfile ?? "-")}</dd>
           <dt>lastSeen</dt><dd>${escapeHtml(detail.health.lastSeen ?? "-")} (${escapeHtml(detail.health.lastSeenSource ?? "-")})</dd>
           <dt>lastHeartbeat</dt><dd>${escapeHtml(detail.health.lastHeartbeatAt ?? "-")}</dd>
@@ -270,22 +286,30 @@ export function createRegistryUi({ document, fetchImpl }) {
     }
   }
 
-  async function mintEnrollmentToken() {
-    const resultEl = $("mint-result");
+  async function mintToken({ purpose, resultId, label }) {
+    const resultEl = $(resultId);
     resultEl.innerHTML = `<div class="banner loading">minting&hellip;</div>`;
     try {
-      const minted = await api("/hub/tokens", { method: "POST", body: { purpose: "enroll" } });
+      const minted = await api("/hub/tokens", { method: "POST", body: { purpose } });
       const view = mapTokenMint(minted);
       // Plaintext exactly once; it stays visible until the user leaves
       // the view — the list refresh below never touches this element.
       resultEl.innerHTML = `<div class="plaintext-once">
-        <strong>Copy this token now — it will never be shown again.</strong><br>
+        <strong>${escapeHtml(label)} — Copy this token now; it will never be shown again.</strong><br>
         <code data-plaintext-once>${escapeHtml(view.plaintextOnce)}</code>
       </div>`;
       await loadTokens();
     } catch (error) {
       resultEl.innerHTML = `<div class="banner error">mint failed: ${escapeHtml(error.message)}</div>`;
     }
+  }
+
+  async function mintEnrollmentToken() {
+    await mintToken({ purpose: "enroll", resultId: "mint-result", label: "Enrollment token" });
+  }
+
+  async function mintPairToken() {
+    await mintToken({ purpose: "pair", resultId: "pair-mint-result", label: "Pairing token" });
   }
 
   async function mintReenrollToken(nodeId) {
@@ -349,6 +373,17 @@ export function createRegistryUi({ document, fetchImpl }) {
     }
   }
 
+  async function saveRouteMode(nodeId) {
+    const input = $("route-mode-input");
+    const routeMode = input?.value;
+    try {
+      await api(`/hub/nodes/${nodeId}/route-mode`, { method: "PUT", body: { routeMode } });
+      await loadNodeDetail(nodeId);
+    } catch (error) {
+      showBanner({ message: `route mode change failed: ${error.message}` });
+    }
+  }
+
   async function removeRouteTarget(nodeId) {
     const errorEl = $("route-target-error");
     if (errorEl) {
@@ -382,6 +417,7 @@ export function createRegistryUi({ document, fetchImpl }) {
       await loadTokens();
     });
     $("mint-token").addEventListener("click", () => mintEnrollmentToken());
+    $("mint-pair-token").addEventListener("click", () => mintPairToken());
     $("nodes-list").addEventListener("click", async (event) => {
       const target = event.target;
       if (target.dataset?.deleteId !== undefined) {
@@ -402,6 +438,10 @@ export function createRegistryUi({ document, fetchImpl }) {
     });
     $("node-detail-view").addEventListener("click", async (event) => {
       if (event.target.id === "back-to-nodes") await loadNodes();
+      if (event.target.id === "save-route-mode") {
+        const nodeId = event.target.dataset?.nodeId;
+        if (nodeId) await saveRouteMode(nodeId);
+      }
       if (event.target.id === "save-route-target") {
         const nodeId = event.target.dataset?.nodeId;
         if (nodeId) await saveRouteTarget(nodeId);

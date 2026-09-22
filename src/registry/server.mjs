@@ -198,6 +198,20 @@ export function createHubServer({ registry, options = {} }) {
   }
   const limiter = new SlidingWindowLimiter();
 
+  // Reverse transport is live process state, but the operator surface still
+  // needs a sanitized, server-authoritative projection. Keep only presence,
+  // readiness, a reason, and the last transition; never expose session IDs,
+  // key IDs, signatures, or sockets, and never persist this map.
+  const reverseTransitions = new Map();
+  const recordReverseTransition = (nodeId, event, { routeReady = null, reason = null } = {}) => {
+    reverseTransitions.set(nodeId, {
+      at: registry.now().toISOString(),
+      event,
+      routeReady,
+      reason,
+    });
+  };
+
   // Operator management UI assets
   const UI_ROOT = new URL("../../ui/", import.meta.url);
   const UI_ASSETS = new Map([
@@ -654,7 +668,7 @@ export function createHubServer({ registry, options = {} }) {
         return sendJson(response, 200, readModel);
       }
       if (path === "/hub/nodes" || path === "/hub/nodes/") {
-        return sendJson(response, 200, { nodes: registry.listNodes() });
+        return sendJson(response, 200, { nodes: managementNodeList() });
       }
       const routeTargetGetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
       if (routeTargetGetMatch) {
@@ -667,7 +681,7 @@ export function createHubServer({ registry, options = {} }) {
       }
       const nodeMatch = path.match(/^\/hub\/nodes\/([^/]+)\/?$/);
       if (nodeMatch) {
-        return sendJson(response, 200, registry.getNode(decodeURIComponent(nodeMatch[1])));
+        return sendJson(response, 200, managementNodeDetail(decodeURIComponent(nodeMatch[1])));
       }
       if (path === "/hub/tokens" || path === "/hub/tokens/") {
         return sendJson(response, 200, { tokens: registry.listTokens() });
@@ -676,6 +690,21 @@ export function createHubServer({ registry, options = {} }) {
     }
 
     requireCsrf(request, session);
+
+    const routeModeMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-mode\/?$/);
+    if (routeModeMatch) {
+      if (request.method !== "PUT") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected PUT" } });
+      }
+      const nodeId = decodeURIComponent(routeModeMatch[1]);
+      const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+      const result = registry.setRouteMode({
+        actor: session.operatorPrincipal,
+        nodeId,
+        routeMode: body.routeMode,
+      });
+      return sendJson(response, 200, result);
+    }
 
     const routeTargetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
     if (routeTargetMatch) {
@@ -765,6 +794,7 @@ export function createHubServer({ registry, options = {} }) {
   const reverseSessions = options.reverseSessions ?? new ReverseSessionManager({
     idleTarget: reverseChannels.idleTarget,
     maxChannels: reverseChannels.maxChannels,
+    recordTransition: (nodeId, event, detail) => recordReverseTransition(nodeId, event, detail),
     onPromoted: (nodeId, routeReady) => console.log(`reverse session ready node=${nodeId} routeReady=${routeReady}`),
     onRouteReadyChange: (nodeId, routeReady) => console.log(`reverse route readiness node=${nodeId} routeReady=${routeReady}`),
     onSessionClosed: (session, reason) => {
@@ -773,6 +803,38 @@ export function createHubServer({ registry, options = {} }) {
       reverseChannels.closeChannelsForSession(session.reverseSessionId, reason);
     },
   });
+
+  function managementNodeSummary(node) {
+    const summary = node;
+    const routeMode = summary.routeMode === "reverse" ? "reverse" : "direct";
+    const sessionInfo = reverseSessions.getSessionInfo?.(summary.nodeId) ?? null;
+    const reversePresence = reverseSessions.getPresence?.(summary.nodeId, routeMode) ?? (routeMode === "reverse" ? "offline" : "unknown");
+    const reverseRouteReady = routeMode === "reverse" ? sessionInfo?.routeReady === true : null;
+    let reverseReason = null;
+    if (routeMode === "reverse") {
+      if (reversePresence !== "online") reverseReason = "reverse-session-offline";
+      else if (reverseRouteReady !== true) reverseReason = "reverse-route-unreachable";
+      else {
+        const eligibility = evaluateRouteEligibility(registry, summary.nodeId, { reverseSessions, reverseChannels });
+        reverseReason = eligibility.eligible ? null : eligibility.reason;
+      }
+    }
+    return {
+      ...summary,
+      reversePresence,
+      reverseRouteReady,
+      reverseReason,
+      lastReverseTransition: reverseTransitions.get(summary.nodeId) ?? null,
+    };
+  }
+
+  function managementNodeList() {
+    return registry.listNodes().map(managementNodeSummary);
+  }
+
+  function managementNodeDetail(nodeId) {
+    return managementNodeSummary(registry.getNode(nodeId));
+  }
 
   registry.setRuntimeLifecycleHooks?.({
     onNodeDeleted: (nodeId, reason) => {

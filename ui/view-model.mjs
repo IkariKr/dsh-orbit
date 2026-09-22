@@ -45,12 +45,27 @@ export function healthBadges(node) {
   ];
 }
 
+function mapReverseTransition(transition) {
+  if (!transition || typeof transition !== "object") return null;
+  return {
+    at: transition.at ?? null,
+    event: transition.event ?? null,
+    routeReady: typeof transition.routeReady === "boolean" ? transition.routeReady : null,
+    reason: transition.reason ?? null,
+  };
+}
+
 export function mapNodeRow(node) {
   const health = node?.health ?? {};
   const runtime = node?.runtimeIdentity ?? {};
   return {
     nodeId: node?.nodeId ?? null,
     state: node?.state ?? "unknown",
+    routeMode: node?.routeMode ?? "direct",
+    reversePresence: node?.reversePresence ?? null,
+    reverseRouteReady: typeof node?.reverseRouteReady === "boolean" ? node.reverseRouteReady : null,
+    reverseReason: node?.reverseReason ?? null,
+    lastReverseTransition: mapReverseTransition(node?.lastReverseTransition),
     health: {
       registryContact: health.registryContact ?? "unknown",
       dshHealthy: health.dshHealthy ?? "unknown",

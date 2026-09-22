@@ -43,6 +43,10 @@ const MAX_RECENT_EVENTS = 50;
 // pending-rotation probes interpret unknown-key separately.
 const REVOCATION_CODES = new Set(["revoked", "key-revoked"]);
 
+export function isRouteMode(value) {
+  return value === "direct" || value === "reverse";
+}
+
 export function isCredentialRevocation(body) {
   return REVOCATION_CODES.has(body?.error?.code);
 }
@@ -274,6 +278,7 @@ export class NodeClient {
         state: "active",
         rotation: null,
         pendingEnrollment: null,
+        routeMode: "direct",
       });
       this.backoff.recordSuccess();
       this.recordEvent("enrolled", { nodeId: response.body.nodeId, keyId: response.body.keyId });
@@ -520,6 +525,21 @@ export class NodeClient {
       }
       this.recordEvent("heartbeat-ok", { registryContact: result.body.registryContact, keyId });
 
+      // routeMode is operator-owned Hub state. It is accepted only from a
+      // successful, authenticated heartbeat response and persisted alongside
+      // the existing Hub route-key trust material. No heartbeat failure can
+      // change the local transport mode.
+      const responseRouteMode = result.body.routeMode;
+      if (responseRouteMode !== undefined && !isRouteMode(responseRouteMode)) {
+        this.recordEvent("heartbeat-failed", { code: "invalid-route-mode", message: "hub returned an invalid routeMode" });
+        this.backoff.recordFailure();
+        this.runtimeState = "retrying";
+        this.lastError = { code: "invalid-route-mode", message: "hub returned an invalid routeMode" };
+        return { state: "retrying", attempted: true, ok: false, error: this.lastError };
+      }
+
+      let nextHubRouteKeys = this.store.hubRouteKeys;
+      let hubRouteKeysChanged = false;
       if (result.body.hubRouteKeys !== undefined) {
         if (!isTrustedTransport(this.baseHubUrl)) {
           this.recordEvent("hub-route-keys-rejected", { reason: "untrusted-transport", hubBaseUrl: this.baseHubUrl });
@@ -531,15 +551,30 @@ export class NodeClient {
             const currentJson = JSON.stringify(this.store.hubRouteKeys ?? null);
             const incomingJson = JSON.stringify(validation.keys);
             if (currentJson !== incomingJson) {
-              await this.persist({ ...this.store, hubRouteKeys: validation.keys });
-              this.recordEvent("hub-route-keys-updated", { keyIds: validation.keys.map((k) => k.keyId) });
+              nextHubRouteKeys = validation.keys;
+              hubRouteKeysChanged = true;
               this.pendingKeyAck = true;
             }
           }
         }
       }
 
-      return { state: "active", attempted: true, ok: true };
+      const routeModeChanged = isRouteMode(responseRouteMode) && this.store.routeMode !== responseRouteMode;
+      if (routeModeChanged || hubRouteKeysChanged) {
+        await this.persist({
+          ...this.store,
+          ...(routeModeChanged ? { routeMode: responseRouteMode } : {}),
+          ...(hubRouteKeysChanged ? { hubRouteKeys: nextHubRouteKeys } : {}),
+        });
+        if (routeModeChanged) {
+          this.recordEvent("route-mode-updated", { routeMode: responseRouteMode });
+        }
+        if (hubRouteKeysChanged) {
+          this.recordEvent("hub-route-keys-updated", { keyIds: nextHubRouteKeys.map((k) => k.keyId) });
+        }
+      }
+
+      return { state: "active", attempted: true, ok: true, routeMode: isRouteMode(responseRouteMode) ? responseRouteMode : this.store.routeMode };
     }
     if (result.status === 401 && isCredentialRevocation(result.body)) {
       if (persistOnRevoked) {
@@ -920,6 +955,7 @@ export class NodeClient {
       nodeId: this.store.nodeId,
       keyId: this.store.publicKeyHex ? deriveKeyId(this.store.publicKeyHex) : null,
       hubBaseUrl: this.store.hubBaseUrl ?? this.baseHubUrl,
+      routeMode: this.store.routeMode === "reverse" ? "reverse" : "direct",
       lastHeartbeatAt: this.lastHeartbeatAt,
       lastReportAt: this.lastReportAt,
       lastContactAt: this.lastContactAt,

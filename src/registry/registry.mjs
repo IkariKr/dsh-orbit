@@ -619,6 +619,12 @@ export class Registry {
           "UPDATE nodes SET state = 'active', tombstoned_at = NULL, tombstone_reason = NULL, minted_at = ?, registry_contact = 'unknown', authenticated = 'ok', dsh_healthy = 'unknown', orbit_compatible = 'unknown', reachable = 'unknown', capabilities = '[]', capabilities_stale = 1, last_seen = NULL, last_seen_source = NULL, orbit_version = '', orbit_revision = NULL, dsh_version = '', compatibility_profile = NULL WHERE node_id = ?",
         )
         .run(at, nodeId);
+      // Reenrollment creates a new Hub route identity in this same success
+      // transaction. Deleted-era rows remain terminally revoked, so the
+      // existing primitive necessarily inserts a fresh key here. The route
+      // public material is delivered later by the authenticated heartbeat;
+      // no Hub private key crosses the reenrollment response.
+      this.ensureHubRouteKey(nodeId);
       // The historical key permanently stays revoked: it verified the
       // possession proof and authorizes nothing else.
       this.db.prepare("UPDATE node_keys SET revocation_reason = 'reenroll-possession' WHERE node_id = ? AND key_id = ?").run(nodeId, historicalKey.key_id);
@@ -663,6 +669,7 @@ export class Registry {
     const acceptedHubRouteKeyIds = Array.isArray(body?.acceptedHubRouteKeyIds) ? body.acceptedHubRouteKeyIds : null;
     const nodeId = node.node_id;
     let hubRouteKeys = [];
+    let routeMode = "direct";
     withTransaction(this.db, () => {
       const current = this.getNodeRow(nodeId);
       this.transitionRegistryContact(current, "fresh", "heartbeat");
@@ -685,8 +692,9 @@ export class Registry {
       }
       this.ensureHubRouteKey(nodeId);
       hubRouteKeys = this.getHubRouteKeysForNode(nodeId);
+      routeMode = current.route_mode === "reverse" ? "reverse" : "direct";
     });
-    return { ok: true, registryContact: "fresh", heartbeatCadenceSeconds: this.heartbeatCadenceSeconds, hubRouteKeys };
+    return { ok: true, registryContact: "fresh", heartbeatCadenceSeconds: this.heartbeatCadenceSeconds, routeMode, hubRouteKeys };
   }
 
   // Active capability withholding (RFC-0009 "withheld until refreshed"
@@ -1011,6 +1019,38 @@ export class Registry {
         nodeId,
         routeTarget: this.getRouteTarget(nodeId),
       };
+    });
+  }
+
+  setRouteMode({ actor, nodeId, routeMode }) {
+    requireString(actor, "actor");
+    requireString(nodeId, "nodeId");
+    if (routeMode !== "direct" && routeMode !== "reverse") {
+      denied(400, "bad-request", "routeMode must be direct or reverse");
+    }
+    const node = this.getNodeRow(nodeId);
+    if (!node) {
+      denied(404, "not-found", "no such node");
+    }
+    if (node.state === "tombstoned") {
+      denied(409, "node-tombstoned", "cannot change route mode for a tombstoned node");
+    }
+    return withTransaction(this.db, () => {
+      const current = this.getNodeRow(nodeId);
+      if (!current) {
+        denied(404, "not-found", "no such node");
+      }
+      if (current.state === "tombstoned") {
+        denied(409, "node-tombstoned", "cannot change route mode for a tombstoned node");
+      }
+      const previousRouteMode = current.route_mode === "reverse" ? "reverse" : "direct";
+      if (previousRouteMode === routeMode) {
+        return { nodeId, routeMode, previousRouteMode, changed: false };
+      }
+      this.db.prepare("UPDATE nodes SET route_mode = ? WHERE node_id = ?").run(routeMode, nodeId);
+      this.recordAudit(actor, "hub.nodes.route-mode", { nodeId, routeMode, previousRouteMode });
+      this.recordEvent(nodeId, "route_mode", previousRouteMode, routeMode, "operator");
+      return { nodeId, routeMode, previousRouteMode, changed: true };
     });
   }
 
@@ -1365,6 +1405,7 @@ export class Registry {
       tombstoneReason: row.tombstone_reason,
       routeTarget,
       hubRouteKeys,
+      routeMode: row.route_mode === "reverse" ? "reverse" : "direct",
       health: {
         registryContact: row.registry_contact,
         authenticated: row.authenticated,

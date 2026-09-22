@@ -53,6 +53,8 @@ test("Selector UI view-model: createSelectorRowElement renders eligible row with
     },
     route: {
       eligible: true,
+      routeMode: "reverse",
+      reversePresence: "online",
       reasonCode: null,
       reason: null,
       openUrl: "https://n-11112222333344445555666677778888.stage5-test.example/",
@@ -79,6 +81,10 @@ test("Selector UI view-model: createSelectorRowElement renders eligible row with
   assert.ok(el.innerHTML.includes("node_11112222333344445555666677778888"));
   assert.ok(el.innerHTML.includes('data-state="active"'));
   assert.ok(el.innerHTML.includes("0.1.1-rc.2"));
+  assert.ok(el.innerHTML.includes("route mode:"));
+  assert.ok(el.innerHTML.includes("reverse"));
+  assert.ok(el.innerHTML.includes("reverse presence:"));
+  assert.ok(el.innerHTML.includes("online"));
 });
 
 test("Selector UI view-model: createSelectorRowElement renders ineligible row with reason and disabled button", () => {
@@ -98,6 +104,8 @@ test("Selector UI view-model: createSelectorRowElement renders ineligible row wi
     },
     route: {
       eligible: false,
+      routeMode: "reverse",
+      reversePresence: "offline",
       reasonCode: "route-unreachable",
       reason: "Route ingress or downstream DSH is unreachable",
       openUrl: null,
@@ -110,6 +118,10 @@ test("Selector UI view-model: createSelectorRowElement renders ineligible row wi
   assert.ok(el.innerHTML.includes('class="disabled-button"'));
   assert.ok(el.innerHTML.includes("Route ingress or downstream DSH is unreachable"));
   assert.ok(el.innerHTML.includes('data-state="active"'));
+  assert.ok(el.innerHTML.includes("route mode:"));
+  assert.ok(el.innerHTML.includes("reverse presence:"));
+  assert.ok(el.innerHTML.includes("offline"));
+  assert.ok(el.innerHTML.includes("reason:"));
 });
 
 test("Selector UI view-model: createSelectorRowElement renders tombstoned node with explicit state and unavailable controls", () => {
