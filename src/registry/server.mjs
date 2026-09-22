@@ -698,6 +698,9 @@ export function createHubServer({ registry, options = {} }) {
       }
       const nodeId = decodeURIComponent(routeModeMatch[1]);
       const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "route mode body must be an object" } });
+      }
       const result = registry.setRouteMode({
         actor: session.operatorPrincipal,
         nodeId,
@@ -810,6 +813,9 @@ export function createHubServer({ registry, options = {} }) {
     const sessionInfo = reverseSessions.getSessionInfo?.(summary.nodeId) ?? null;
     const reversePresence = reverseSessions.getPresence?.(summary.nodeId, routeMode) ?? (routeMode === "reverse" ? "offline" : "unknown");
     const reverseRouteReady = routeMode === "reverse" ? sessionInfo?.routeReady === true : null;
+    const displayedReachable = routeMode === "reverse"
+      ? (reverseRouteReady === true ? "ok" : "unreachable")
+      : summary.health.reachable;
     let reverseReason = null;
     if (routeMode === "reverse") {
       if (reversePresence !== "online") reverseReason = "reverse-session-offline";
@@ -821,6 +827,10 @@ export function createHubServer({ registry, options = {} }) {
     }
     return {
       ...summary,
+      health: {
+        ...summary.health,
+        reachable: displayedReachable,
+      },
       reversePresence,
       reverseRouteReady,
       reverseReason,

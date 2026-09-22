@@ -243,6 +243,35 @@ test("route mode mutation is authenticated, audited, explicit, and CSRF-protecte
   assert.deepEqual(await replay.json(), { nodeId: node.nodeId, routeMode: "reverse", previousRouteMode: "reverse", changed: false });
 });
 
+test("malformed route mode bodies return 400 without changing state, audit, or events", async (t) => {
+  const { registry, server } = await withServer(t);
+  const node = await enrollNode(server.baseUrl, registry);
+  const session = await establishSession(server.baseUrl);
+  const path = `/hub/nodes/${node.nodeId}/route-mode`;
+  const headers = {
+    ...gatewayHeaders(),
+    cookie: `${SESSION_COOKIE}=${session.cookie}`,
+    [CSRF_HEADER]: session.csrfToken,
+    "content-type": "application/json",
+  };
+  const auditBefore = registry.db.prepare("SELECT COUNT(*) AS count FROM audit WHERE action = 'hub.nodes.route-mode'").get().count;
+  const eventsBefore = registry.db.prepare("SELECT COUNT(*) AS count FROM events WHERE node_id = ? AND dimension = 'route_mode'").get(node.nodeId).count;
+
+  for (const body of ["null", "[]", "1"]) {
+    const response = await fetch(server.baseUrl + path, {
+      method: "PUT",
+      headers,
+      body,
+    });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error.code, "bad-request");
+  }
+
+  assert.equal(registry.getNode(node.nodeId).routeMode, "direct");
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS count FROM audit WHERE action = 'hub.nodes.route-mode'").get().count, auditBefore);
+  assert.equal(registry.db.prepare("SELECT COUNT(*) AS count FROM events WHERE node_id = ? AND dimension = 'route_mode'").get(node.nodeId).count, eventsBefore);
+});
+
 test("route mode mutation rechecks the current row inside its transaction", () => {
   const registry = createTestRegistry();
   const nodeId = "node_" + "a".repeat(32);

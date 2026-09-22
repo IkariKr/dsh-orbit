@@ -1047,7 +1047,11 @@ export class Registry {
       if (previousRouteMode === routeMode) {
         return { nodeId, routeMode, previousRouteMode, changed: false };
       }
-      this.db.prepare("UPDATE nodes SET route_mode = ? WHERE node_id = ?").run(routeMode, nodeId);
+      if (current.reachable !== "unknown") {
+        this.transitionDimension(nodeId, "reachable", "unknown", "route-mode-change");
+      }
+      this.db.prepare("UPDATE nodes SET route_mode = ?, reachable = 'unknown' WHERE node_id = ?").run(routeMode, nodeId);
+      this.routeProbeFailures.delete(nodeId);
       this.recordAudit(actor, "hub.nodes.route-mode", { nodeId, routeMode, previousRouteMode });
       this.recordEvent(nodeId, "route_mode", previousRouteMode, routeMode, "operator");
       return { nodeId, routeMode, previousRouteMode, changed: true };
@@ -1225,6 +1229,14 @@ export class Registry {
     if (!node || node.state !== "active") {
       return { reachable: "unknown", probed: false, reason: "node-not-active" };
     }
+    if (node.route_mode === "reverse") {
+      this.routeProbeFailures.delete(nodeId);
+      if (node.reachable !== "unknown") {
+        this.transitionDimension(nodeId, "reachable", "unknown", "route-mode-reverse");
+        this.db.prepare("UPDATE nodes SET reachable = 'unknown' WHERE node_id = ?").run(nodeId);
+      }
+      return { reachable: "unknown", probed: false, reason: "reverse-mode" };
+    }
     const routeTarget = this.getRouteTarget(nodeId);
     if (!routeTarget) {
       this.routeProbeFailures.delete(nodeId);
@@ -1311,6 +1323,14 @@ export class Registry {
     const current = this.getNodeRow(nodeId);
     if (!current || current.state !== "active") {
       return { reachable: "unknown", probed: true, ok: false };
+    }
+    if (current.route_mode === "reverse") {
+      this.routeProbeFailures.delete(nodeId);
+      if (current.reachable !== "unknown") {
+        this.transitionDimension(nodeId, "reachable", "unknown", "route-mode-reverse");
+        this.db.prepare("UPDATE nodes SET reachable = 'unknown' WHERE node_id = ?").run(nodeId);
+      }
+      return { reachable: "unknown", probed: true, ok: false, ignored: true, reason: "reverse-mode" };
     }
     if (expectedContext) {
       const currentTarget = this.getRouteTarget(nodeId);

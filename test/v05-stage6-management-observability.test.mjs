@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createTestRegistry, createTestServer, enrollNode } from "./helpers/registry-fixture.mjs";
+import { createTestRegistry, createTestServer, defaultRuntimeIdentity, enrollNode, signedMachineRequest } from "./helpers/registry-fixture.mjs";
 
 const ASSERTION = "gateway-held-assertion-secret";
 const GATEWAY_HEADER = "x-dsh-authenticated-proxy";
@@ -70,6 +70,7 @@ test("management read model exposes explicit reverse offline state without deriv
   assert.equal(reverse.reversePresence, "offline");
   assert.equal(reverse.reverseRouteReady, false);
   assert.equal(reverse.reverseReason, "reverse-session-offline");
+  assert.equal(reverse.health.reachable, "unreachable");
   assert.equal(JSON.stringify(reverse).includes("reverseSessionId"), false);
 
   const restoredDirect = await fetch(`${server.baseUrl}/hub/nodes/${node.nodeId}/route-mode`, {
@@ -88,6 +89,42 @@ test("management read model exposes explicit reverse offline state without deriv
   assert.equal(directAgain.reversePresence, "unknown");
   assert.equal(directAgain.reverseRouteReady, null);
   assert.equal(directAgain.reverseReason, null);
+});
+
+test("reverse mode stops direct probing and invalidates stale persisted reachability", async (t) => {
+  const registry = createTestRegistry();
+  const server = await createTestServer(registry, {});
+  t.after(async () => {
+    await server.close();
+    registry.close();
+  });
+
+  const node = await enrollNode(server.baseUrl, registry);
+  registry.setRouteTarget({ actor: "operator", nodeId: node.nodeId, routeTarget: "http://127.0.0.1:1" });
+  registry.db.prepare("UPDATE nodes SET reachable = 'ok' WHERE node_id = ?").run(node.nodeId);
+  registry.setRouteMode({ actor: "operator", nodeId: node.nodeId, routeMode: "reverse" });
+
+  let transportCalls = 0;
+  const probe = await registry.probeNode(node.nodeId, {
+    requestTransport: async () => {
+      transportCalls += 1;
+      return { status: 200, body: JSON.stringify({ nodeId: node.nodeId, ready: true }) };
+    },
+  });
+  assert.deepEqual(probe, { reachable: "unknown", probed: false, reason: "reverse-mode" });
+  assert.equal(transportCalls, 0);
+  assert.equal(registry.getNode(node.nodeId).health.reachable, "unknown");
+
+  const heartbeat = await signedMachineRequest(server.baseUrl, {
+    path: "/api/v1/heartbeat",
+    nodeId: node.nodeId,
+    keyId: node.keyId,
+    keyHex: node.privateKeyHex,
+    body: defaultRuntimeIdentity(),
+  });
+  assert.equal(heartbeat.status, 200);
+  assert.equal(registry.getNode(node.nodeId).health.registryContact, "fresh");
+  assert.equal(registry.getNode(node.nodeId).health.reachable, "unknown");
 });
 
 test("management read model projects live reverse readiness while keeping the session identity private", async (t) => {
@@ -128,5 +165,6 @@ test("management read model projects live reverse readiness while keeping the se
   assert.equal(detail.reversePresence, "online");
   assert.equal(detail.reverseRouteReady, true);
   assert.equal(detail.reverseReason, "no-active-hub-route-key");
+  assert.equal(detail.health.reachable, "ok");
   assert.equal(JSON.stringify(detail).includes(reverseSessionId), false);
 });
