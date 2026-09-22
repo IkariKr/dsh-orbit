@@ -12,9 +12,9 @@
 - Worktree：`dsh-orbit-v05-stage1`
 - Branch：`chore/v0.5-stage2-public-machine-ingress`
 - Stage 6 accepted implementation/review baseline：`55cdd473ef2c0f4b0c8d7a9c9f904874bffba160`
-- Stage 7 qualification implementation commit：`18de37b`
+- Stage 7 qualification implementation commit：`18de37b3ea25a73ab503c326ff793a82266704f0`
 - Stage 7 implementation scope：qualification harness and local hardening contract tests only
-- Independent review target：`18de37b`
+- Independent review target：`18de37b3ea25a73ab503c326ff793a82266704f0`
 - Independent re-review verdict：**PASS**
 - Independent re-review findings：P0=0, P1=0, P2=0, P3=0
 - Stage 7 local qualification preparation：**COMPLETE — locally verified**
@@ -130,7 +130,7 @@ Additional checks:
 
 The independent review first identified one P1: explicit `scope: null` was silently treated as automated scope by the D14 validator. The remediation changed defaulting to apply only when `scope === undefined` and added regression tests for `null` and unknown scopes.
 
-The independent re-review of exact commit `18de37b` concluded:
+The independent re-review of exact commit `18de37b3ea25a73ab503c326ff793a82266704f0` concluded:
 
 ```text
 PASS
