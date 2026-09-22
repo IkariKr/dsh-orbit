@@ -1,62 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { D14_MATRIX_FIELDS } from "../scripts/v05-reverse-acceptance-matrix.mjs";
 
 const ROOT = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, ROOT), "utf8");
 
 const ACCEPTED_V04_CLOSURE = "9891ab858a9c953a211978580910efcc2158bcd7";
-
-const REVERSE_MATRIX_FIELDS = [
-  "pairTokenMinted",
-  "pairTokenDigestOnly",
-  "pairFreshNodeSuccess",
-  "pairReplayIdempotent",
-  "pairDifferentContentDenied",
-  "pairWrongPurposeDenied",
-  "pairExpiredDenied",
-  "pairLostKeyCreatesNewNodeId",
-  "existingNodeReverseConnectsWithoutRepair",
-  "publicMachineIngressAuthenticated",
-  "machineWrongSignatureDenied",
-  "machineNonceReplayDenied",
-  "machineStaleTimestampDenied",
-  "reverseTlsUnknownCaDenied",
-  "reverseTlsWrongSanDenied",
-  "reverseControlOnline",
-  "duplicateControlDeterministicTakeover",
-  "controlReconnectAfterNetworkLoss",
-  "hubRestartReconnect",
-  "nodeRestartReconnect",
-  "reversePresenceIndependentOfRegistryContact",
-  "reverseDshLossUnreachable",
-  "reverseDshRecoveryReachable",
-  "dataChannelPoolBounded",
-  "httpRootReverse",
-  "staticAssetReverse",
-  "streamingUploadReverse",
-  "websocketUpgradeReverse",
-  "websocketPingPongReverse",
-  "websocketLargePayloadReverse",
-  "cookieIsolationReverse",
-  "routeProofWrongNodeDenied",
-  "routeProofReplayDenied",
-  "channelAbortCleanup",
-  "noCredentialLeak",
-  "nodeAOutageIsolation",
-  "nodeBHealthyDuringAOutage",
-  "noImplicitDirectFallback",
-  "noImplicitReverseFallback",
-  "explicitRouteModeSwitch",
-  "directModeRegression",
-  "credentialRotationReconnect",
-  "deleteClosesReverseSession",
-  "reenrollFreshHubRouteIdentity",
-  "deletedBookmarkFailClosed",
-  "hubRestartNoPhantomReverseSession",
-  "backupRestoreNoLiveReverseSession",
-  "selectorReverseEligibility",
-];
 
 test("v0.5 construction design package is anchored to the accepted v0.4 closure", async () => {
   const [authorizationText, roadmap, rfc, sop] = await Promise.all([
@@ -101,9 +51,9 @@ test("RFC-0012 freezes the exact 48-field reverse acceptance matrix", async () =
   const rfc = await read("docs/rfc/0012-reverse-connected-nodes.md");
   const actual = [...rfc.matchAll(/^\|\s*\d+\s*\|\s*\`([A-Za-z0-9]+)\`\s*\|/gm)].map((match) => match[1]);
 
-  assert.equal(REVERSE_MATRIX_FIELDS.length, 48);
-  assert.equal(new Set(REVERSE_MATRIX_FIELDS).size, 48);
-  assert.deepEqual(actual, REVERSE_MATRIX_FIELDS);
+  assert.equal(D14_MATRIX_FIELDS.length, 48);
+  assert.equal(new Set(D14_MATRIX_FIELDS).size, 48);
+  assert.deepEqual(actual, D14_MATRIX_FIELDS);
 });
 
 test("v0.5 scope remains reverse-connection-only and preserves v0.4 routing boundaries", async () => {
