@@ -68,19 +68,31 @@ node --test \
 
 The original Stage 6 focused and full suites are rerun below after the remediation commit.
 
-## 4. Gate status
+## 4. Independent re-review disposition
+
+The independent remediation re-review was executed against exact commit `41e3ce95c632da638e1acb60df141ee324bd3526`.
 
 ```text
+Verdict: PASS / ACCEPTED
 P0 = 0
-P1 = 0 after remediation
-P2 = 0 after remediation
+P1 = 0
+P2 = 0
 
-Stage 6 implementation: remediation complete
-Independent Stage 6 re-review: required before acceptance
-Stage 7: NOT AUTHORIZED
-Candidate freeze: NOT AUTHORIZED
-Gate C: NOT REACHED
-Stage 8: NOT AUTHORIZED
+Stage 6: ACCEPTED for 41e3ce9
+Stage 7: AUTHORIZED TO PROCEED, but not started by this session
+Candidate freeze: NOT AUTHORIZED / NOT EXECUTED
+Gate C: NOT REACHED / NOT AUTHORIZED
+Stage 8: NOT AUTHORIZED / NOT EXECUTED
 ```
 
-No candidate freeze, Stage 7 hardening, Gate C review, mounted evidence, release tag, promotion, DNS, or publication is authorized by this remediation record.
+Independent re-review verification:
+
+```text
+focused remediation suite: 49 passed / 0 failed / 0 skipped
+reverse ingress and transport regressions: 40 passed / 0 failed / 0 skipped
+npm run check: 486 tests / 481 passed / 0 failed / 5 skipped
+```
+
+The reviewer independently verified that direct probing stops in reverse mode, late direct probe results cannot restore reachability, management `health.reachable` follows reverse readiness, and malformed route-mode bodies return 400 without mutation. No new P0/P1/P2 findings were identified.
+
+The following remain explicitly unexecuted: external/mounted production Stage 6 evidence, the frozen 48-field candidate matrix, Stage 7 hardening, candidate freeze, Gate C review, Stage 8 mounted evidence, release tagging, promotion, DNS, and publication.
