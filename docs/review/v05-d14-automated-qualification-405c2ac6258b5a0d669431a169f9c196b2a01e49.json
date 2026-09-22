@@ -1,0 +1,349 @@
+{
+  "schemaVersion": 1,
+  "kind": "v0.5-d14-automated-qualification",
+  "scope": "automated",
+  "result": "AUTOMATED_PASS_MOUNTED_PENDING",
+  "candidateSha": "405c2ac6258b5a0d669431a169f9c196b2a01e49",
+  "candidateFrozen": true,
+  "branch": "chore/v0.5-stage2-public-machine-ingress",
+  "runId": "v05-automated-405c2ac6258b-20260922125938",
+  "executedAt": "2026-09-22T12:59:38.473Z",
+  "matrix": {
+    "pairTokenMinted": "NOT_EXECUTED",
+    "pairTokenDigestOnly": "PASS",
+    "pairFreshNodeSuccess": "NOT_EXECUTED",
+    "pairReplayIdempotent": "PASS",
+    "pairDifferentContentDenied": "PASS",
+    "pairWrongPurposeDenied": "PASS",
+    "pairExpiredDenied": "PASS",
+    "pairLostKeyCreatesNewNodeId": "PASS",
+    "existingNodeReverseConnectsWithoutRepair": "PASS",
+    "publicMachineIngressAuthenticated": "NOT_EXECUTED",
+    "machineWrongSignatureDenied": "PASS",
+    "machineNonceReplayDenied": "PASS",
+    "machineStaleTimestampDenied": "PASS",
+    "reverseTlsUnknownCaDenied": "NOT_EXECUTED",
+    "reverseTlsWrongSanDenied": "NOT_EXECUTED",
+    "reverseControlOnline": "NOT_EXECUTED",
+    "duplicateControlDeterministicTakeover": "NOT_EXECUTED",
+    "controlReconnectAfterNetworkLoss": "NOT_EXECUTED",
+    "hubRestartReconnect": "NOT_EXECUTED",
+    "nodeRestartReconnect": "NOT_EXECUTED",
+    "reversePresenceIndependentOfRegistryContact": "PASS",
+    "reverseDshLossUnreachable": "NOT_EXECUTED",
+    "reverseDshRecoveryReachable": "NOT_EXECUTED",
+    "dataChannelPoolBounded": "PASS",
+    "httpRootReverse": "NOT_EXECUTED",
+    "staticAssetReverse": "NOT_EXECUTED",
+    "streamingUploadReverse": "NOT_EXECUTED",
+    "websocketUpgradeReverse": "NOT_EXECUTED",
+    "websocketPingPongReverse": "NOT_EXECUTED",
+    "websocketLargePayloadReverse": "NOT_EXECUTED",
+    "cookieIsolationReverse": "NOT_EXECUTED",
+    "routeProofWrongNodeDenied": "PASS",
+    "routeProofReplayDenied": "PASS",
+    "channelAbortCleanup": "NOT_EXECUTED",
+    "noCredentialLeak": "NOT_EXECUTED",
+    "nodeAOutageIsolation": "NOT_EXECUTED",
+    "nodeBHealthyDuringAOutage": "NOT_EXECUTED",
+    "noImplicitDirectFallback": "NOT_EXECUTED",
+    "noImplicitReverseFallback": "NOT_EXECUTED",
+    "explicitRouteModeSwitch": "NOT_EXECUTED",
+    "directModeRegression": "NOT_EXECUTED",
+    "credentialRotationReconnect": "NOT_EXECUTED",
+    "deleteClosesReverseSession": "NOT_EXECUTED",
+    "reenrollFreshHubRouteIdentity": "NOT_EXECUTED",
+    "deletedBookmarkFailClosed": "NOT_EXECUTED",
+    "hubRestartNoPhantomReverseSession": "NOT_EXECUTED",
+    "backupRestoreNoLiveReverseSession": "PASS",
+    "selectorReverseEligibility": "NOT_EXECUTED"
+  },
+  "fieldEvidence": {
+    "pairTokenMinted": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "pairTokenDigestOnly": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage1-pairing.test.mjs :: pair token is digest-only at rest; plaintext exists exactly once in the mint response"
+      ]
+    },
+    "pairFreshNodeSuccess": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "pairReplayIdempotent": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage1-pairing.test.mjs :: exact pairing replay returns the exact recorded result within the idempotency retention"
+      ]
+    },
+    "pairDifferentContentDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage1-pairing.test.mjs :: reusing the pair token or request id with different content is denied"
+      ]
+    },
+    "pairWrongPurposeDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage1-pairing.test.mjs :: pairing with unknown, wrong-purpose, or expired token is denied and consumes nothing"
+      ]
+    },
+    "pairExpiredDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage1-pairing.test.mjs :: pairing with unknown, wrong-purpose, or expired token is denied and consumes nothing"
+      ]
+    },
+    "pairLostKeyCreatesNewNodeId": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage1-pairing.test.mjs :: a pair token can never restore a tombstoned node ID; lost keys pair into a different node ID"
+      ]
+    },
+    "existingNodeReverseConnectsWithoutRepair": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage2-public-ingress.test.mjs :: the server-reachable machine listener exposes pair and the reverse surfaces to an existing node binding"
+      ]
+    },
+    "publicMachineIngressAuthenticated": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "machineWrongSignatureDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage2-public-ingress.test.mjs :: reverse upgrade security: Origin 403, signature binding, nonce replay, skew, and no credential substitution"
+      ]
+    },
+    "machineNonceReplayDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage2-public-ingress.test.mjs :: reverse upgrade security: Origin 403, signature binding, nonce replay, skew, and no credential substitution"
+      ]
+    },
+    "machineStaleTimestampDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage2-public-ingress.test.mjs :: reverse upgrade security: Origin 403, signature binding, nonce replay, skew, and no credential substitution"
+      ]
+    },
+    "reverseTlsUnknownCaDenied": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "reverseTlsWrongSanDenied": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "reverseControlOnline": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "duplicateControlDeterministicTakeover": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "controlReconnectAfterNetworkLoss": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "hubRestartReconnect": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "nodeRestartReconnect": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "reversePresenceIndependentOfRegistryContact": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage3-reverse-control.test.mjs :: local DSH readiness changes reachable and presence without touching registryContact",
+        "test/v05-stage7-contract-gaps.test.mjs :: heartbeat staleness does not turn an online reverse session offline"
+      ]
+    },
+    "reverseDshLossUnreachable": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "reverseDshRecoveryReachable": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "dataChannelPoolBounded": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage4-reverse-channels.test.mjs :: pool bounds validate: idle target 1-16, max 4-64, idle <= max"
+      ]
+    },
+    "httpRootReverse": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "staticAssetReverse": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "streamingUploadReverse": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "websocketUpgradeReverse": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "websocketPingPongReverse": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "websocketLargePayloadReverse": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "cookieIsolationReverse": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "routeProofWrongNodeDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage4-reverse-channels.test.mjs :: wrong-authority and wrong-node proofs are denied before DSH is touched"
+      ]
+    },
+    "routeProofReplayDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage4-reverse-channels.test.mjs :: an ORBIT-ROUTE-V1 proof consumed on the reverse transport cannot replay on the shared cache"
+      ]
+    },
+    "channelAbortCleanup": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "noCredentialLeak": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "nodeAOutageIsolation": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "nodeBHealthyDuringAOutage": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "noImplicitDirectFallback": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "noImplicitReverseFallback": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "explicitRouteModeSwitch": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "directModeRegression": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "credentialRotationReconnect": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "deleteClosesReverseSession": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "reenrollFreshHubRouteIdentity": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "deletedBookmarkFailClosed": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "hubRestartNoPhantomReverseSession": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "backupRestoreNoLiveReverseSession": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v05-stage1-pairing.test.mjs :: backup/restore preserves route mode and pair-purpose state; no live reverse session state exists to preserve",
+        "test/v05-stage7-contract-gaps.test.mjs :: backup and restore create a fresh Registry without restoring live reverse sessions"
+      ]
+    },
+    "selectorReverseEligibility": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    }
+  },
+  "verification": {
+    "fullCheck": "npm run check: 503 tests, 497 passed, 0 failed, 6 skipped",
+    "focusedQualification": "Stage 7 and v0.5 focused suites: 118 tests, 115 passed, 0 failed, 3 skipped",
+    "publicTree": "PASS",
+    "diffCheck": "PASS",
+    "worktree": "clean",
+    "divergence": "0/0"
+  },
+  "notExecuted": [
+    "all mounted-required D14 fields",
+    "mounted two-node evidence",
+    "Gate C independent candidate review",
+    "Stage 8 canonical evidence and final review"
+  ]
+}
