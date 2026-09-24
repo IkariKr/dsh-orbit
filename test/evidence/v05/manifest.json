@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "kind": "v05-final-evidence-manifest",
+  "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+  "runId": "v05-formal-1790252625",
+  "result": "PASS",
+  "finalization": "READY_FOR_INDEPENDENT_FINAL_REVIEW",
+  "artifactCount": 6,
+  "artifacts": {
+    "fresh-install.json": {
+      "sha256": "da792b0402c67f6b91bd7e9ba7ea43031161626f0956b7b2563287759cf12638",
+      "bytes": 818,
+      "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+      "runId": "v05-formal-1790252625",
+      "sourcePath": "D:\\App\\01_Ai\\CodeX\\dsh-orbit-v05-formal-runner\\staging\\source-artifacts-v05-formal-1790252625\\fresh-install.json"
+    },
+    "migration.json": {
+      "sha256": "4e0a7353d6f418dae4dce124051c906bc975d63fb77e98232ec53db92d51c85a",
+      "bytes": 903,
+      "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+      "runId": "v05-formal-1790252625",
+      "sourcePath": "D:\\App\\01_Ai\\CodeX\\dsh-orbit-v05-formal-runner\\staging\\source-artifacts-v05-formal-1790252625\\migration.json"
+    },
+    "backup-restore.json": {
+      "sha256": "3ceb2a65ba0f8d3f73cf2b52a0a8fb9ccfb77491ecc79445ace1167e1f59d974",
+      "bytes": 1097,
+      "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+      "runId": "v05-formal-1790252625",
+      "sourcePath": "D:\\App\\01_Ai\\CodeX\\dsh-orbit-v05-formal-runner\\staging\\source-artifacts-v05-formal-1790252625\\backup-restore.json"
+    },
+    "mounted-runner-raw.json": {
+      "sha256": "03618809be635bca09882c818e9aaae745883f3c840d4b999476f8319fc00639",
+      "bytes": 16364,
+      "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+      "runId": "v05-formal-1790252625",
+      "sourcePath": "D:\\App\\01_Ai\\CodeX\\dsh-orbit-v05-formal-runner\\staging\\formal-v05-formal-1790252625-raw.json"
+    },
+    "two-node-mounted-smoke.json": {
+      "sha256": "d928056884c8b0ff623033f9059179153ac0c9cdb835c34f8adc69ae77334560",
+      "bytes": 4953,
+      "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+      "runId": "v05-formal-1790252625",
+      "sourcePath": "generated-from-mounted-runner-raw.json"
+    },
+    "promotion-plan-validation.json": {
+      "sha256": "b8d3d40a1b9e02e434e61b757ba000a2e470af50552b9c24d0bf9077b5963028",
+      "bytes": 559,
+      "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+      "runId": "v05-formal-1790252625",
+      "sourcePath": "D:\\App\\01_Ai\\CodeX\\dsh-orbit-v05-formal-runner\\staging\\source-artifacts-v05-formal-1790252625\\promotion-plan-validation.json"
+    }
+  },
+  "automatedQualificationProvenance": {
+    "path": "D:\\App\\01_Ai\\CodeX\\dsh-orbit-v05-stage1\\docs\\review\\v05-d14-automated-qualification-7e8bb397775dc37f411cc084173525fbb056bf15.json",
+    "sha256": "b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+    "bytes": 12490,
+    "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+    "sourceRunId": "v05-automated-7e8bb397775d-1790238348804",
+    "scope": "automated",
+    "matrixUsedForMountedEvidence": false
+  },
+  "matrix": {
+    "fieldCount": 48,
+    "PASS": 48,
+    "FAIL": 0,
+    "NOT_EXECUTED": 0,
+    "BLOCKED": 0
+  },
+  "directRouteTargetA": "https://dsh-a:9444",
+  "encoding": "UTF-8, LF, final newline"
+}

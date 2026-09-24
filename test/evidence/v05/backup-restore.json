@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "kind": "v05-formal-backup-restore",
+  "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+  "runId": "v05-formal-1790252625",
+  "executedAt": "2026-09-24T12:23:56.172Z",
+  "result": "PASS",
+  "verification": {
+    "pass": 3,
+    "fail": 0,
+    "testExecutions": [
+      {
+        "command": "backup-restore",
+        "exitCode": 0,
+        "tests": 5,
+        "pass": 3,
+        "fail": 0,
+        "skipped": 2,
+        "requiredTestNames": [
+          "backup/restore preserves route mode",
+          "SQLite backup uses a consistent standalone image"
+        ],
+        "observedTestNames": [
+          "SQLite backup uses a consistent standalone image and preserves WAL state (68.9024ms)",
+          "backup rejects overwrite and restores after mutations with WAL sidecars quarantined (151.4513ms)",
+          "backup/restore preserves route mode and pair-purpose state; no live reverse session state exists to preserve (117.0211ms)"
+        ],
+        "tapOutputSha256": "b24ecf12aa437834a64655f860d081e1f81bacfd82dbcc8f6509b04de3d7a4ac"
+      }
+    ]
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "kind": "v05-final-two-node-mounted-smoke",
+  "execution": "executed",
+  "result": "PASS",
+  "startedAt": "2026-09-24T12:23:45.265Z",
+  "finishedAt": "2026-09-24T12:25:07.222Z",
+  "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+  "runId": "v05-formal-1790252625",
+  "nodes": {
+    "a": "node_06827d59b9d6511f05883387f431fbba",
+    "b": "node_62e2f94672739bc519887316c7bc3455"
+  },
+  "routeModes": {
+    "a": "direct",
+    "b": "reverse"
+  },
+  "routeAuthorities": {
+    "a": "n-06827d59b9d6511f05883387f431fbba.dsh-orbit.test:8547",
+    "b": "n-62e2f94672739bc519887316c7bc3455.dsh-orbit.test:8547"
+  },
+  "inboundDeniedProbe": {
+    "nodeId": "node_62e2f94672739bc519887316c7bc3455",
+    "source": "registry-hub network namespace",
+    "targetPort": 9445,
+    "result": "connection-refused",
+    "at": "2026-09-24T12:23:59.092Z"
+  },
+  "aDirectRouteTarget": "https://dsh-a:9444",
+  "dsh": {
+    "version": "0.1.1-rc.2",
+    "profile": "dsh-0.1.1-rc.2",
+    "commitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "cliSha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  },
+  "tls": {
+    "validation": "enabled",
+    "caFingerprint": "sha256 Fingerprint=4B:03:0F:54:F6:7A:50:A4:B7:65:2B:92:20:A6:DA:40:DD:0B:2C:F5:5E:CE:20:DB:1E:EF:44:BB:09:A9:6E:2C",
+    "leafFingerprint": "sha256 Fingerprint=CD:AF:FE:F6:0B:6D:A6:E4:52:14:E0:2D:CD:B3:90:85:6F:37:A1:05:2D:A5:AD:E9:7D:CF:0A:CA:D1:C8:C2:5C"
+  },
+  "browser": {
+    "producer": "runner-owned-firefox-selenium",
+    "challengeDigest": "031218b784a6b85e9a83cbd62d4bd9095a6f406cadd6f99055f2fd4e62adf9a1",
+    "trustMode": "firefox-profile-nss",
+    "gatewayUrl": "https://127.0.0.1:8547"
+  },
+  "reverseProvenance": {
+    "mode": "reverse-only",
+    "generationStatus": "ready-current",
+    "nodeId": "node_62e2f94672739bc519887316c7bc3455",
+    "outboundOnly": true,
+    "inboundDenied": true,
+    "sessionGeneration": "099f7dd9ae0ef3a9dc6039a1e5185acbec4378cb80821c65bc65a185009c54d6",
+    "controlBindingSha256": "8d570c190f3dd0c27b69976eefe5604e7cd3b581e339c7cba285749aeccbd519",
+    "channelBindingSha256": "d6416cb15e2957435af9bb09dbd9f2cba61ad4f763aefb26e24fbf5dd32a9bb4",
+    "inboundDeniedEvidence": "sha256:4a95397d2951ca011c7a982b5af4b79b0541a699e5c0e7571a3bc303894b5d68"
+  },
+  "matrix": {
+    "pairTokenMinted": "PASS",
+    "pairTokenDigestOnly": "PASS",
+    "pairFreshNodeSuccess": "PASS",
+    "pairReplayIdempotent": "PASS",
+    "pairDifferentContentDenied": "PASS",
+    "pairWrongPurposeDenied": "PASS",
+    "pairExpiredDenied": "PASS",
+    "pairLostKeyCreatesNewNodeId": "PASS",
+    "existingNodeReverseConnectsWithoutRepair": "PASS",
+    "publicMachineIngressAuthenticated": "PASS",
+    "machineWrongSignatureDenied": "PASS",
+    "machineNonceReplayDenied": "PASS",
+    "machineStaleTimestampDenied": "PASS",
+    "reverseTlsUnknownCaDenied": "PASS",
+    "reverseTlsWrongSanDenied": "PASS",
+    "reverseControlOnline": "PASS",
+    "duplicateControlDeterministicTakeover": "PASS",
+    "controlReconnectAfterNetworkLoss": "PASS",
+    "hubRestartReconnect": "PASS",
+    "nodeRestartReconnect": "PASS",
+    "reversePresenceIndependentOfRegistryContact": "PASS",
+    "reverseDshLossUnreachable": "PASS",
+    "reverseDshRecoveryReachable": "PASS",
+    "dataChannelPoolBounded": "PASS",
+    "httpRootReverse": "PASS",
+    "staticAssetReverse": "PASS",
+    "streamingUploadReverse": "PASS",
+    "websocketUpgradeReverse": "PASS",
+    "websocketPingPongReverse": "PASS",
+    "websocketLargePayloadReverse": "PASS",
+    "cookieIsolationReverse": "PASS",
+    "routeProofWrongNodeDenied": "PASS",
+    "routeProofReplayDenied": "PASS",
+    "channelAbortCleanup": "PASS",
+    "noCredentialLeak": "PASS",
+    "nodeAOutageIsolation": "PASS",
+    "nodeBHealthyDuringAOutage": "PASS",
+    "noImplicitDirectFallback": "PASS",
+    "noImplicitReverseFallback": "PASS",
+    "explicitRouteModeSwitch": "PASS",
+    "directModeRegression": "PASS",
+    "credentialRotationReconnect": "PASS",
+    "deleteClosesReverseSession": "PASS",
+    "reenrollFreshHubRouteIdentity": "PASS",
+    "deletedBookmarkFailClosed": "PASS",
+    "hubRestartNoPhantomReverseSession": "PASS",
+    "backupRestoreNoLiveReverseSession": "PASS",
+    "selectorReverseEligibility": "PASS"
+  },
+  "provenance": {
+    "producer": "formal-runner",
+    "rawEvidenceSha256": "03618809be635bca09882c818e9aaae745883f3c840d4b999476f8319fc00639",
+    "rawEvidenceBytes": 16364,
+    "automatedQualification": {
+      "path": "D:\\App\\01_Ai\\CodeX\\dsh-orbit-v05-stage1\\docs\\review\\v05-d14-automated-qualification-7e8bb397775dc37f411cc084173525fbb056bf15.json",
+      "sha256": "b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "bytes": 12490,
+      "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+      "sourceRunId": "v05-automated-7e8bb397775d-1790238348804",
+      "scope": "automated",
+      "matrixUsedForMountedEvidence": false
+    }
+  }
+}

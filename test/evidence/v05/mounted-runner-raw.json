@@ -1,0 +1,394 @@
+{
+  "kind": "v05-d14-mounted-runner-raw",
+  "producer": "formal-runner",
+  "success": true,
+  "cleanupComplete": true,
+  "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+  "runId": "v05-formal-1790252625",
+  "startedAt": "2026-09-24T12:23:45.265Z",
+  "matrix": {
+    "pairTokenMinted": "PASS",
+    "pairTokenDigestOnly": "PASS",
+    "pairFreshNodeSuccess": "PASS",
+    "pairReplayIdempotent": "PASS",
+    "pairDifferentContentDenied": "PASS",
+    "pairWrongPurposeDenied": "PASS",
+    "pairExpiredDenied": "PASS",
+    "pairLostKeyCreatesNewNodeId": "PASS",
+    "existingNodeReverseConnectsWithoutRepair": "PASS",
+    "publicMachineIngressAuthenticated": "PASS",
+    "machineWrongSignatureDenied": "PASS",
+    "machineNonceReplayDenied": "PASS",
+    "machineStaleTimestampDenied": "PASS",
+    "reverseTlsUnknownCaDenied": "PASS",
+    "reverseTlsWrongSanDenied": "PASS",
+    "reverseControlOnline": "PASS",
+    "duplicateControlDeterministicTakeover": "PASS",
+    "controlReconnectAfterNetworkLoss": "PASS",
+    "hubRestartReconnect": "PASS",
+    "nodeRestartReconnect": "PASS",
+    "reversePresenceIndependentOfRegistryContact": "PASS",
+    "reverseDshLossUnreachable": "PASS",
+    "reverseDshRecoveryReachable": "PASS",
+    "dataChannelPoolBounded": "PASS",
+    "httpRootReverse": "PASS",
+    "staticAssetReverse": "PASS",
+    "streamingUploadReverse": "PASS",
+    "websocketUpgradeReverse": "PASS",
+    "websocketPingPongReverse": "PASS",
+    "websocketLargePayloadReverse": "PASS",
+    "cookieIsolationReverse": "PASS",
+    "routeProofWrongNodeDenied": "PASS",
+    "routeProofReplayDenied": "PASS",
+    "channelAbortCleanup": "PASS",
+    "noCredentialLeak": "PASS",
+    "nodeAOutageIsolation": "PASS",
+    "nodeBHealthyDuringAOutage": "PASS",
+    "noImplicitDirectFallback": "PASS",
+    "noImplicitReverseFallback": "PASS",
+    "explicitRouteModeSwitch": "PASS",
+    "directModeRegression": "PASS",
+    "credentialRotationReconnect": "PASS",
+    "deleteClosesReverseSession": "PASS",
+    "reenrollFreshHubRouteIdentity": "PASS",
+    "deletedBookmarkFailClosed": "PASS",
+    "hubRestartNoPhantomReverseSession": "PASS",
+    "backupRestoreNoLiveReverseSession": "PASS",
+    "selectorReverseEligibility": "PASS"
+  },
+  "steps": [
+    {
+      "type": "preflight",
+      "at": "2026-09-24T12:23:45.577Z",
+      "detail": "candidate clean; strict TLS inputs present; compose config rendered"
+    },
+    {
+      "field": "reverseTlsUnknownCaDenied",
+      "detail": "unexpected unknown-CA outcome UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+      "at": "2026-09-24T12:23:56.613Z"
+    },
+    {
+      "field": "reverseTlsWrongSanDenied",
+      "detail": "unexpected wrong-SAN outcome ERR_TLS_CERT_ALTNAME_INVALID",
+      "at": "2026-09-24T12:23:56.619Z"
+    },
+    {
+      "field": "pairTokenMinted",
+      "detail": "Hub minted a one-time pair-purpose token and the Node B CLI consumed it",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "pairTokenDigestOnly",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "pairReplayIdempotent",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "pairDifferentContentDenied",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "pairWrongPurposeDenied",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "pairExpiredDenied",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "pairLostKeyCreatesNewNodeId",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "existingNodeReverseConnectsWithoutRepair",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "machineWrongSignatureDenied",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "machineNonceReplayDenied",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "machineStaleTimestampDenied",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "reversePresenceIndependentOfRegistryContact",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "dataChannelPoolBounded",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "routeProofWrongNodeDenied",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "routeProofReplayDenied",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "backupRestoreNoLiveReverseSession",
+      "detail": "frozen candidate-bound automated qualification PASS; source SHA-256 b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "pairFreshNodeSuccess",
+      "detail": "fresh Node B identity was paired through the authenticated private machine-ingress URL configured in the response",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "publicMachineIngressAuthenticated",
+      "detail": "Node B accepted a fresh pair token over the candidate's CA-verified HTTPS machine-ingress endpoint",
+      "at": "2026-09-24T12:23:58.359Z"
+    },
+    {
+      "field": "reverseControlOnline",
+      "detail": "Hub management read model reports Node B online with routeReady=true and current session-ready transition",
+      "at": "2026-09-24T12:23:58.898Z"
+    },
+    {
+      "field": "noImplicitDirectFallback",
+      "detail": "reverse-only Node B has a null route target and remains explicitly reverse",
+      "at": "2026-09-24T12:23:58.935Z"
+    },
+    {
+      "field": "noImplicitReverseFallback",
+      "detail": "A and B remain on independently configured transports with no failover",
+      "at": "2026-09-24T12:23:58.935Z"
+    },
+    {
+      "field": "explicitRouteModeSwitch",
+      "detail": "management route-mode mutation changed Node A to reverse then restored direct",
+      "at": "2026-09-24T12:23:58.935Z"
+    },
+    {
+      "field": "directModeRegression",
+      "detail": "operator-configured HTTPS direct target for Node A remains the selected route",
+      "at": "2026-09-24T12:23:59.092Z"
+    },
+    {
+      "field": "selectorReverseEligibility",
+      "detail": "Hub selector projection shows fresh compatible reports and eligible A/direct and B/reverse routes",
+      "at": "2026-09-24T12:24:04.102Z"
+    },
+    {
+      "field": "httpRootReverse",
+      "detail": "Node B root returned HTTP 200 through its reverse route authority",
+      "at": "2026-09-24T12:24:04.140Z"
+    },
+    {
+      "field": "directModeRegression",
+      "detail": "Node A root returned HTTP 200 through its direct route target",
+      "at": "2026-09-24T12:24:04.140Z"
+    },
+    {
+      "field": "staticAssetReverse",
+      "detail": "Node B referenced static asset returned HTTP 200",
+      "at": "2026-09-24T12:24:04.147Z"
+    },
+    {
+      "field": "cookieIsolationReverse",
+      "detail": "Firefox checkpoint proves host-only node cookies and no selector credential crossover",
+      "at": "2026-09-24T12:24:13.473Z"
+    },
+    {
+      "field": "websocketUpgradeReverse",
+      "detail": "strict-TLS Node B route-authority upgrade returned HTTP 101 and validated Sec-WebSocket-Accept",
+      "at": "2026-09-24T12:24:13.487Z"
+    },
+    {
+      "field": "websocketPingPongReverse",
+      "detail": "Node B reverse DSH mux path returned the exact RFC6455 Pong payload",
+      "at": "2026-09-24T12:24:13.487Z"
+    },
+    {
+      "field": "duplicateControlDeterministicTakeover",
+      "detail": "Hub management read model observed two ready control generations and the promoted current session",
+      "at": "2026-09-24T12:24:16.276Z"
+    },
+    {
+      "field": "reverseControlOnline",
+      "detail": "Node B daemon re-established a current ready reverse generation after takeover probe cleanup",
+      "at": "2026-09-24T12:24:16.285Z"
+    },
+    {
+      "field": "websocketLargePayloadReverse",
+      "detail": "isolated reverse-route echo sidecar proved exact 512 KiB transport round-trip; not a DSH endpoint capability claim",
+      "at": "2026-09-24T12:24:16.834Z"
+    },
+    {
+      "field": "streamingUploadReverse",
+      "detail": "256 KiB streaming body uploaded across reverse route authority with exact byte count and sha256 echo",
+      "at": "2026-09-24T12:24:16.846Z"
+    },
+    {
+      "field": "channelAbortCleanup",
+      "detail": "aborted stream cleaned up channel cleanly; subsequent reverse route request returned HTTP 200",
+      "at": "2026-09-24T12:24:17.364Z"
+    },
+    {
+      "field": "noCredentialLeak",
+      "detail": "reverse HTTP response body and headers contain no private keys, proxy secrets, or gateway secrets",
+      "at": "2026-09-24T12:24:17.364Z"
+    },
+    {
+      "field": "nodeAOutageIsolation",
+      "detail": "Node A direct endpoint fails during Node A outage without affecting Hub",
+      "at": "2026-09-24T12:24:18.018Z"
+    },
+    {
+      "field": "nodeBHealthyDuringAOutage",
+      "detail": "Node B reverse route remains online and returns HTTP 200 during Node A outage",
+      "at": "2026-09-24T12:24:18.018Z"
+    },
+    {
+      "field": "controlReconnectAfterNetworkLoss",
+      "detail": "Node B daemon re-established reverse control session after process interruption",
+      "at": "2026-09-24T12:24:18.661Z"
+    },
+    {
+      "field": "nodeRestartReconnect",
+      "detail": "Node B daemon restart re-establishes clean ready reverse session",
+      "at": "2026-09-24T12:24:20.311Z"
+    },
+    {
+      "field": "reverseDshLossUnreachable",
+      "detail": "when DSH on readiness target stops responding, Hub marks reverseRouteReady=false and route authority fails closed",
+      "at": "2026-09-24T12:24:33.600Z"
+    },
+    {
+      "field": "reverseDshRecoveryReachable",
+      "detail": "when DSH recovers on readiness target, Hub marks reverseRouteReady=true and route authority returns HTTP 200",
+      "at": "2026-09-24T12:24:40.419Z"
+    },
+    {
+      "field": "hubRestartReconnect",
+      "detail": "Node B automatically reconnected after Hub container restart",
+      "at": "2026-09-24T12:25:04.455Z"
+    },
+    {
+      "field": "hubRestartNoPhantomReverseSession",
+      "detail": "Hub restart preserves single authoritative reverse session without ghost entries",
+      "at": "2026-09-24T12:25:04.455Z"
+    },
+    {
+      "field": "credentialRotationReconnect",
+      "detail": "Node B credentials rotated with overlap, reverse transport maintained with new key",
+      "at": "2026-09-24T12:25:04.729Z"
+    },
+    {
+      "field": "deleteClosesReverseSession",
+      "detail": "deleting node closes reverse session and removes active presence",
+      "at": "2026-09-24T12:25:04.745Z"
+    },
+    {
+      "field": "deletedBookmarkFailClosed",
+      "detail": "request to deleted node reverse route authority fails closed",
+      "at": "2026-09-24T12:25:04.745Z"
+    },
+    {
+      "field": "reenrollFreshHubRouteIdentity",
+      "detail": "reenrolled node with original key proof obtained fresh Hub route identity and resumed reverse routing",
+      "at": "2026-09-24T12:25:07.222Z"
+    }
+  ],
+  "automatedQualification": {
+    "sourcePath": "D:/App/01_Ai/CodeX/dsh-orbit-v05-stage1/docs/review/v05-d14-automated-qualification-7e8bb397775dc37f411cc084173525fbb056bf15.json",
+    "sha256": "b42801a545bda39c02f5cb58b7e682d65645bd8ec4ac6885f2f980a42b9a3f6f",
+    "sourceRunId": "v05-automated-7e8bb397775d-1790238348804"
+  },
+  "nodeIds": [
+    "node_06827d59b9d6511f05883387f431fbba",
+    "node_62e2f94672739bc519887316c7bc3455"
+  ],
+  "routeModes": {
+    "a": "direct",
+    "b": "reverse"
+  },
+  "inboundDeniedProbe": {
+    "nodeId": "node_62e2f94672739bc519887316c7bc3455",
+    "source": "registry-hub network namespace",
+    "targetPort": 9445,
+    "result": "connection-refused",
+    "at": "2026-09-24T12:23:59.092Z"
+  },
+  "routeAuthorities": {
+    "a": "n-06827d59b9d6511f05883387f431fbba.dsh-orbit.test:8547",
+    "b": "n-62e2f94672739bc519887316c7bc3455.dsh-orbit.test:8547"
+  },
+  "routeTargets": {
+    "a": "https://dsh-a:9444"
+  },
+  "browser": {
+    "browserProducer": "runner-owned-firefox-selenium",
+    "challengeDigest": "031218b784a6b85e9a83cbd62d4bd9095a6f406cadd6f99055f2fd4e62adf9a1",
+    "trustMode": "firefox-profile-nss",
+    "gatewayUrl": "https://127.0.0.1:8547",
+    "caFingerprint": "sha256 Fingerprint=4B:03:0F:54:F6:7A:50:A4:B7:65:2B:92:20:A6:DA:40:DD:0B:2C:F5:5E:CE:20:DB:1E:EF:44:BB:09:A9:6E:2C",
+    "leafFingerprint": "sha256 Fingerprint=CD:AF:FE:F6:0B:6D:A6:E4:52:14:E0:2D:CD:B3:90:85:6F:37:A1:05:2D:A5:AD:E9:7D:CF:0A:CA:D1:C8:C2:5C",
+    "checkpoint": "browser/checkpoint-v05-formal-1790252625.json"
+  },
+  "finishedAt": "2026-09-24T12:25:07.222Z",
+  "dsh": {
+    "version": "0.1.1-rc.2",
+    "profile": "dsh-0.1.1-rc.2",
+    "commitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "cliSha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  },
+  "tls": {
+    "validation": "enabled",
+    "caFingerprint": "sha256 Fingerprint=4B:03:0F:54:F6:7A:50:A4:B7:65:2B:92:20:A6:DA:40:DD:0B:2C:F5:5E:CE:20:DB:1E:EF:44:BB:09:A9:6E:2C",
+    "leafFingerprint": "sha256 Fingerprint=CD:AF:FE:F6:0B:6D:A6:E4:52:14:E0:2D:CD:B3:90:85:6F:37:A1:05:2D:A5:AD:E9:7D:CF:0A:CA:D1:C8:C2:5C"
+  },
+  "reverseProvenance": {
+    "mode": "reverse-only",
+    "status": "ready-current",
+    "nodeId": "node_62e2f94672739bc519887316c7bc3455",
+    "outboundOnly": true,
+    "inboundDenied": true,
+    "sessionGeneration": "099f7dd9ae0ef3a9dc6039a1e5185acbec4378cb80821c65bc65a185009c54d6",
+    "controlBindingSha256": "8d570c190f3dd0c27b69976eefe5604e7cd3b581e339c7cba285749aeccbd519",
+    "channelBindingSha256": "d6416cb15e2957435af9bb09dbd9f2cba61ad4f763aefb26e24fbf5dd32a9bb4",
+    "inboundDeniedEvidence": "sha256:4a95397d2951ca011c7a982b5af4b79b0541a699e5c0e7571a3bc303894b5d68"
+  },
+  "sourceArtifacts": {
+    "fresh-install.json": {
+      "sha256": "da792b0402c67f6b91bd7e9ba7ea43031161626f0956b7b2563287759cf12638",
+      "bytes": 818
+    },
+    "migration.json": {
+      "sha256": "4e0a7353d6f418dae4dce124051c906bc975d63fb77e98232ec53db92d51c85a",
+      "bytes": 903
+    },
+    "backup-restore.json": {
+      "sha256": "3ceb2a65ba0f8d3f73cf2b52a0a8fb9ccfb77491ecc79445ace1167e1f59d974",
+      "bytes": 1097
+    },
+    "promotion-plan-validation.json": {
+      "sha256": "b8d3d40a1b9e02e434e61b757ba000a2e470af50552b9c24d0bf9077b5963028",
+      "bytes": 559
+    }
+  },
+  "result": "PASS"
+}

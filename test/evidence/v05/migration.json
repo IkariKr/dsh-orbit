@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "kind": "v05-formal-migration",
+  "candidateSha": "7e8bb397775dc37f411cc084173525fbb056bf15",
+  "runId": "v05-formal-1790252625",
+  "executedAt": "2026-09-24T12:23:55.753Z",
+  "result": "PASS",
+  "verification": {
+    "pass": 2,
+    "fail": 0,
+    "testExecutions": [
+      {
+        "command": "migration",
+        "exitCode": 0,
+        "tests": 2,
+        "pass": 2,
+        "fail": 0,
+        "skipped": 0,
+        "requiredTestNames": [
+          "v5 database migrates",
+          "migration rerun is idempotent"
+        ],
+        "observedTestNames": [
+          "a v5 database migrates in place to the v6 schema preserving rows and adding route_mode (45.7765ms)",
+          "migration rerun is idempotent on a file-backed registry (35.4838ms)"
+        ],
+        "tapOutputSha256": "17b7ea70bf96bff87993b1c2eb892a54441810d60bc6e5611ed4b2bc6767dfac"
+      }
+    ]
+  }
+}
