@@ -20,14 +20,16 @@ function pairRegistry(options = {}) {
 }
 
 async function startMockDsh() {
+  let statusCode = 401;
   const server = http.createServer((request, response) => {
-    response.writeHead(401, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: { code: "unauthorized" } }));
+    response.writeHead(statusCode, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { code: "mock-response" } }));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   return {
     server,
     target: `http://127.0.0.1:${server.address().port}`,
+    setStatusCode: (nextStatusCode) => { statusCode = nextStatusCode; },
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections?.();
@@ -49,11 +51,12 @@ function enrollReverseNode(registry) {
   };
 }
 
-function makeReverseClient(baseUrl, node, { dshTarget, onEvent, livenessPollMs = 100 } = {}) {
+function makeReverseClient(baseUrl, node, { dshTarget, readinessTarget, onEvent, livenessPollMs = 100 } = {}) {
   return new ReverseClient({
     hubBaseUrl: baseUrl,
     getCredentials: () => ({ nodeId: node.nodeId, keyId: node.keyId, privateKeyHex: node.privateKeyHex }),
     dshTarget: dshTarget ?? "http://127.0.0.1:1",
+    readinessTarget,
     livenessPollMs,
     onEvent: onEvent ?? (() => {}),
   });
@@ -166,11 +169,21 @@ function waitFor(predicate, { timeoutMs = 5000, stepMs = 25, label }) {
   });
 }
 
-test("probeDshTransport treats any HTTP answer as ready and refusal as not ready", async () => {
+test("probeDshTransport accepts any HTTP response and rejects refusal or timeout", async () => {
   const dsh = await startMockDsh();
+  assert.equal(await probeDshTransport(dsh.target), true, "BrowserAuth 401 proves the transport responds");
+  dsh.setStatusCode(200);
   assert.equal(await probeDshTransport(dsh.target), true);
+  dsh.setStatusCode(500);
+  assert.equal(await probeDshTransport(dsh.target), true, "DSH application status does not redefine transport liveness");
   await dsh.close();
   assert.equal(await probeDshTransport("http://127.0.0.1:1"), false);
+
+  const stalled = http.createServer(() => {});
+  await new Promise((resolve) => stalled.listen(0, "127.0.0.1", resolve));
+  assert.equal(await probeDshTransport(`http://127.0.0.1:${stalled.address().port}`, { timeoutMs: 30 }), false);
+  stalled.closeAllConnections?.();
+  await new Promise((resolve) => stalled.close(resolve));
 });
 
 test("valid active node connects, answers ready, and becomes online", async (t) => {
@@ -349,27 +362,45 @@ test("control loss makes reverse presence offline; reconnect restores online; no
   await cleanupReverse({ dshServers: [dsh], closeServer: close });
 });
 
-test("local DSH readiness changes reachable and presence without touching registryContact", async (t) => {
+test("reverse readiness probes the direct DSH target instead of the route adapter", async (t) => {
   const registry = pairRegistry();
   const { baseUrl, reverseSessions, close } = await createTestServer(registry);
   t.after(() => close());
   const node = enrollReverseNode(registry);
   const dsh = await startMockDsh();
+  const adapter = await startMockDsh();
+  adapter.setStatusCode(502);
+  const probeDsh = (target) => probeDshTransport(target, { timeoutMs: 80 });
 
-  const client = makeReverseClient(baseUrl, node, { dshTarget: dsh.target, livenessPollMs: 60 });
+  const client = makeReverseClient(baseUrl, node, {
+    dshTarget: adapter.target,
+    readinessTarget: dsh.target,
+    livenessPollMs: 60,
+  });
   client.start();
-  await waitFor(() => reverseSessions.isReverseReachable(node.nodeId, "reverse") === true, { label: "reachable ok" });
+  await waitFor(() => reverseSessions.isReverseReachable(node.nodeId, "reverse") === true, { label: "reachable from direct DSH readiness" });
 
   const rowBefore = registry.db.prepare("SELECT registry_contact, last_seen FROM nodes WHERE node_id = ?").get(node.nodeId);
-  await dsh.close(); // local DSH transport loss
-  await waitFor(() => reverseSessions.isReverseReachable(node.nodeId, "reverse") === false, { label: "reachable false" });
+  dsh.setStatusCode(500);
+  assert.equal(await probeDsh(adapter.target), true, "a proxy HTTP response alone is not used as DSH readiness");
+  assert.equal(await probeDsh(dsh.target), true, "an application 500 from the direct DSH listener remains responsive");
+
+  await dsh.close(); // The route adapter remains available but its DSH upstream is gone.
+  await waitFor(() => reverseSessions.isReverseReachable(node.nodeId, "reverse") === false, { label: "direct DSH transport loss makes route unreachable" });
   assert.equal(reverseSessions.getSessionInfo(node.nodeId).routeReady, false);
   assert.equal(reverseSessions.getPresence(node.nodeId, "reverse"), "online", "presence tracks the control session, not DSH health");
+
+  const stalledDsh = http.createServer(() => {});
+  await new Promise((resolve) => stalledDsh.listen(0, "127.0.0.1", resolve));
+  const stalledTarget = `http://127.0.0.1:${stalledDsh.address().port}`;
+  assert.equal(await probeDsh(stalledTarget), false, "a stalled direct DSH probe times out as not ready");
+  stalledDsh.closeAllConnections?.();
+  await new Promise((resolve) => stalledDsh.close(resolve));
 
   const rowAfter = registry.db.prepare("SELECT registry_contact, last_seen FROM nodes WHERE node_id = ?").get(node.nodeId);
   assert.deepEqual(rowAfter, rowBefore, "reverse reachability must never move registryContact");
   client.stop();
-  await cleanupReverse({ closeServer: close });
+  await cleanupReverse({ dshServers: [adapter], closeServer: close });
 });
 
 test("credential revocation closes only matching reverse generations", () => {

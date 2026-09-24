@@ -199,6 +199,7 @@ switch (command) {
     const ingressListen = process.env.DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN ?? "127.0.0.1";
     const routeDomain = process.env.DSH_ORBIT_NODE_ROUTE_DOMAIN ?? "localhost";
     const dshTarget = process.env.DSH_ORBIT_NODE_DSH_TARGET ?? "http://127.0.0.1:3080";
+    const readinessTarget = process.env.DSH_ORBIT_NODE_DSH_READINESS_TARGET || dshTarget;
     if (!Number.isInteger(ingressPort) || ingressPort < 0 || ingressPort > 65535) {
       console.error("dsh-orbit-node: DSH_ORBIT_NODE_ROUTE_INGRESS_PORT must be an integer from 0 to 65535");
       process.exit(2);
@@ -304,6 +305,7 @@ switch (command) {
             hubBaseUrl: client.store.hubBaseUrl,
             caCertificates: client.caCertificates ?? null,
             dshTarget,
+            readinessTarget,
             channelPool: reverseChannelPool,
             getCredentials: () =>
               client.store.state === "active" && client.store.privateKeyHex

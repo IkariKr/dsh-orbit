@@ -51,7 +51,8 @@ surface and must not be routed through the browser gateway. See
 | `DSH_ORBIT_NODE_ROUTE_INGRESS_PORT` | no | `0` | Route-ingress listen port. `0` requests an ephemeral port for development/tests; production route targets should use an explicit stable port. |
 | `DSH_ORBIT_NODE_ROUTE_INGRESS_LISTEN` | no | `127.0.0.1` | Route-ingress listen address. Non-loopback production exposure must be protected by verified TLS according to RFC-0010. |
 | `DSH_ORBIT_NODE_ROUTE_DOMAIN` | no | `localhost` | Route domain used to verify `ORBIT-ROUTE-V1`; must exactly match the Hub route-domain configuration. |
-| `DSH_ORBIT_NODE_DSH_TARGET` | no | `http://127.0.0.1:3080` | Node-local DSH transport checked by `GET /_orbit/route-ready`. This is liveness only and does not parse DSH APIs. |
+| `DSH_ORBIT_NODE_DSH_TARGET` | no | `http://127.0.0.1:3080` | Node-local DSH destination for route forwarding and direct-ingress liveness checks. Reverse nodes use this target for browser flows; no DSH API semantics are parsed. |
+| `DSH_ORBIT_NODE_DSH_READINESS_TARGET` | no | value of `DSH_ORBIT_NODE_DSH_TARGET` | Optional direct DSH endpoint used only by reverse-control readiness probes. Set it when the route target is an adapter or proxy; any HTTP response (including 401/application errors) proves transport responsiveness, while refusal or timeout is not ready. |
 | `DSH_ORBIT_NODE_ROUTE_TLS_KEY` / `DSH_ORBIT_NODE_ROUTE_TLS_CERT` | together | unset | Route-ingress TLS private key and certificate, as PEM values or file paths. Configuring only one fails startup. |
 | `DSH_ORBIT_NODE_WS_LIMIT` | no | `50` | Maximum concurrent WebSocket connections permitted on the Node route ingress, integer 1–10000. Out-of-range or non-integer values fail startup closed. |
 | `DSH_ORBIT_REPORT_FILE` | for `upload-report` | none | Path to a validated compatibility report. |

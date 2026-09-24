@@ -491,7 +491,7 @@ For `routeMode = direct`:
 
 For `routeMode = reverse`:
 - `reversePresence = online` requires a current ready control session;
-- node control `ready/status` includes only generic local DSH transport readiness;
+- node control `ready/status` includes only generic local DSH transport readiness; any HTTP response from the configured DSH readiness target (including BrowserAuth 401 or an application error) indicates a responsive transport, while connection refusal or timeout is not ready; when route traffic uses an adapter, the readiness target is configured to probe the DSH listener directly;
 - `reachable = ok` iff the current reverse session is online **and** current local route readiness is true;
 - control loss immediately makes `reversePresence = offline` and `reachable = unreachable`;
 - local DSH transport loss makes `reachable = unreachable` without changing `registryContact`;

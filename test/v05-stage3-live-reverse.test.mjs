@@ -111,7 +111,7 @@ function runNodeCommand({ command, statePath, hubUrl, caCertPath, extraEnv = {},
   });
 }
 
-function startNodeDaemon({ statePath, hubUrl, caCertPath, dshTarget }) {
+function startNodeDaemon({ statePath, hubUrl, caCertPath, dshTarget, readinessTarget = dshTarget }) {
   const child = spawn(process.execPath, ["bin/dsh-orbit-node.mjs", "run"], {
     cwd: REPO_ROOT,
     env: {
@@ -123,6 +123,7 @@ function startNodeDaemon({ statePath, hubUrl, caCertPath, dshTarget }) {
       DSH_ORBIT_NODE_ROUTE_INGRESS_DISABLED: "1",
       DSH_ORBIT_NODE_ROUTE_DOMAIN: "dsh.example.local",
       DSH_ORBIT_NODE_DSH_TARGET: dshTarget,
+      DSH_ORBIT_NODE_DSH_READINESS_TARGET: readinessTarget,
       DSH_ORBIT_NODE_DSH_VERSION: "0.1.1-rc.2",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -274,6 +275,9 @@ test("Live v0.5 Stage 3 reverse evidence: outbound-only reverse node stays conne
 
   const dsh = startMockDshServer();
   await dsh.start();
+  const routeAdapter = startMockDshServer();
+  await routeAdapter.start();
+  routeAdapter.setStatusCode(502);
   const gateway = startRehearsalGateway({ certPem: GATEWAY_CERT_PEM, keyPem: GATEWAY_KEY_PEM });
   await gateway.listen();
 
@@ -283,6 +287,7 @@ test("Live v0.5 Stage 3 reverse evidence: outbound-only reverse node stays conne
     await killProcess(daemon?.child);
     await killProcess(hub?.child);
     await dsh.close();
+    await routeAdapter.close();
     await gateway.close();
     await rm(dir, { recursive: true, force: true });
   });
@@ -304,7 +309,13 @@ test("Live v0.5 Stage 3 reverse evidence: outbound-only reverse node stays conne
   console.log(`[Evidence] Paired ${nodeId}; route ingress disabled: the node is outbound-only`);
 
   console.log("\n=== STEP 2: The node daemon establishes the reverse control session (online) ===");
-  daemon = startNodeDaemon({ statePath, hubUrl: `https://127.0.0.1:${gateway.port}`, caCertPath: certPath, dshTarget: dsh.target });
+  daemon = startNodeDaemon({
+    statePath,
+    hubUrl: `https://127.0.0.1:${gateway.port}`,
+    caCertPath: certPath,
+    dshTarget: routeAdapter.target,
+    readinessTarget: dsh.target,
+  });
   try {
     await waitFor(() => hub.logs().includes(`reverse session ready node=${nodeId} routeReady=true`), { label: "hub log: session ready routeReady=true", timeoutMs: 20000 });
   } catch (error) {
@@ -312,12 +323,12 @@ test("Live v0.5 Stage 3 reverse evidence: outbound-only reverse node stays conne
     console.error(`[Diagnostic] daemon: ${daemon.diagnostics()}`);
     throw error;
   }
-  console.log("[Evidence] Hub observed the current ready session: reversePresence=online, reachable=ok");
+  console.log("[Test] Hub observed readiness from the direct DSH probe while the mock route adapter returned 502");
 
   console.log("\n=== STEP 3: Local DSH stop/restart moves reachable without touching the session or registryContact ===");
   const contactBefore = await readRegistryContact(dbPath, nodeId);
   await dsh.close();
-  await waitFor(() => hub.logs().includes(`reverse route readiness node=${nodeId} routeReady=false`), { label: "hub log: routeReady=false", timeoutMs: 20000 });
+  await waitFor(() => hub.logs().includes(`reverse route readiness node=${nodeId} routeReady=false`), { label: "hub log: routeReady=false while adapter remains 502", timeoutMs: 20000 });
   dsh.restart();
   await waitFor(
     () => {
@@ -335,7 +346,13 @@ test("Live v0.5 Stage 3 reverse evidence: outbound-only reverse node stays conne
   console.log("\n=== STEP 4: Node process restart reconnects with the same node ID and key ===");
   await killProcess(daemon.child);
   await waitFor(() => hub.logs().includes(`reverse session closed node=${nodeId}`), { label: "hub log: session closed after node stop", timeoutMs: 20000 });
-  daemon = startNodeDaemon({ statePath, hubUrl: `https://127.0.0.1:${gateway.port}`, caCertPath: certPath, dshTarget: dsh.target });
+  daemon = startNodeDaemon({
+    statePath,
+    hubUrl: `https://127.0.0.1:${gateway.port}`,
+    caCertPath: certPath,
+    dshTarget: routeAdapter.target,
+    readinessTarget: dsh.target,
+  });
   await waitFor(
     () => countOccurrences(hub.logs(), `reverse session ready node=${nodeId}`) >= 2,
     { label: "hub log: second ready session after node restart", timeoutMs: 20000 },
@@ -395,14 +412,18 @@ async function readRegistryContact(dbPath, nodeId) {
 }
 
 function startMockDshServer() {
+  let statusCode = 401;
   const server = http.createServer((request, response) => {
-    response.writeHead(401, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: { code: "unauthorized" } }));
+    response.writeHead(statusCode, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: { code: "mock-response" } }));
   });
   let target = null;
   return {
     get target() {
       return target;
+    },
+    setStatusCode(nextStatusCode) {
+      statusCode = nextStatusCode;
     },
     start: () =>
       new Promise((resolve) => {
@@ -414,7 +435,7 @@ function startMockDshServer() {
     restart: () =>
       new Promise((resolve) => {
         // Re-listen on the SAME port: the running node daemon probes the
-        // original DSH_ORBIT_NODE_DSH_TARGET.
+        // configured DSH readiness target.
         const port = target ? new URL(target).port : 0;
         server.listen(Number(port), "127.0.0.1", () => {
           target = `http://127.0.0.1:${server.address().port}`;

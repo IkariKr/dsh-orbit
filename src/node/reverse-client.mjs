@@ -28,9 +28,9 @@ const RECONNECT_CAP_MS = 30_000;
 const DSH_LIVENESS_POLL_MS = 10_000;
 const DSH_PROBE_TIMEOUT_MS = 3000;
 
-// Generic local DSH transport readiness (RFC-0012 D8): the node does not
-// interpret DSH semantics — a transport that answers (any HTTP status,
-// including the BrowserAuth 401) is ready; refused/timed-out is not.
+// Generic local DSH transport readiness (RFC-0012 D8): any HTTP response,
+// including BrowserAuth 401 or an application 5xx, proves the configured
+// DSH endpoint is responsive; refusal and timeout do not.
 export function probeDshTransport(dshTarget, { timeoutMs = DSH_PROBE_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
     let url;
@@ -66,6 +66,7 @@ export class ReverseClient {
     hubBaseUrl,
     getCredentials,
     dshTarget = "http://127.0.0.1:3080",
+    readinessTarget = dshTarget,
     now = () => new Date(),
     onEvent = () => {},
     caCertificates = null,
@@ -78,6 +79,7 @@ export class ReverseClient {
     this.hubBaseUrl = hubBaseUrl?.replace(/\/$/, "");
     this.getCredentials = getCredentials;
     this.dshTarget = dshTarget;
+    this.readinessTarget = readinessTarget ?? dshTarget;
     this.now = now;
     this.onEvent = onEvent;
     this.caCertificates = caCertificates;
@@ -333,7 +335,7 @@ export class ReverseClient {
         return;
       }
       this.sessionId = typeof message.reverseSessionId === "string" ? message.reverseSessionId : null;
-      this.currentRouteReady = await probeDshTransport(this.dshTarget);
+      this.currentRouteReady = await probeDshTransport(this.readinessTarget);
       this.lastReportedRouteReady = this.currentRouteReady;
       this.sendJson({ type: "ready", protocol: REVERSE_PROTOCOL, routeReady: this.currentRouteReady });
       // A successful ready session resets the reconnect backoff (D4.3).
@@ -342,7 +344,7 @@ export class ReverseClient {
       this.channelPool?.setSession(this.sessionId, message.idleTarget, message.maxChannels);
       // D8: report status only when the local route readiness changes.
       this.routeReadyTimer = setInterval(async () => {
-        const ready = await probeDshTransport(this.dshTarget);
+        const ready = await probeDshTransport(this.readinessTarget);
         if (ready !== this.lastReportedRouteReady && this.socket) {
           this.lastReportedRouteReady = ready;
           this.currentRouteReady = ready;
