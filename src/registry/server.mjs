@@ -7,7 +7,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { sha256Hex } from "./crypto.mjs";
-import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS } from "./protocol.mjs";
+import { BODY_LIMIT_KIB, BODY_LIMIT_REPORT, RATE_LIMITS, computeRouteAuthority } from "./protocol.mjs";
 import { DeniedError } from "./registry.mjs";
 import { validateWebSocketConfig } from "./config.mjs";
 import {
@@ -25,6 +25,12 @@ import {
 import { buildSelectorReadModel, mapEligibilityReason, isHtmlAccept, renderUnavailableHtml } from "./selector-view.mjs";
 import { ReverseSessionManager } from "./reverse-session.mjs";
 import { ReverseChannelManager } from "./reverse-channel.mjs";
+import {
+  MultiNodeFlowTracker,
+  validateTargetScope,
+  assertValidTargetScope,
+  validateScopedAction,
+} from "./flow-tracker.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -232,6 +238,8 @@ export function createHubServer({ registry, options = {} }) {
     ["/styles.css", ["styles.css", "text/css; charset=utf-8"]],
   ]);
 
+  const flowTracker = options.flowTracker ?? new MultiNodeFlowTracker();
+
   const server = createServer((request, response) => {
     // Stage 3: Check if incoming request targets a deterministic node route authority
     // e.g. n-<32hex>.<routeDomain>
@@ -308,6 +316,17 @@ export function createHubServer({ registry, options = {} }) {
         }));
         return;
       }
+
+      const endFlow = flowTracker.trackFlow(hostClass.nodeId);
+      let flowEnded = false;
+      const onFlowDone = () => {
+        if (!flowEnded) {
+          flowEnded = true;
+          endFlow();
+        }
+      };
+      response.on("close", onFlowDone);
+      response.on("finish", onFlowDone);
 
       if (eligibility.snapshot.routeMode === "reverse") {
         void proxyReverseHttpRequest({
@@ -667,12 +686,23 @@ export function createHubServer({ registry, options = {} }) {
         });
         return sendJson(response, 200, readModel);
       }
-      if (path === "/hub/nodes" || path === "/hub/nodes/") {
-        return sendJson(response, 200, { nodes: managementNodeList() });
+      if (path === "/hub/nodes" || path === "/hub/nodes/" || path === "/hub/overview" || path === "/hub/overview/") {
+        return sendJson(response, 200, {
+          nodes: managementNodeList(),
+          activeSessions: {
+            totalFlows: flowTracker.getTotalActiveFlowCount(),
+            distinctNodes: flowTracker.getActiveNodeCount(),
+          },
+        });
       }
       const routeTargetGetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
       if (routeTargetGetMatch) {
-        const nodeId = decodeURIComponent(routeTargetGetMatch[1]);
+        const rawNodeId = decodeURIComponent(routeTargetGetMatch[1]);
+        const targetScope = validateTargetScope(rawNodeId);
+        if (!targetScope.valid) {
+          return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });
+        }
+        const nodeId = targetScope.nodeId;
         const node = registry.getNodeRow(nodeId);
         if (!node) {
           return sendJson(response, 404, { error: { code: "not-found", message: "no such node" } });
@@ -681,7 +711,17 @@ export function createHubServer({ registry, options = {} }) {
       }
       const nodeMatch = path.match(/^\/hub\/nodes\/([^/]+)\/?$/);
       if (nodeMatch) {
-        return sendJson(response, 200, managementNodeDetail(decodeURIComponent(nodeMatch[1])));
+        const rawNodeId = decodeURIComponent(nodeMatch[1]);
+        const targetScope = validateTargetScope(rawNodeId);
+        if (!targetScope.valid) {
+          return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });
+        }
+        const nodeId = targetScope.nodeId;
+        const node = registry.getNode(nodeId);
+        if (!node) {
+          return sendJson(response, 404, { error: { code: "not-found", message: "no such node" } });
+        }
+        return sendJson(response, 200, managementNodeDetail(nodeId));
       }
       if (path === "/hub/tokens" || path === "/hub/tokens/") {
         return sendJson(response, 200, { tokens: registry.listTokens() });
@@ -691,12 +731,58 @@ export function createHubServer({ registry, options = {} }) {
 
     requireCsrf(request, session);
 
+    if (
+      path === "/hub/actions/node" ||
+      path === "/hub/actions/node/" ||
+      path === "/hub/nodes/action" ||
+      path === "/hub/nodes/action/"
+    ) {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      const raw = parseBody(await readBody(request, BODY_LIMIT_KIB));
+      const actionResult = validateScopedAction(raw);
+      if (!actionResult.valid) {
+        return sendJson(response, 400, { error: { code: actionResult.code, message: actionResult.message } });
+      }
+      const targetNode = registry.getNodeRow(actionResult.nodeId);
+      if (!targetNode) {
+        return sendJson(response, 404, { error: { code: "not-found", message: "no such target node" } });
+      }
+
+      if (actionResult.action === "status") {
+        return sendJson(response, 200, { ok: true, node: managementNodeDetail(actionResult.nodeId) });
+      }
+      if (actionResult.action === "open") {
+        const routeAuthority = computeRouteAuthority(actionResult.nodeId, registry.routeDomain);
+        return sendJson(response, 200, {
+          ok: true,
+          targetNodeId: actionResult.nodeId,
+          routeAuthority,
+          url: `${trustedExternalScheme}://${routeAuthority}/`,
+        });
+      }
+      if (actionResult.action === "disconnect") {
+        reverseSessions.closeSessionsForNode(actionResult.nodeId, "operator-disconnect");
+        reverseChannels.closeChannelsForNode(actionResult.nodeId, "operator-disconnect");
+        return sendJson(response, 200, { ok: true, targetNodeId: actionResult.nodeId, action: "disconnect" });
+      }
+      if (actionResult.action === "refresh") {
+        return sendJson(response, 200, { ok: true, targetNodeId: actionResult.nodeId, node: managementNodeDetail(actionResult.nodeId) });
+      }
+    }
+
     const routeModeMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-mode\/?$/);
     if (routeModeMatch) {
       if (request.method !== "PUT") {
         return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected PUT" } });
       }
-      const nodeId = decodeURIComponent(routeModeMatch[1]);
+      const rawNodeId = decodeURIComponent(routeModeMatch[1]);
+      const targetScope = validateTargetScope(rawNodeId);
+      if (!targetScope.valid) {
+        return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });
+      }
+      const nodeId = targetScope.nodeId;
       const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
       if (body === null || typeof body !== "object" || Array.isArray(body)) {
         return sendJson(response, 400, { error: { code: "bad-request", message: "route mode body must be an object" } });
@@ -711,7 +797,12 @@ export function createHubServer({ registry, options = {} }) {
 
     const routeTargetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
     if (routeTargetMatch) {
-      const nodeId = decodeURIComponent(routeTargetMatch[1]);
+      const rawNodeId = decodeURIComponent(routeTargetMatch[1]);
+      const targetScope = validateTargetScope(rawNodeId);
+      if (!targetScope.valid) {
+        return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });
+      }
+      const nodeId = targetScope.nodeId;
       if (request.method === "PUT") {
         const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
         const target = body.routeTarget ?? body.routeTargetOrigin ?? body.origin;
@@ -756,7 +847,12 @@ export function createHubServer({ registry, options = {} }) {
       if (request.method !== "POST") {
         return sendJson(response, 405, { error: { code: "method-not-allowed", message: "delete/reenroll accept POST only" } });
       }
-      const nodeId = decodeURIComponent(nodeMatch[1]);
+      const rawNodeId = decodeURIComponent(nodeMatch[1]);
+      const targetScope = validateTargetScope(rawNodeId);
+      if (!targetScope.valid) {
+        return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });
+      }
+      const nodeId = targetScope.nodeId;
       if (nodeMatch[2] === "delete") {
         const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
         // Destructive deletes carry a client requestId for confirmation
@@ -834,6 +930,7 @@ export function createHubServer({ registry, options = {} }) {
       reversePresence,
       reverseRouteReady,
       reverseReason,
+      activeFlows: flowTracker.getActiveFlowCount(summary.nodeId),
       lastReverseTransition: reverseTransitions.get(summary.nodeId) ?? null,
     };
   }
@@ -1015,6 +1112,9 @@ export function createHubServer({ registry, options = {} }) {
         return;
       }
 
+      const endWsFlow = flowTracker.trackFlow(hostClass.nodeId);
+      socket.on("close", endWsFlow);
+
       if (eligibility.snapshot.routeMode === "reverse") {
         void proxyReverseWebSocketUpgrade({
           req: request,
@@ -1073,7 +1173,9 @@ export function createHubServer({ registry, options = {} }) {
   server.on("close", () => {
     wsTracker.destroyAll();
     reverseSessions.closeAll("hub-shutdown");
+    flowTracker.clear();
   });
 
-  return { server, wsTracker, reverseSessions, reverseChannels };
+  server.flowTracker = flowTracker;
+  return { server, wsTracker, reverseSessions, reverseChannels, flowTracker };
 }
