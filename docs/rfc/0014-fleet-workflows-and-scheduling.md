@@ -54,9 +54,9 @@ Core safety principles:
 4. **D4: Aggregated Results Collection & Complete Per-Node Accounting**
    Results from all targeted nodes are aggregated into a single structured response. Every node in the resolved target set has an explicit record (`completed`, `failed`, `timeout`, `unreachable`, or `skipped`). No target node is silently dropped.
 5. **D5: Durable Audit Trail & Operator Accountability**
-   Fleet jobs, target resolutions, execution parameters, and result summaries are recorded in the Hub's SQLite audit log with the initiating operator principal and timestamp.
+   Fleet jobs, target resolutions, execution parameters, and result summaries are recorded in the Hub's SQLite `audit` table with the initiating operator principal and timestamp.
 6. **D6: Acceptance Matrix for v0.7 (M28 Matrix - 28 Canonical Fields)**
-   A dedicated 28-field acceptance matrix is mechanically enforced across automated qualification (9 fields) and live mounted drill runs (19 fields).
+   A dedicated 28-field acceptance matrix is mechanically enforced across automated qualification (13 fields) and live mounted drill runs (15 fields).
 
 ---
 
@@ -104,10 +104,25 @@ interface FleetJob {
     failed: number;
     skipped: number;
     timeout: number;
+    unreachable: number;
   };
   results: Record<string, NodeTaskResult>; // nodeId -> result
 }
 ```
+
+#### Status Lifecycle & Reconciliation Invariant
+The per-node task status vocabulary maps deterministically:
+- `pending`: Task created and queued; dispatch pending.
+- `running`: Dispatched and currently executing on target node.
+- `completed`: Successfully executed on node (process exit code 0).
+- `failed`: Node execution resulted in non-zero exit code, process crash, or node daemon execution failure.
+- `timeout`: Node execution or network roundtrip exceeded `timeoutMs` (default 30s).
+- `unreachable`: Node is offline, disconnected (e.g. reverse connection disconnected), or connection refused at dispatch time.
+- `skipped`: Node was excluded prior to dispatch due to missing required capabilities or stale capability evidence (`capabilities_stale == 1`).
+
+When a fleet job reaches a terminal status (`completed`, `failed`, or `partial`):
+- `summary.totalTargets === summary.completed + summary.failed + summary.skipped + summary.timeout + summary.unreachable`
+- `Object.keys(results).length === summary.totalTargets`
 
 ### D2: Target Scope Validation & Resolution
 
@@ -115,13 +130,20 @@ The Hub management API endpoint `POST /hub/fleet/jobs` validates target specific
 
 ```typescript
 export function validateFleetTargetSpec(targetSpec, registry) {
-  if (!targetSpec || typeof targetSpec !== "object") {
-    return { valid: false, code: "invalid-target-spec", message: "targetSpec is required and must be an object" };
+  // Bare wildcards or wildcard modes are strictly prohibited
+  if (
+    targetSpec === "*" ||
+    (typeof targetSpec === "object" && targetSpec !== null && (
+      targetSpec.mode === "all" ||
+      targetSpec.mode === "broadcast" ||
+      targetSpec.nodeIds === "*"
+    ))
+  ) {
+    return { valid: false, code: "wildcard-prohibited", message: "bare wildcard target specification is prohibited" };
   }
 
-  // Bare wildcards are denied
-  if (targetSpec === "*" || targetSpec.mode === "all" || targetSpec.mode === "broadcast" || targetSpec.nodeIds === "*") {
-    return { valid: false, code: "wildcard-prohibited", message: "bare wildcard target specification is prohibited" };
+  if (!targetSpec || typeof targetSpec !== "object") {
+    return { valid: false, code: "invalid-target-spec", message: "targetSpec is required and must be an object" };
   }
 
   if (targetSpec.mode === "explicit") {
@@ -154,10 +176,10 @@ export function validateFleetTargetSpec(targetSpec, registry) {
     const nodes = registry.listNodes().filter((n) => n.state === "active");
     const matched = [];
     for (const n of nodes) {
-      const storedCaps = JSON.parse(n.capabilities || "[]");
-      const hasCap = storedCaps.some((c) => c.name === targetSpec.capability);
-      if (hasCap && n.capabilities_stale === 0) {
-        matched.push(n.node_id);
+      const activeCaps = n.health?.capabilities || [];
+      const hasCap = activeCaps.some((c) => (typeof c === "string" ? c === targetSpec.capability : c.name === targetSpec.capability));
+      if (hasCap && !n.health?.capabilitiesStale) {
+        matched.push(n.nodeId);
       }
     }
     if (matched.length === 0) {
@@ -170,35 +192,90 @@ export function validateFleetTargetSpec(targetSpec, registry) {
 }
 ```
 
-### D3: Capability-Aware Scheduling
+### D3: Capability-Aware Scheduling & Transport Architecture
 
-The `FleetJobScheduler` orchestrates task execution:
-1. **Node Eligibility Check**:
-   - `nodeRow.state === "active"`;
-   - Reachability: `routeMode === "direct" && reachable === "ok"`, or `routeMode === "reverse" && reverseRouteReady === true`;
-   - Capabilities check: node must have all `requiredCapabilities` attested with `capabilities_stale === 0`.
-2. **Dispatch & Concurrency**:
-   - Tasks are dispatched concurrently up to `maxConcurrentDispatches` (default: 8);
-   - Direct nodes are dispatched via HTTP POST to the node's internal task runner or RouteIngress;
-   - Reverse nodes are dispatched over dedicated reverse channels using a structured task frame (`mode: "task"`);
-3. **Timeout & Failure Containment**:
-   - Each node task has an individual timeout (default: 30 seconds);
-   - If Node A times out, Node A is marked `status: "timeout"` and its channel is aborted;
-   - Concurrent tasks on Node B continue without interruption or shared timeout coupling.
+The `FleetJobScheduler` orchestrates task execution across heterogeneous node transports (direct and reverse).
+
+#### D3.1 Node Eligibility & Capability Checks
+1. **Node State**: `nodeRow.state === "active"`;
+2. **Reachability**:
+   - Direct nodes: `routeMode === "direct" && reachable === "ok"` with active route ingress;
+   - Reverse nodes: `routeMode === "reverse" && reverseRouteReady === true` with active reverse control session;
+3. **Capability Attestation**: Node must possess all `requiredCapabilities` with fresh evidence (`capabilities_stale === 0`). Nodes with stale evidence are excluded (`status: "skipped"`).
+
+#### D3.2 Direct Node Dispatch Transport
+For nodes operating in direct routing mode (`routeMode === "direct"`):
+1. **Dedicated Ingress Endpoint**: Direct nodes expose `POST /_orbit/task` on `RouteIngress`.
+2. **Machine Authentication**: Requests are authenticated using the `ORBIT-ROUTE-V1` signature scheme (RFC-0010 D5). The Hub signs `method: "POST"`, `rawTarget: "/_orbit/task"`, and `routeAuthority: computeRouteAuthority(nodeId, routeDomain)` using its route private key, transmitting standard route headers (`x-orbit-route-key-id`, `x-orbit-route-timestamp`, `x-orbit-route-nonce`, `x-orbit-route-signature`).
+3. **Ingress Enforcement & Isolation**: `RouteIngress` intercepts `POST /_orbit/task` before any proxying logic. It validates the signature against Hub trust keys and the process-level `RouteNonceCache`. Replayed, stale, or unauthorized requests fail closed (HTTP 401/403/400).
+4. **Execution & Non-Forwarding**: Validated task requests are dispatched directly to the node daemon's local task runner process. `RouteIngress` **never** forwards `POST /_orbit/task` to downstream DSH.
+5. **Payload & Response**: Request body is JSON `{ jobId, taskType, payload, timeoutMs }` bounded to 1 MiB (payloads exceeding limit fail with HTTP 413 `payload-too-large`). The node returns HTTP 200 with `{ status, exitCode, stdout, stderr, durationMs }` or an HTTP 500 error object.
+
+#### D3.3 Reverse Node Dispatch Transport (Formal Extension to RFC-0012)
+RFC-0014 formally extends the reverse connection architecture defined in RFC-0012:
+1. **Scope Amendment**: Resolves the v0.5 deferral in RFC-0012 §11 ("Fleet commands/tasks and multi-node batch operations: defer to v0.7").
+2. **Control Channel Invariant Preserved**: The reverse control channel (`/api/v1/reverse-channel`) vocabulary remains strictly closed (`ready`, `status`, `ping`, `pong`, `close`). Fleet tasks are **never** transmitted on the control channel.
+3. **Reverse Data Channel Extension (`mode: "task"`)**:
+   - The Hub acquires an idle data channel from the reverse channel pool for the target node. If no channel is currently idle, the Hub waits up to `capacityWaitMs` (2000 ms). If pool capacity remains exhausted, dispatch fails closed with `status: "unreachable"` and error code `reverse-capacity-exhausted`.
+   - The Hub transmits an OPEN frame with `mode: "task"`:
+     ```json
+     {
+       "type": "open",
+       "requestId": "task_req_<32hex>",
+       "mode": "task",
+       "method": "POST",
+       "rawTarget": "/_orbit/task",
+       "routeAuthority": "<nodeId>.orbit.internal",
+       "routeProof": {
+         "keyId": "...",
+         "timestamp": 1234567890,
+         "nonce": "...",
+         "signature": "..."
+       },
+       "task": {
+         "jobId": "job_<32hex>",
+         "taskType": "command",
+         "payload": { ... },
+         "timeoutMs": 30000
+       }
+     }
+     ```
+   - **Verification**: The reverse node client verifies `open.routeProof` with `ORBIT-ROUTE-V1` against the Hub trust keys using the node's `RouteNonceCache` (shared across direct and reverse transports). Invalid or replayed proofs abort immediately (`code: "auth-failed"`).
+   - **Local Execution**: Validated tasks are dispatched locally to the node task runner. The node **never** forwards `mode: "task"` frames to upstream DSH.
+   - **Result Framing**: Upon execution completion, the node returns a `task-result` frame over the data channel:
+     ```json
+     {
+       "type": "task-result",
+       "requestId": "task_req_<32hex>",
+       "status": "completed",
+       "exitCode": 0,
+       "stdout": "...",
+       "stderr": "...",
+       "durationMs": 142
+     }
+     ```
+   - Followed by `{ "type": "close", "requestId": "..." }`, releasing the data channel back to the pool.
+
+#### D3.4 Concurrency, Timeouts & Failure Containment
+1. **Concurrency Bounds**: The scheduler dispatches tasks concurrently up to `maxConcurrentDispatches` (default: 8 across the fleet).
+2. **Per-Node Timeouts**: Each node task is governed by an individual timeout (default: 30 seconds). If Node A exceeds the timeout, the Hub marks Node A `status: "timeout"` and aborts its channel (`type: "abort", code: "task-timeout"`).
+3. **Zero Cross-Node Impact**: Timeout, failure, crash, or disconnection on Node A has zero effect on concurrent task execution on Node B.
 
 ### D4: Aggregated Results Collection
 
-The Hub maintains live progress:
+The Hub maintains live progress and complete accounting:
 - `GET /hub/fleet/jobs`: Lists recent jobs with summary statistics;
 - `GET /hub/fleet/jobs/:jobId`: Returns full details including per-node outputs, exit codes, and timestamps;
 - Completeness guarantee: `Object.keys(results).length === summary.totalTargets`.
+- Reconciliation invariant: `summary.totalTargets === summary.completed + summary.failed + summary.skipped + summary.timeout + summary.unreachable`.
 
 ### D5: Auditability & Security Logging
 
-Every fleet job execution writes to SQLite `audit_log`:
-- `action`: `"fleet.job.create"`, `"fleet.job.complete"`, `"fleet.job.abort"`;
-- `actor`: `operatorPrincipal`;
-- `metadata`: includes `jobId`, `taskType`, `targetSpec`, `resolvedNodeCount`, and summary metrics;
+Every fleet job execution writes directly to the Hub's authoritative SQLite `audit` table (`src/registry/sqlite.mjs`):
+- Schema: `id, at, actor, action, detail_json` (written via `registry.recordAudit(actor, action, detail)`);
+- Actions: `"fleet.job.create"`, `"fleet.job.complete"`, `"fleet.job.abort"`;
+- Actor: `operatorPrincipal`;
+- Detail JSON: includes `jobId`, `taskType`, `targetSpec`, `resolvedNodeCount`, and summary metrics;
 - Zero credential leakage: task payloads and output logs scrub tokens, private keys, and session cookies.
 
 ---
