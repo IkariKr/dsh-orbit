@@ -128,10 +128,12 @@ export function mapOverview(payload) {
   return {
     kind: "overview",
     nodes,
-    activeSessions: {
-      totalFlows: typeof activeSessions?.totalFlows === "number" ? activeSessions.totalFlows : 0,
-      distinctNodes: typeof activeSessions?.distinctNodes === "number" ? activeSessions.distinctNodes : 0,
-    },
+    activeSessions: activeSessions && typeof activeSessions === "object"
+      ? {
+          totalFlows: typeof activeSessions.totalFlows === "number" ? activeSessions.totalFlows : 0,
+          distinctNodes: typeof activeSessions.distinctNodes === "number" ? activeSessions.distinctNodes : 0,
+        }
+      : null,
   };
 }
 

@@ -79,18 +79,17 @@ interface ScopedNodeAction {
 
 - Any request missing `targetNodeId`, or specifying `"all"`, `""`, or multiple IDs is rejected with `HTTP 400 Bad Request` (`code: "invalid-target-scope"`).
 - Terminal plugins, settings mutations, or diagnostic commands run strictly within the context of the selected node.
-- The UI must visually indicate the active target node with its display name and truncated ID.
+- The UI must visually indicate the active target node with its truncated ID (e.g. `target: node_012345678…`), formatting `target: <displayName> (<truncatedId>)` if an extended read model provides an optional `displayName`.
 
 ### D3: Devices and Nodes read model & UI
 
-The Hub management API extends the existing read model (`GET /hub/nodes`) with per-node `activeFlows` and introduces an authenticated overview endpoint (`GET /hub/overview`) with real-time session observability:
+The Hub management API extends the existing read model (`GET /hub/nodes`) with per-node `activeFlows` and introduces an authenticated overview endpoint (`GET /hub/overview`) with real-time session observability (human-assigned `displayName` alias management is deferred to v0.7 fleet inventory; in v0.6 canonical node IDs are used):
 
 ```json
 {
   "nodes": [
     {
       "nodeId": "node_06827d59b9d6511f05883387f431fbba",
-      "displayName": "workstation-node",
       "routeMode": "direct",
       "reachable": "ok",
       "activeFlows": 2,
@@ -98,7 +97,6 @@ The Hub management API extends the existing read model (`GET /hub/nodes`) with p
     },
     {
       "nodeId": "node_62e2f94672739bc519887316c7bc3455",
-      "displayName": "nas-node",
       "routeMode": "reverse",
       "reachable": "ok",
       "reversePresence": "online",

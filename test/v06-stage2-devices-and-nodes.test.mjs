@@ -138,7 +138,7 @@ test("app-level: renderNodes displays Devices & Nodes summary, target scope tag,
     if (url === "/hub/session") {
       return { ok: true, status: 200, json: async () => ({ principal: "admin@test", csrfToken: "csrf123" }) };
     }
-    if (url === "/hub/nodes") {
+    if (url === "/hub/overview") {
       return {
         ok: true,
         status: 200,
@@ -203,7 +203,7 @@ test("app-level: scoped open and refresh actions dispatch to /hub/actions/node a
     if (url === "/hub/session") {
       return { ok: true, status: 200, json: async () => ({ principal: "admin@test", csrfToken: "csrf123" }) };
     }
-    if (url === "/hub/nodes") {
+    if (url === "/hub/overview" || url === "/hub/nodes") {
       return {
         ok: true,
         status: 200,
@@ -305,7 +305,7 @@ test("app-level: scoped actions handle action error and display error banner", a
     if (url === "/hub/session") {
       return { ok: true, status: 200, json: async () => ({ principal: "admin@test", csrfToken: "csrf123" }) };
     }
-    if (url === "/hub/nodes") {
+    if (url === "/hub/overview" || url === "/hub/nodes") {
       return {
         ok: true,
         status: 200,
@@ -355,7 +355,7 @@ test("app-level: scoped actions recover from session expiration and retry action
       const csrfToken = sessionCalls === 1 ? "csrf-initial" : "csrf-renewed";
       return { ok: true, status: 200, json: async () => ({ principal: "admin@test", csrfToken }) };
     }
-    if (url === "/hub/nodes") {
+    if (url === "/hub/overview" || url === "/hub/nodes") {
       return {
         ok: true,
         status: 200,
@@ -405,6 +405,41 @@ test("app-level: scoped actions recover from session expiration and retry action
   assert.equal(actionCalls, 2);
   assert.equal(tokensUsed[0], "csrf-initial");
   assert.equal(tokensUsed[1], "csrf-renewed");
+});
+
+test("app-level: loadNodes falls back to /hub/nodes if /hub/overview is not available", async () => {
+  const doc = createFakeDocument();
+  const requestedUrls = [];
+
+  let fakeFetch = async (url) => {
+    requestedUrls.push(url);
+    if (url === "/hub/session") {
+      return { ok: true, status: 200, json: async () => ({ principal: "admin@test", csrfToken: "csrf123" }) };
+    }
+    if (url === "/hub/overview") {
+      return { ok: false, status: 404, json: async () => ({ error: { code: "not-found" } }) };
+    }
+    if (url === "/hub/nodes") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          nodes: [{ nodeId: NODE_A, state: "active", routeMode: "direct", activeFlows: 1 }],
+          activeSessions: { totalFlows: 1, distinctNodes: 1 },
+        }),
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+
+  const ui = createRegistryUi({ document: doc, fetchImpl: fakeFetch });
+  await ui.start();
+
+  assert.ok(requestedUrls.includes("/hub/overview"));
+  assert.ok(requestedUrls.includes("/hub/nodes"));
+  const nodesListHtml = doc.getElementById("nodes-list").innerHTML;
+  assert.match(nodesListHtml, /1 enrolled/);
+  assert.match(nodesListHtml, /Active Sessions:.*1 flows across 1 active nodes/);
 });
 
 test("Hub Server integration: real-time multi-node read model and /hub/overview live query", async () => {

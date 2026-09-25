@@ -268,14 +268,19 @@ export function createRegistryUi({ document, fetchImpl }) {
   async function loadNodes() {
     showBanner(LOADING_STATE);
     try {
-      const [nodesBody, overviewBody] = await Promise.all([
-        api("/hub/nodes"),
-        api("/hub/overview").catch(() => null),
-      ]);
-      const overview = overviewBody ? mapOverview(overviewBody) : null;
-      const activeSessions = overview?.activeSessions ?? nodesBody.activeSessions ?? null;
-      renderNodes(mapNodeList(nodesBody.nodes, activeSessions));
-      showBanner(nodesBody.nodes.length === 0 ? EMPTY_NODES_STATE : {});
+      let body;
+      try {
+        body = await api("/hub/overview");
+      } catch {
+        body = await api("/hub/nodes");
+      }
+      const overview = mapOverview(body);
+      const activeSessions = overview.activeSessions ?? (body?.activeSessions ? {
+        totalFlows: typeof body.activeSessions.totalFlows === "number" ? body.activeSessions.totalFlows : 0,
+        distinctNodes: typeof body.activeSessions.distinctNodes === "number" ? body.activeSessions.distinctNodes : 0,
+      } : null);
+      renderNodes(mapNodeList(body?.nodes, activeSessions));
+      showBanner(overview.nodes.length === 0 ? EMPTY_NODES_STATE : {});
     } catch (error) {
       if (error.sessionRequired) {
         if (await refreshSession()) return loadNodes();
