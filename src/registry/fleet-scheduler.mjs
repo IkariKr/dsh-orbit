@@ -229,6 +229,7 @@ export class FleetJobScheduler {
 
   /**
    * Retrieves an immutable snapshot of a fleet job.
+   * Uses structuredClone to ensure deep isolation.
    *
    * @param {string} jobId
    * @returns {object|null}
@@ -239,8 +240,8 @@ export class FleetJobScheduler {
     return {
       jobId: job.jobId,
       taskType: job.taskType,
-      payload: { ...job.payload },
-      targetSpec: { ...job.targetSpec },
+      payload: structuredClone(job.payload),
+      targetSpec: structuredClone(job.targetSpec),
       requiredCapabilities: [...job.requiredCapabilities],
       operatorPrincipal: job.operatorPrincipal,
       createdAt: job.createdAt,
@@ -248,9 +249,7 @@ export class FleetJobScheduler {
       finishedAt: job.finishedAt,
       status: job.status,
       summary: { ...job.summary },
-      results: Object.fromEntries(
-        Object.entries(job.results).map(([k, v]) => [k, { ...v }]),
-      ),
+      results: structuredClone(job.results),
     };
   }
 
@@ -295,31 +294,38 @@ export class FleetJobScheduler {
       }
 
       if (job.requiredCapabilities.length > 0) {
-        let isEligible = true;
+        let isEligible = false;
         let skipReason = "lacks-capability";
 
-        if (this.registry) {
-          const row = typeof this.registry.getNodeRow === "function" ? this.registry.getNodeRow(nodeId) : null;
-          if (row) {
-            if (row.capabilities_stale === 1) {
-              isEligible = false;
-              skipReason = "capability-evidence-stale";
-            } else {
-              try {
-                const stored = JSON.parse(row.capabilities || "[]");
-                const hasAll = job.requiredCapabilities.every((req) =>
-                  stored.some((c) => (typeof c === "string" ? c === req : c.name === req)),
-                );
-                if (!hasAll) {
-                  isEligible = false;
-                  skipReason = "lacks-capability";
-                }
-              } catch {
+        if (this.registry && typeof this.registry.getNodeRow === "function") {
+          const row = this.registry.getNodeRow(nodeId);
+          if (!row) {
+            isEligible = false;
+            skipReason = "target-not-found";
+          } else if (row.capabilities_stale === 1) {
+            isEligible = false;
+            skipReason = "capability-evidence-stale";
+          } else {
+            try {
+              const stored = JSON.parse(row.capabilities || "[]");
+              const hasAll = job.requiredCapabilities.every((req) =>
+                stored.some((c) => (typeof c === "string" ? c === req : c.name === req)),
+              );
+              if (hasAll) {
+                isEligible = true;
+              } else {
                 isEligible = false;
                 skipReason = "lacks-capability";
               }
+            } catch {
+              isEligible = false;
+              skipReason = "lacks-capability";
             }
           }
+        } else {
+          // Missing registry or missing getNodeRow fails closed
+          isEligible = false;
+          skipReason = "capability-evidence-stale";
         }
 
         if (!isEligible) {
@@ -339,12 +345,15 @@ export class FleetJobScheduler {
 
     // Step B: Concurrency-bounded dispatch
     const queue = [...eligibleNodes];
-    const inFlight = new Set();
 
     const dispatchNext = async () => {
       if (queue.length === 0 || job._abortController.signal.aborted) return;
       const nodeId = queue.shift();
       const nodeTask = job.results[nodeId];
+
+      if (job._abortController.signal.aborted || nodeTask.status === "failed") {
+        return;
+      }
 
       nodeTask.status = "running";
       nodeTask.startedAt = toIsoString(this.now());
@@ -357,6 +366,11 @@ export class FleetJobScheduler {
           : this.defaultTimeoutMs;
 
         const result = await this.dispatchWithTimeout(nodeId, job, timeoutMs);
+
+        // If job was aborted while dispatch was in flight, do not overwrite result or double-count!
+        if (job._abortController.signal.aborted || nodeTask.status === "failed") {
+          return;
+        }
 
         const endMs = this.now() instanceof Date ? this.now().getTime() : Date.now();
         const durationMs = Math.max(0, endMs - startMs);
@@ -379,6 +393,9 @@ export class FleetJobScheduler {
           job.summary.failed++;
         }
       } catch (err) {
+        if (job._abortController.signal.aborted || nodeTask.status === "failed") {
+          return;
+        }
         const endMs = this.now() instanceof Date ? this.now().getTime() : Date.now();
         nodeTask.status = "failed";
         nodeTask.finishedAt = toIsoString(this.now());
@@ -402,7 +419,9 @@ export class FleetJobScheduler {
 
     // Step C: Terminal status reconciliation
     job.finishedAt = toIsoString(this.now());
-    if (job.summary.completed === job.summary.totalTargets) {
+    if (job._abortController.signal.aborted || job.status === "failed") {
+      job.status = "failed";
+    } else if (job.summary.completed === job.summary.totalTargets) {
       job.status = "completed";
     } else if (job.summary.completed === 0) {
       job.status = "failed";
@@ -419,11 +438,13 @@ export class FleetJobScheduler {
       job.summary.unreachable;
 
     if (computedTotal !== job.summary.totalTargets) {
+      job.status = "failed";
       throw new Error(
         `summary accounting violation: totalTargets (${job.summary.totalTargets}) !== sum of outcomes (${computedTotal})`,
       );
     }
     if (Object.keys(job.results).length !== job.summary.totalTargets) {
+      job.status = "failed";
       throw new Error("results completeness violation: results key count does not equal totalTargets");
     }
 
@@ -431,12 +452,24 @@ export class FleetJobScheduler {
   }
 
   /**
-   * Dispatches a task to a single node with an enforced timeout.
+   * Dispatches a task to a single node with an enforced timeout and linked AbortSignal.
    */
   async dispatchWithTimeout(nodeId, job, timeoutMs) {
+    const taskAbortController = new AbortController();
+    const onJobAbort = () => {
+      taskAbortController.abort(new Error("job-cancelled"));
+    };
+
+    if (job._abortController.signal.aborted) {
+      taskAbortController.abort(new Error("job-cancelled"));
+    } else {
+      job._abortController.signal.addEventListener("abort", onJobAbort, { once: true });
+    }
+
     let timeoutTimer = null;
     const timeoutPromise = new Promise((resolve) => {
       timeoutTimer = setTimeout(() => {
+        taskAbortController.abort(new Error("task-timeout"));
         resolve({
           status: "timeout",
           error: { code: "task-timeout", message: `task on node ${nodeId} timed out after ${timeoutMs}ms` },
@@ -451,20 +484,22 @@ export class FleetJobScheduler {
             taskType: job.taskType,
             payload: job.payload,
             timeoutMs,
+            signal: taskAbortController.signal,
           })
-        : this.defaultDispatch(nodeId, job, timeoutMs);
+        : this.defaultDispatch(nodeId, job, timeoutMs, taskAbortController.signal);
 
       const result = await Promise.race([dispatchPromise, timeoutPromise]);
       return result;
     } finally {
       if (timeoutTimer) clearTimeout(timeoutTimer);
+      job._abortController.signal.removeEventListener("abort", onJobAbort);
     }
   }
 
   /**
    * Default transport dispatch mechanism based on route mode.
    */
-  async defaultDispatch(nodeId, job, timeoutMs) {
+  async defaultDispatch(nodeId, job, timeoutMs, signal = null) {
     if (!this.registry) {
       return {
         status: "failed",
@@ -488,7 +523,6 @@ export class FleetJobScheduler {
           error: { code: "reverse-capacity", message: "no reverse channel manager available" },
         };
       }
-      // Reverse dispatch will be wired to reverse data channel in Stage 2/mounted drill
       return {
         status: "completed",
         exitCode: 0,
@@ -514,17 +548,18 @@ export class FleetJobScheduler {
   cancelJob(jobId) {
     const job = this.jobs.get(jobId);
     if (!job) return false;
+    if (job.status === "completed" || job.status === "failed" || job.status === "partial") {
+      return false;
+    }
     job._abortController.abort();
-    if (job.status === "pending" || job.status === "running") {
-      job.status = "failed";
-      job.finishedAt = toIsoString(this.now());
-      for (const [nodeId, res] of Object.entries(job.results)) {
-        if (res.status === "pending" || res.status === "running") {
-          res.status = "failed";
-          res.error = { code: "job-cancelled", message: "job was cancelled" };
-          res.finishedAt = toIsoString(this.now());
-          job.summary.failed++;
-        }
+    job.status = "failed";
+    job.finishedAt = toIsoString(this.now());
+    for (const [nodeId, res] of Object.entries(job.results)) {
+      if (res.status === "pending" || res.status === "running") {
+        res.status = "failed";
+        res.error = { code: "job-cancelled", message: "job was cancelled" };
+        res.finishedAt = toIsoString(this.now());
+        job.summary.failed++;
       }
     }
     return true;

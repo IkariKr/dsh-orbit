@@ -379,17 +379,22 @@ test("FleetJobScheduler failure independence when Node A errors (field 17)", asy
   assert.equal(result.results[NODE_B].stdout, "B completed");
 });
 
-test("FleetJobScheduler cancellation aborts in-flight tasks cleanly (field 26)", async () => {
+test("FleetJobScheduler cancellation aborts in-flight tasks cleanly and preserves accounting invariant (field 26)", async () => {
   const mockRegistry = createMockRegistry({
     nodeRows: {
       [NODE_A]: { node_id: NODE_A, state: "active" },
     },
   });
 
+  let transportSignalAborted = false;
+
   const scheduler = new FleetJobScheduler({
     registry: mockRegistry,
-    dispatchTransport: async () => {
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    dispatchTransport: async (nodeId, task) => {
+      task.signal.addEventListener("abort", () => {
+        transportSignalAborted = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
       return { status: "completed", exitCode: 0 };
     },
   });
@@ -399,11 +404,98 @@ test("FleetJobScheduler cancellation aborts in-flight tasks cleanly (field 26)",
     targetSpec: { mode: "explicit", nodeIds: [NODE_A] },
   });
 
-  // Cancel immediately
+  // Cancel immediately while dispatch is in flight
   scheduler.cancelJob(job.jobId);
 
-  const snapshot = scheduler.getJob(job.jobId);
-  assert.equal(snapshot.status, "failed");
-  assert.equal(snapshot.results[NODE_A].status, "failed");
-  assert.equal(snapshot.results[NODE_A].error.code, "job-cancelled");
+  // Snapshot immediately after cancellation
+  const immediateSnapshot = scheduler.getJob(job.jobId);
+  assert.equal(immediateSnapshot.status, "failed");
+  assert.equal(immediateSnapshot.results[NODE_A].status, "failed");
+  assert.equal(immediateSnapshot.results[NODE_A].error.code, "job-cancelled");
+
+  // Await the underlying execution promise to ensure post-settlement does not resurrect completed state
+  await scheduler.jobs.get(job.jobId)._executionPromise;
+
+  const settledSnapshot = scheduler.getJob(job.jobId);
+  assert.equal(settledSnapshot.status, "failed");
+  assert.equal(settledSnapshot.summary.totalTargets, 1);
+  assert.equal(settledSnapshot.summary.failed, 1);
+  assert.equal(settledSnapshot.summary.completed, 0);
+
+  // Node remains failed and does not resurrect
+  assert.equal(settledSnapshot.results[NODE_A].status, "failed");
+  assert.equal(settledSnapshot.results[NODE_A].error.code, "job-cancelled");
+
+  // Transport signal received the abort
+  assert.equal(transportSignalAborted, true);
+
+  // Accounting invariant holds
+  const computedTotal =
+    settledSnapshot.summary.completed +
+    settledSnapshot.summary.failed +
+    settledSnapshot.summary.skipped +
+    settledSnapshot.summary.timeout +
+    settledSnapshot.summary.unreachable;
+  assert.equal(computedTotal, settledSnapshot.summary.totalTargets);
+});
+
+test("FleetJobScheduler snapshots are deep clones and mutate-isolated (field 1)", () => {
+  const mockRegistry = createMockRegistry({
+    nodeRows: {
+      [NODE_A]: { node_id: NODE_A, state: "active" },
+    },
+  });
+
+  const scheduler = new FleetJobScheduler({ registry: mockRegistry });
+  const job = scheduler.submitJob({
+    taskType: "diagnostic",
+    payload: { nested: { count: 42 } },
+    targetSpec: { mode: "explicit", nodeIds: [NODE_A] },
+  });
+
+  const snap = scheduler.getJob(job.jobId);
+  // Mutate nested fields on the snapshot
+  snap.payload.nested.count = 999;
+  snap.targetSpec.nodeIds.length = 0;
+  snap.results[NODE_A].status = "mutated";
+
+  // Re-read from scheduler: internal state must be completely untouched
+  const fresh = scheduler.getJob(job.jobId);
+  assert.equal(fresh.payload.nested.count, 42);
+  assert.deepEqual(fresh.targetSpec.nodeIds, [NODE_A]);
+  assert.notEqual(fresh.results[NODE_A].status, "mutated");
+});
+
+test("FleetJobScheduler capability filtering fails closed when registry row is missing", async () => {
+  const mockRegistry = createMockRegistry({
+    nodes: [{ nodeId: NODE_A, state: "active", health: { capabilities: [{ name: "audit", version: 1 }], capabilitiesStale: false } }],
+    nodeRows: {
+      // NODE_A intentionally missing from nodeRows (e.g. deleted/unavailable after target validation)
+    },
+  });
+
+  let dispatched = false;
+  const scheduler = new FleetJobScheduler({
+    registry: mockRegistry,
+    dispatchTransport: async () => {
+      dispatched = true;
+      return { status: "completed", exitCode: 0 };
+    },
+  });
+
+  const job = scheduler.submitJob({
+    taskType: "package-audit",
+    targetSpec: { mode: "capability", capability: "audit" },
+    requiredCapabilities: ["audit"],
+  });
+
+  await scheduler.jobs.get(job.jobId)._executionPromise;
+
+  const res = scheduler.getJob(job.jobId);
+  // Node must NOT be dispatched (fails closed)
+  assert.equal(dispatched, false);
+  assert.equal(res.summary.skipped, 1);
+  assert.equal(res.summary.completed, 0);
+  assert.equal(res.results[NODE_A].status, "skipped");
+  assert.equal(res.results[NODE_A].reason, "target-not-found");
 });
