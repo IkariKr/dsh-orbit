@@ -55,7 +55,7 @@ Construction is authorized by `V05-CONSTRUCTION-20260919-A1`
 built on the accepted v0.4 closure `9891ab858a9c953a211978580910efcc2158bcd7`.
 The construction design package is [RFC-0012](rfc/0012-reverse-connected-nodes.md)
 and the [v0.5 multistage SOP](sop/v0.5-reverse-connected-nodes-multistage-sop.md).
-RFC-0012 must receive Stage 0 / Gate A Architecture Review GO before v0.5 product runtime construction begins.
+v0.5 engineering acceptance is CLOSED (Final Review PASS, 48/48 D14 reverse-acceptance matrix PASS, release closure `bfcc541d84f3fc5fb3bb14fa54100276e41816ba`, release tag `v0.5.0-rc.1`, see `docs/release-attestations/v0.5-stage8-final-review-2026-09-24.md`). Tag/release, production promotion, and DNS cutover each remain separately authorized.
 
 - outbound node-to-hub connection for devices behind NAT or restrictive networks (the only place reverse connection is designed);
 - pairing and device authorization (distinct from 0.3 enrollment: 0.3 enrolls server-reachable nodes, 0.5 pairs NAT-restricted devices);
@@ -69,10 +69,23 @@ Frozen scope for 0.5 construction:
 
 ## 0.6: multi-node sessions
 
+Construction is authorized by `V06-CONSTRUCTION-20260925-A1`
+(`docs/release-attestations/v0.6-construction-authorization-2026-09-25.md`),
+built on the accepted v0.5 closure `bfcc541d84f3fc5fb3bb14fa54100276e41816ba`.
+The construction design package is [RFC-0013](rfc/0013-multi-node-sessions-and-target-scope.md)
+and the [v0.6 multistage SOP](sop/v0.6-multi-node-sessions-multistage-sop.md).
+RFC-0013 must receive Stage 0 / Gate A Architecture Review GO before v0.6 product runtime construction begins.
+
 - concurrent connections to multiple selected nodes;
 - clear target scope in the UI;
 - per-node session isolation;
 - no implicit broadcast execution.
+
+Frozen scope for 0.6 construction:
+
+- **MUST**: an RFC-first design record for multi-node sessions and target scoping (RFC-0013) before product construction; concurrent connections to multiple selected nodes across direct and reverse transports; clear and unambiguous target scope in the UI; strict per-node session and cookie isolation; strict prohibition against implicit broadcast execution or silent failover; candidate-freeze compliance with fresh candidate-bound evidence; operator SOP and reference documentation.
+- **SHOULD**: first-class Devices and Nodes view in the authenticated operator surface per UX reference recommendations (`docs/ux/dsh-remote-mobile.md`); per-node session visibility and connection state tracking; graceful handling of concurrent node disconnects or reachability degradation.
+- **OUT OF SCOPE**: fleet workflows and scheduled multi-node command execution (roadmap 0.7); a new route authority system beyond RFC-0010; a new selector system beyond RFC-0011; a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy; unrelated UI refactor; unrelated runtime refactor; tag or release creation/mutation without separate authorization; production promotion; DNS cutover.
 
 ## 0.7: fleet workflows
 

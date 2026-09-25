@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "authorizationId": "V06-CONSTRUCTION-20260925-A1",
+  "status": "AUTHORIZED_FOR_V06_CONSTRUCTION",
+  "issuedDate": "2026-09-25",
+  "acceptedV05Closure": "bfcc541d84f3fc5fb3bb14fa54100276e41816ba",
+  "governancePredecessor": "docs/release-attestations/v0.5-stage8-final-review-2026-09-24.md",
+  "constructionLineage": {
+    "root": "the pushed commit containing this authorization record",
+    "mustDescendFromAcceptedV05Closure": true,
+    "mustDescendFromGovernancePredecessor": true,
+    "forbiddenBases": [
+      "historical Stage 8 branches and worktrees",
+      "superseded or unaccepted closure attempts",
+      "pre-final-review candidates",
+      "experimental worktrees"
+    ]
+  },
+  "objective": "v0.6 multi-node sessions per docs/roadmap.md section 0.6: concurrent connections to multiple selected nodes, clear target scope in the UI, per-node session isolation, no implicit broadcast execution",
+  "scopeFreeze": {
+    "must": [
+      "RFC-first design record for multi-node sessions and target scoping (RFC-0013) before product construction",
+      "concurrent connections to multiple selected nodes across direct and reverse transports",
+      "clear and unambiguous target scope in the UI",
+      "strict per-node session and cookie isolation",
+      "strict prohibition against implicit broadcast execution or silent failover",
+      "candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.6 release candidate",
+      "operator documentation (SOP) and architecture reference updates for multi-node sessions"
+    ],
+    "should": [
+      "first-class Devices and Nodes view in the authenticated operator surface per UX reference recommendations",
+      "per-node session visibility and connection state tracking",
+      "graceful handling of concurrent node disconnects or reachability degradation"
+    ],
+    "outOfScope": [
+      "fleet workflows and scheduled multi-node command execution (roadmap 0.7)",
+      "a new route authority system beyond RFC-0010",
+      "a new selector system beyond RFC-0011",
+      "a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy",
+      "unrelated UI refactor",
+      "unrelated runtime refactor",
+      "tag or release creation/mutation without separate authorization",
+      "production promotion without separate authorization",
+      "DNS cutover without separate authorization"
+    ]
+  },
+  "allowedPathRules": [
+    "docs/**",
+    "src/**",
+    "bin/**",
+    "ui/**",
+    "test/**",
+    "scripts/**",
+    "docker-registry/**",
+    "CHANGELOG.md",
+    "README.md",
+    "package.json: dependency changes require recorded justification",
+    "package-lock.json: only mechanically resulting changes"
+  ],
+  "forbiddenActions": [
+    "reopening or rewriting the accepted v0.5 closure lineage or its attestation",
+    "cherry-picking quarantined historical constructions into v0.6",
+    "product construction before RFC-0013 and Stage 0 Gate A approval is recorded",
+    "changing the DSH baseline outside the DSH baseline promotion policy",
+    "tag or release creation/mutation without separate authorization",
+    "production promotion without separate authorization",
+    "DNS cutover without separate authorization"
+  ],
+  "evidenceRequirements": {
+    "candidateMustBeFrozenBeforeEvidence": true,
+    "candidateFreezeRule": "exactly one frozen candidate per evidence round; once frozen, later phases produce only qualification/evidence; a real problem means a new candidate and fresh candidate-bound evidence",
+    "multiNodeSessionMatrixRequired": "a multi-node session acceptance matrix must be defined in RFC-0013 and mechanically enforced before the v0.6 mounted evidence run",
+    "closureRule": "one evidence-only closure, direct child of the frozen candidate, attestation must not reference its own closure SHA",
+    "finalReviewRequired": true
+  },
+  "separationOfPowers": {
+    "tagReleaseAuthorizationSeparate": true,
+    "productionPromotionAuthorizationSeparate": true,
+    "dnsCutoverAuthorizationSeparate": true,
+    "v06NotGatedOnProductionPromotionOrDnsCutover": true
+  }
+}
