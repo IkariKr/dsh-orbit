@@ -206,17 +206,17 @@ The `FleetJobScheduler` orchestrates task execution across heterogeneous node tr
 #### D3.2 Direct Node Dispatch Transport
 For nodes operating in direct routing mode (`routeMode === "direct"`):
 1. **Dedicated Ingress Endpoint**: Direct nodes expose `POST /_orbit/task` on `RouteIngress`.
-2. **Machine Authentication**: Requests are authenticated using the `ORBIT-ROUTE-V1` signature scheme (RFC-0010 D5). The Hub signs `method: "POST"`, `rawTarget: "/_orbit/task"`, and `routeAuthority: computeRouteAuthority(nodeId, routeDomain)` using its route private key, transmitting standard route headers (`x-orbit-route-key-id`, `x-orbit-route-timestamp`, `x-orbit-route-nonce`, `x-orbit-route-signature`).
+2. **Machine Authentication**: Requests are authenticated using the `ORBIT-ROUTE-V1` signature scheme (RFC-0010 D5). The Hub signs `method: "POST"`, `rawTarget: "/_orbit/task"`, and `routeAuthority: computeRouteAuthority(nodeId, routeDomain)` using its route private key, transmitting the canonical route headers (`x-orbit-route-node`, `x-orbit-route-key`, `x-orbit-route-timestamp`, `x-orbit-route-nonce`, `x-orbit-route-signature`).
 3. **Ingress Enforcement & Isolation**: `RouteIngress` intercepts `POST /_orbit/task` before any proxying logic. It validates the signature against Hub trust keys and the process-level `RouteNonceCache`. Replayed, stale, or unauthorized requests fail closed (HTTP 401/403/400).
 4. **Execution & Non-Forwarding**: Validated task requests are dispatched directly to the node daemon's local task runner process. `RouteIngress` **never** forwards `POST /_orbit/task` to downstream DSH.
 5. **Payload & Response**: Request body is JSON `{ jobId, taskType, payload, timeoutMs }` bounded to 1 MiB (payloads exceeding limit fail with HTTP 413 `payload-too-large`). The node returns HTTP 200 with `{ status, exitCode, stdout, stderr, durationMs }` or an HTTP 500 error object.
 
 #### D3.3 Reverse Node Dispatch Transport (Formal Extension to RFC-0012)
 RFC-0014 formally extends the reverse connection architecture defined in RFC-0012:
-1. **Scope Amendment**: Resolves the v0.5 deferral in RFC-0012 §11 ("Fleet commands/tasks and multi-node batch operations: defer to v0.7").
-2. **Control Channel Invariant Preserved**: The reverse control channel (`/api/v1/reverse-channel`) vocabulary remains strictly closed (`ready`, `status`, `ping`, `pong`, `close`). Fleet tasks are **never** transmitted on the control channel.
+1. **Scope Amendment**: Supersedes the v0.5 exclusion in RFC-0012 Explicit Non-Goals ("fleet commands/tasks;"). Remote shell/task execution over the control channel remains strictly forbidden.
+2. **Control Channel Invariant Preserved**: The reverse control channel (`/api/v1/reverse/control`) vocabulary remains strictly closed (`ready`, `status`, `ping`, `pong`, `close`). Fleet tasks are **never** transmitted on the control channel.
 3. **Reverse Data Channel Extension (`mode: "task"`)**:
-   - The Hub acquires an idle data channel from the reverse channel pool for the target node. If no channel is currently idle, the Hub waits up to `capacityWaitMs` (2000 ms). If pool capacity remains exhausted, dispatch fails closed with `status: "unreachable"` and error code `reverse-capacity-exhausted`.
+   - The Hub acquires an idle data channel from the reverse channel pool for the target node. If no channel is currently idle, the Hub waits up to `capacityWaitMs` (2000 ms). If pool capacity remains exhausted, dispatch fails closed with `status: "unreachable"` and error code `reverse-capacity`.
    - The Hub transmits an OPEN frame with `mode: "task"`:
      ```json
      {
@@ -225,8 +225,10 @@ RFC-0014 formally extends the reverse connection architecture defined in RFC-001
        "mode": "task",
        "method": "POST",
        "rawTarget": "/_orbit/task",
-       "routeAuthority": "<nodeId>.orbit.internal",
+       "routeAuthority": "n-<nodeId>.<routeDomain>",
+       "headers": [["host", "n-<nodeId>.<routeDomain>"]],
        "routeProof": {
+         "nodeId": "<nodeId>",
          "keyId": "...",
          "timestamp": 1234567890,
          "nonce": "...",
@@ -240,7 +242,7 @@ RFC-0014 formally extends the reverse connection architecture defined in RFC-001
        }
      }
      ```
-   - **Verification**: The reverse node client verifies `open.routeProof` with `ORBIT-ROUTE-V1` against the Hub trust keys using the node's `RouteNonceCache` (shared across direct and reverse transports). Invalid or replayed proofs abort immediately (`code: "auth-failed"`).
+   - **Verification & Bounds**: The reverse node client validates `open.mode === "task"` alongside `http` and `websocket`, requiring `open.headers` as an array and validating `open.routeProof` with `ORBIT-ROUTE-V1` against Hub trust keys using the node's `RouteNonceCache` (shared across direct and reverse transports). Invalid or replayed proofs abort immediately (`code: "auth-failed"`). Since the OPEN frame JSON is bounded to 64 KiB (`CHANNEL_FRAME_MAX_BYTES = 64 * 1024`), reverse task payloads are bounded to 32 KiB within the OPEN frame; larger payloads fail closed before dispatch with code `payload-too-large`.
    - **Local Execution**: Validated tasks are dispatched locally to the node task runner. The node **never** forwards `mode: "task"` frames to upstream DSH.
    - **Result Framing**: Upon execution completion, the node returns a `task-result` frame over the data channel:
      ```json
