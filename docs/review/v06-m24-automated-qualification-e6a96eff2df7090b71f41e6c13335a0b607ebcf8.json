@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "kind": "v0.6-m24-automated-qualification",
+  "scope": "automated",
+  "result": "AUTOMATED_PASS_MOUNTED_PENDING",
+  "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+  "candidateFrozen": true,
+  "branch": "chore/v0.6-stage5-candidate-freeze",
+  "runId": "v06-automated-e6a96eff2df7-20260926180000",
+  "executedAt": "2026-09-26T18:00:00.000Z",
+  "matrix": {
+    "multiNodeListObservability": "PASS",
+    "explicitTargetScopeRequired": "PASS",
+    "targetScopeWildcardDenied": "PASS",
+    "concurrentHttpRootDirectAndReverse": "NOT_EXECUTED",
+    "concurrentStaticAssetsDirectAndReverse": "NOT_EXECUTED",
+    "concurrentStreamingUploads": "NOT_EXECUTED",
+    "concurrentWebSocketUpgrade": "NOT_EXECUTED",
+    "concurrentWebSocketPingPong": "NOT_EXECUTED",
+    "concurrentLargePayloadTransfer": "NOT_EXECUTED",
+    "cookieJarIsolationConcurrent": "NOT_EXECUTED",
+    "originIsolationLocalStorage": "NOT_EXECUTED",
+    "nodeAOutageNoImpactOnNodeB": "NOT_EXECUTED",
+    "nodeBOutageNoImpactOnNodeA": "NOT_EXECUTED",
+    "nodeARestartRecovery": "NOT_EXECUTED",
+    "nodeBRestartRecovery": "NOT_EXECUTED",
+    "reverseChannelPoolIndependence": "NOT_EXECUTED",
+    "routeProofWrongNodeCrossDenied": "PASS",
+    "noSilentCrossNodeFailover": "NOT_EXECUTED",
+    "hubRestartRestoresAllNodes": "NOT_EXECUTED",
+    "multiNodeFlowTrackerAccurate": "PASS",
+    "multiNodeCredentialRotation": "NOT_EXECUTED",
+    "deleteNodeAKeepsNodeB": "NOT_EXECUTED",
+    "operatorUiTargetScopeIndication": "PASS",
+    "noImplicitBroadcastExecution": "PASS"
+  },
+  "fieldEvidence": {
+    "multiNodeListObservability": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v06-stage2-devices-and-nodes.test.mjs :: Hub Server integration: real-time multi-node read model and /hub/overview live query"
+      ]
+    },
+    "explicitTargetScopeRequired": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v06-stage1-target-scoping.test.mjs :: validateTargetScope accepts valid single node IDs",
+        "test/v06-stage1-target-scoping.test.mjs :: validateTargetScope rejects empty, null, and non-string inputs",
+        "test/v06-stage1-target-scoping.test.mjs :: validateScopedAction rejects invalid payloads, missing targets, or unknown actions"
+      ]
+    },
+    "targetScopeWildcardDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v06-stage1-target-scoping.test.mjs :: validateTargetScope rejects wildcards, broadcasts, and multi-targets"
+      ]
+    },
+    "concurrentHttpRootDirectAndReverse": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "concurrentStaticAssetsDirectAndReverse": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "concurrentStreamingUploads": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "concurrentWebSocketUpgrade": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "concurrentWebSocketPingPong": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "concurrentLargePayloadTransfer": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "cookieJarIsolationConcurrent": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "originIsolationLocalStorage": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "nodeAOutageNoImpactOnNodeB": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "nodeBOutageNoImpactOnNodeA": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "nodeARestartRecovery": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "nodeBRestartRecovery": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "reverseChannelPoolIndependence": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "routeProofWrongNodeCrossDenied": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v06-stage4-outage-containment.test.mjs :: Stage 4: Cross-node route proof replay denial (RFC-0010 / RFC-0013 D1)"
+      ]
+    },
+    "noSilentCrossNodeFailover": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "hubRestartRestoresAllNodes": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "multiNodeFlowTrackerAccurate": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v06-stage1-target-scoping.test.mjs :: MultiNodeFlowTracker accurately tracks concurrent flows across multiple nodes",
+        "test/v06-stage1-target-scoping.test.mjs :: Hub server returns 503 capacity-exhausted when flowTracker limits are reached, without server crash",
+        "test/v06-stage3-concurrent-routing.test.mjs :: Stage 3: Concurrent HTTP requests across direct Node A and reverse Node B route without crosstalk"
+      ]
+    },
+    "multiNodeCredentialRotation": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "deleteNodeAKeepsNodeB": {
+      "minimumEvidence": "mounted",
+      "status": "NOT_EXECUTED",
+      "evidence": []
+    },
+    "operatorUiTargetScopeIndication": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v06-stage2-devices-and-nodes.test.mjs :: app-level: renderNodes displays Devices & Nodes summary, target scope tag, activeFlows, and scoped action buttons",
+        "test/v06-stage2-devices-and-nodes.test.mjs :: view-model: mapNodeRow maps activeFlows and targetScope"
+      ]
+    },
+    "noImplicitBroadcastExecution": {
+      "minimumEvidence": "automated",
+      "status": "PASS",
+      "evidence": [
+        "test/v06-stage1-target-scoping.test.mjs :: validateTargetScope rejects wildcards, broadcasts, and multi-targets",
+        "test/v06-stage1-target-scoping.test.mjs :: validateScopedAction rejects invalid payloads, missing targets, or unknown actions"
+      ]
+    }
+  }
+}
