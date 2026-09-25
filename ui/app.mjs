@@ -132,8 +132,9 @@ export function createRegistryUi({ document, fetchImpl }) {
     const transitionText = transition
       ? `${escapeHtml(transition.at ?? "-")} · ${escapeHtml(transition.event ?? "transition")} · ready ${escapeHtml(transition.routeReady ?? "-")} · ${escapeHtml(transition.reason ?? "-")}`
       : "-";
+    const flows = typeof node.activeFlows === "number" ? node.activeFlows : 0;
     return `<div class="node-meta route-observability">
-      route ${escapeHtml(node.routeMode)} · reverse ${escapeHtml(node.reversePresence ?? "-")} · ready ${escapeHtml(node.reverseRouteReady ?? "-")} · ${escapeHtml(node.reverseReason ?? "-")} · last reverse transition ${transitionText}
+      route ${escapeHtml(node.routeMode)} · reverse ${escapeHtml(node.reversePresence ?? "-")} · ready ${escapeHtml(node.reverseRouteReady ?? "-")} · activeFlows ${flows} · ${escapeHtml(node.reverseReason ?? "-")} · last reverse transition ${transitionText}
     </div>`;
   }
 
@@ -141,13 +142,16 @@ export function createRegistryUi({ document, fetchImpl }) {
     const alerts = node.health.alertFlags.map((flag) => `<span class="alert-flag">alert: ${escapeHtml(flag)}</span>`).join(" ");
     let actions = "";
     if (node.state === "active") {
-      actions = `<button class="danger" data-delete-id="${escapeHtml(node.nodeId)}">delete</button>`;
+      actions = `<button class="secondary" data-scoped-open-id="${escapeHtml(node.nodeId)}">open</button> <button class="secondary" data-scoped-refresh-id="${escapeHtml(node.nodeId)}">refresh</button> <button class="danger" data-delete-id="${escapeHtml(node.nodeId)}">delete</button>`;
     } else if (node.state === "tombstoned") {
       actions = `<button class="primary" data-reenroll-id="${escapeHtml(node.nodeId)}">mint re-enrollment token</button>`;
     }
-    return `<div class="panel node-row">
+    const targetTag = node.targetScope?.label
+      ? `<span class="target-scope-chip">${escapeHtml(node.targetScope.label)}</span>`
+      : "";
+    return `<div class="panel node-row" data-node-id="${escapeHtml(node.nodeId)}">
       <div>
-        <div class="node-id">${escapeHtml(node.nodeId)}</div>
+        <div class="node-id">${escapeHtml(node.nodeId)} ${targetTag}</div>
         <div class="node-meta">runtime ${escapeHtml(node.runtimeIdentity.dshVersion ?? "-")} rev ${escapeHtml(node.runtimeIdentity.orbitRevision ?? "-")} · lastSeen ${escapeHtml(node.health.lastSeen ?? "never")} (${escapeHtml(node.health.lastSeenSource ?? "-")}) · lastHeartbeat ${escapeHtml(node.health.lastHeartbeatAt ?? "never")}</div>
         ${renderRouteObservability(node)}
         ${alerts}
@@ -155,7 +159,7 @@ export function createRegistryUi({ document, fetchImpl }) {
       <div>
         ${renderBadges(node)}
         <div class="node-meta" style="margin-top:8px">${renderCapabilities(node)}</div>
-        ${actions}
+        <div class="node-actions" style="margin-top:8px">${actions}</div>
       </div>
     </div>`;
   }
@@ -166,7 +170,13 @@ export function createRegistryUi({ document, fetchImpl }) {
       list.innerHTML = `<div class="panel"><div class="banner empty">no nodes registered yet</div></div>`;
       return;
     }
-    list.innerHTML = view.rows.map(renderNodeRow).join("");
+    const overviewBanner = view.activeSessions
+      ? `<div class="panel overview-panel" id="overview-summary">
+          <strong>Devices &amp; Nodes:</strong> ${view.rows.length} enrolled ·
+          <strong>Active Sessions:</strong> ${view.activeSessions.totalFlows} flows across ${view.activeSessions.distinctNodes} active nodes
+        </div>`
+      : "";
+    list.innerHTML = overviewBanner + view.rows.map(renderNodeRow).join("");
   }
 
   function renderTokenRows(rows) {
@@ -258,7 +268,7 @@ export function createRegistryUi({ document, fetchImpl }) {
     showBanner(LOADING_STATE);
     try {
       const body = await api("/hub/nodes");
-      renderNodes(mapNodeList(body.nodes));
+      renderNodes(mapNodeList(body.nodes, body.activeSessions));
       showBanner(body.nodes.length === 0 ? EMPTY_NODES_STATE : {});
     } catch (error) {
       if (error.sessionRequired) {
@@ -433,8 +443,32 @@ export function createRegistryUi({ document, fetchImpl }) {
         await mintReenrollToken(target.dataset.reenrollId);
         return;
       }
+      if (target.dataset?.scopedOpenId !== undefined) {
+        const nodeId = target.dataset.scopedOpenId;
+        const res = await api("/hub/actions/node", {
+          method: "POST",
+          body: { targetNodeId: nodeId, action: "open" },
+        });
+        if (res.url && typeof window !== "undefined") {
+          window.open(res.url, "_blank");
+        }
+        return;
+      }
+      if (target.dataset?.scopedRefreshId !== undefined) {
+        const nodeId = target.dataset.scopedRefreshId;
+        await api("/hub/actions/node", {
+          method: "POST",
+          body: { targetNodeId: nodeId, action: "refresh" },
+        });
+        await loadNodes();
+        return;
+      }
       const row = target.closest(".node-id");
-      if (row) await loadNodeDetail(row.textContent.trim());
+      if (row) {
+        const rawText = row.textContent.trim();
+        const extractedNodeId = rawText.split(" ")[0].trim();
+        await loadNodeDetail(extractedNodeId);
+      }
     });
     $("node-detail-view").addEventListener("click", async (event) => {
       if (event.target.id === "back-to-nodes") await loadNodes();

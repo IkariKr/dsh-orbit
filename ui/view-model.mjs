@@ -62,6 +62,8 @@ export function mapNodeRow(node) {
     nodeId: node?.nodeId ?? null,
     state: node?.state ?? "unknown",
     routeMode: node?.routeMode ?? "direct",
+    activeFlows: typeof node?.activeFlows === "number" ? node.activeFlows : 0,
+    targetScope: node?.nodeId ? { targetNodeId: node.nodeId, label: `target: ${node.nodeId.slice(0, 13)}…` } : null,
     reversePresence: node?.reversePresence ?? null,
     reverseRouteReady: typeof node?.reverseRouteReady === "boolean" ? node.reverseRouteReady : null,
     reverseReason: node?.reverseReason ?? null,
@@ -98,10 +100,32 @@ export function mapNodeRow(node) {
   };
 }
 
-export function mapNodeList(nodes) {
+export function mapNodeList(nodes, activeSessions = null) {
   if (!Array.isArray(nodes)) return EMPTY_NODES_STATE;
   if (nodes.length === 0) return EMPTY_NODES_STATE;
-  return { kind: "nodes", rows: nodes.map(mapNodeRow) };
+  return {
+    kind: "nodes",
+    rows: nodes.map(mapNodeRow),
+    activeSessions: activeSessions && typeof activeSessions === "object"
+      ? {
+          totalFlows: typeof activeSessions.totalFlows === "number" ? activeSessions.totalFlows : 0,
+          distinctNodes: typeof activeSessions.distinctNodes === "number" ? activeSessions.distinctNodes : 0,
+        }
+      : null,
+  };
+}
+
+export function mapOverview(payload) {
+  const nodes = Array.isArray(payload?.nodes) ? payload.nodes.map(mapNodeRow) : [];
+  const activeSessions = payload?.activeSessions;
+  return {
+    kind: "overview",
+    nodes,
+    activeSessions: {
+      totalFlows: typeof activeSessions?.totalFlows === "number" ? activeSessions.totalFlows : 0,
+      distinctNodes: typeof activeSessions?.distinctNodes === "number" ? activeSessions.distinctNodes : 0,
+    },
+  };
 }
 
 export function mapNodeDetail(node) {

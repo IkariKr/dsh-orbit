@@ -94,7 +94,12 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--bor
 th { color: var(--muted); font-size: 12px; text-transform: uppercase; }
 
 button.primary { background: var(--info); color: #0b0f14; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; }
+button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); padding: 5px 12px; border-radius: 6px; cursor: pointer; }
+button.secondary:hover { border-color: var(--info); }
 button.danger { background: var(--bad); color: #fff; border: none; padding: 7px 14px; border-radius: 6px; cursor: pointer; }
+
+.overview-panel { background: var(--panel-2); border-left: 4px solid var(--info); padding: 10px 14px; margin-bottom: 14px; }
+.target-scope-chip { font-family: ui-monospace, monospace; font-size: 11px; background: var(--panel-2); border: 1px solid var(--info); color: var(--info); padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
 
 .dialog-actions { display: flex; gap: 10px; margin-top: 14px; justify-content: flex-end; }
 
