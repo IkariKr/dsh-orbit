@@ -92,16 +92,14 @@ The Hub management API extends the existing read model (`GET /hub/nodes`) with p
       "nodeId": "node_06827d59b9d6511f05883387f431fbba",
       "routeMode": "direct",
       "reachable": "ok",
-      "activeFlows": 2,
-      "routeAuthority": "n-06827d59b9d6511f05883387f431fbba.dsh-orbit.test:8547"
+      "activeFlows": 2
     },
     {
       "nodeId": "node_62e2f94672739bc519887316c7bc3455",
       "routeMode": "reverse",
       "reachable": "ok",
       "reversePresence": "online",
-      "activeFlows": 1,
-      "routeAuthority": "n-62e2f94672739bc519887316c7bc3455.dsh-orbit.test:8547"
+      "activeFlows": 1
     }
   ],
   "activeSessions": {
