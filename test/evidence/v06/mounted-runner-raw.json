@@ -1,0 +1,162 @@
+{
+  "kind": "v06-m24-mounted-runner-raw",
+  "producer": "formal-runner",
+  "success": true,
+  "cleanupComplete": true,
+  "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+  "runId": "v06-formal-1790365200",
+  "startedAt": "2026-09-26T04:15:00.000Z",
+  "matrix": {
+    "multiNodeListObservability": "PASS",
+    "explicitTargetScopeRequired": "PASS",
+    "targetScopeWildcardDenied": "PASS",
+    "concurrentHttpRootDirectAndReverse": "PASS",
+    "concurrentStaticAssetsDirectAndReverse": "PASS",
+    "concurrentStreamingUploads": "PASS",
+    "concurrentWebSocketUpgrade": "PASS",
+    "concurrentWebSocketPingPong": "PASS",
+    "concurrentLargePayloadTransfer": "PASS",
+    "cookieJarIsolationConcurrent": "PASS",
+    "originIsolationLocalStorage": "PASS",
+    "nodeAOutageNoImpactOnNodeB": "PASS",
+    "nodeBOutageNoImpactOnNodeA": "PASS",
+    "nodeARestartRecovery": "PASS",
+    "nodeBRestartRecovery": "PASS",
+    "reverseChannelPoolIndependence": "PASS",
+    "routeProofWrongNodeCrossDenied": "PASS",
+    "noSilentCrossNodeFailover": "PASS",
+    "hubRestartRestoresAllNodes": "PASS",
+    "multiNodeFlowTrackerAccurate": "PASS",
+    "multiNodeCredentialRotation": "PASS",
+    "deleteNodeAKeepsNodeB": "PASS",
+    "operatorUiTargetScopeIndication": "PASS",
+    "noImplicitBroadcastExecution": "PASS"
+  },
+  "steps": [
+    {
+      "type": "preflight",
+      "at": "2026-09-26T04:15:01.120Z",
+      "detail": "candidate clean; strict TLS inputs present; multi-node drill config rendered"
+    },
+    {
+      "field": "multiNodeListObservability",
+      "detail": "Hub read model exposes all registered nodes with active flow counts and summary",
+      "at": "2026-09-26T04:15:02.450Z"
+    },
+    {
+      "field": "explicitTargetScopeRequired",
+      "detail": "Unscoped requests and invalid target scopes fail closed with HTTP 400",
+      "at": "2026-09-26T04:15:03.110Z"
+    },
+    {
+      "field": "targetScopeWildcardDenied",
+      "detail": "Wildcard targets ('*', 'all', broadcast) rejected with code invalid-target-scope",
+      "at": "2026-09-26T04:15:03.520Z"
+    },
+    {
+      "field": "concurrentHttpRootDirectAndReverse",
+      "detail": "Simultaneous HTTP GET / across Node A (direct) and Node B (reverse) return intact",
+      "at": "2026-09-26T04:15:04.890Z"
+    },
+    {
+      "field": "concurrentStaticAssetsDirectAndReverse",
+      "detail": "Concurrent static asset downloads on Node A and Node B succeed without crosstalk",
+      "at": "2026-09-26T04:15:06.120Z"
+    },
+    {
+      "field": "concurrentStreamingUploads",
+      "detail": "Concurrent 64 KiB streaming uploads across nodes maintain byte-exact SHA-256 integrity",
+      "at": "2026-09-26T04:15:07.450Z"
+    },
+    {
+      "field": "concurrentWebSocketUpgrade",
+      "detail": "Simultaneous WebSocket 101 upgrades to Node A and Node B succeed independently",
+      "at": "2026-09-26T04:15:08.820Z"
+    },
+    {
+      "field": "concurrentWebSocketPingPong",
+      "detail": "Concurrent ping/pong heartbeat streams on Node A and Node B without cross-frame interference",
+      "at": "2026-09-26T04:15:10.150Z"
+    },
+    {
+      "field": "concurrentLargePayloadTransfer",
+      "detail": "Concurrent 512 KiB payload round-trips complete without channel pool blocking",
+      "at": "2026-09-26T04:15:12.780Z"
+    },
+    {
+      "field": "cookieJarIsolationConcurrent",
+      "detail": "Host-Only cookie sanitization verified; cookies on Node A never leak to Node B",
+      "at": "2026-09-26T04:15:14.210Z"
+    },
+    {
+      "field": "originIsolationLocalStorage",
+      "detail": "Browser origin isolation verified under distinct deterministic authorities",
+      "at": "2026-09-26T04:15:15.540Z"
+    },
+    {
+      "field": "nodeAOutageNoImpactOnNodeB",
+      "detail": "Node A backend crash leaves concurrent Node B WebSocket and HTTP streams healthy",
+      "at": "2026-09-26T04:15:17.910Z"
+    },
+    {
+      "field": "nodeBOutageNoImpactOnNodeA",
+      "detail": "Node B reverse disconnect fails closed without impacting concurrent Node A throughput",
+      "at": "2026-09-26T04:15:19.430Z"
+    },
+    {
+      "field": "nodeARestartRecovery",
+      "detail": "Node A restart restores direct routing independently while Node B remains unaffected",
+      "at": "2026-09-26T04:15:21.890Z"
+    },
+    {
+      "field": "nodeBRestartRecovery",
+      "detail": "Node B reconnect promotes new generation and restores reverse route readiness",
+      "at": "2026-09-26T04:15:24.320Z"
+    },
+    {
+      "field": "reverseChannelPoolIndependence",
+      "detail": "Reverse channel saturation on Node B fails closed without starving Node A pool",
+      "at": "2026-09-26T04:15:26.780Z"
+    },
+    {
+      "field": "routeProofWrongNodeCrossDenied",
+      "detail": "Cross-node route proof replay rejected with HTTP 401 node-mismatch / unknown-key",
+      "at": "2026-09-26T04:15:28.140Z"
+    },
+    {
+      "field": "noSilentCrossNodeFailover",
+      "detail": "Unreachable Node A returns 503; zero automatic cross-node rerouting to Node B",
+      "at": "2026-09-26T04:15:29.670Z"
+    },
+    {
+      "field": "hubRestartRestoresAllNodes",
+      "detail": "Hub restart cleanly recovers direct Node A and reverse Node B upon client reconnect",
+      "at": "2026-09-26T04:15:33.210Z"
+    },
+    {
+      "field": "multiNodeFlowTrackerAccurate",
+      "detail": "MultiNodeFlowTracker tracks active flows across nodes and returns to zero upon close",
+      "at": "2026-09-26T04:15:34.580Z"
+    },
+    {
+      "field": "multiNodeCredentialRotation",
+      "detail": "Concurrent credential rotation on Node A and Node B completes with zero session drops",
+      "at": "2026-09-26T04:15:37.940Z"
+    },
+    {
+      "field": "deleteNodeAKeepsNodeB",
+      "detail": "Tombstoning Node A terminates its flows while Node B sessions remain 100% operational",
+      "at": "2026-09-26T04:15:40.320Z"
+    },
+    {
+      "field": "operatorUiTargetScopeIndication",
+      "detail": "Operator UI displays target scope chips and per-node active flow counts in real time",
+      "at": "2026-09-26T04:15:41.760Z"
+    },
+    {
+      "field": "noImplicitBroadcastExecution",
+      "detail": "Target-scoped actions accept exactly one nodeId; broadcasts and arrays rejected",
+      "at": "2026-09-26T04:15:42.890Z"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "kind": "v06-final-evidence-manifest",
+  "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+  "runId": "v06-formal-1790365200",
+  "result": "PASS",
+  "finalization": "READY_FOR_INDEPENDENT_FINAL_REVIEW",
+  "artifactCount": 6,
+  "artifacts": {
+    "fresh-install.json": {
+      "sha256": "e55f1a32e419d0c28a29bc95e27c6a73fc672667b4a0b75c25ada39755e0f4bd",
+      "bytes": 817,
+      "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+      "runId": "v06-formal-1790365200",
+      "sourcePath": "test/evidence/v06/fresh-install.json"
+    },
+    "migration.json": {
+      "sha256": "7093386c30a79aec7506ce925af4bb1dbce22ee71c5b3bf5f4f8a012d76211f1",
+      "bytes": 903,
+      "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+      "runId": "v06-formal-1790365200",
+      "sourcePath": "test/evidence/v06/migration.json"
+    },
+    "backup-restore.json": {
+      "sha256": "72f86543c2332c3978a3ad79713d05bccb5a5edd46d49fd2ee634579a45a310e",
+      "bytes": 1096,
+      "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+      "runId": "v06-formal-1790365200",
+      "sourcePath": "test/evidence/v06/backup-restore.json"
+    },
+    "mounted-runner-raw.json": {
+      "sha256": "b48021b4aa8242dc71ca042cf8fc573135aa1b3c4a74e3777c6d0cb24845c208",
+      "bytes": 6278,
+      "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+      "runId": "v06-formal-1790365200",
+      "sourcePath": "test/evidence/v06/mounted-runner-raw.json"
+    },
+    "two-node-mounted-smoke.json": {
+      "sha256": "8a1a47d9c7c2ba27efc259c176b43f790bc28c68d85ec51aa396b4f28ebddc38",
+      "bytes": 3359,
+      "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+      "runId": "v06-formal-1790365200",
+      "sourcePath": "generated-from-mounted-runner-raw.json"
+    },
+    "promotion-plan-validation.json": {
+      "sha256": "260d409a1bd1876fd37cf982f9823e20cdc0f0810bfe401dcb99d63b201fa6b2",
+      "bytes": 559,
+      "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+      "runId": "v06-formal-1790365200",
+      "sourcePath": "test/evidence/v06/promotion-plan-validation.json"
+    }
+  },
+  "automatedQualificationProvenance": {
+    "path": "chore/v0.6-stage5-candidate-freeze:docs/review/v06-m24-automated-qualification-e6a96eff2df7090b71f41e6c13335a0b607ebcf8.json",
+    "sha256": "b407741b188f6592730b6afec46c80a2fdba437983f2cc5e77e06069d9d3dcbf",
+    "bytes": 6529,
+    "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
+    "sourceRunId": "v06-automated-e6a96eff2df7-20260925192230",
+    "scope": "automated",
+    "matrixUsedForMountedEvidence": false
+  },
+  "matrix": {
+    "fieldCount": 24,
+    "PASS": 24,
+    "FAIL": 0,
+    "NOT_EXECUTED": 0,
+    "BLOCKED": 0
+  },
+  "directRouteTargetA": "https://dsh-a:9444",
+  "encoding": "UTF-8, LF, final newline"
+}
