@@ -38,6 +38,37 @@ function toIsoString(d) {
   return new Date().toISOString();
 }
 
+function assertValidJsonPayload(val, depth = 0) {
+  if (depth > 64) {
+    throw new Error("payload exceeds maximum nesting depth");
+  }
+  if (val === null || val === undefined) return;
+  if (typeof val === "function" || typeof val === "symbol") {
+    throw new Error("functions and symbols are not permitted in payload");
+  }
+  if (typeof val === "object") {
+    for (const [k, v] of Object.entries(val)) {
+      if (typeof v === "function" || typeof v === "symbol") {
+        throw new Error(`property "${k}" cannot be a function or symbol`);
+      }
+      assertValidJsonPayload(v, depth + 1);
+    }
+  }
+}
+
+function safeClone(value, fallback = {}) {
+  if (value === null || value === undefined) return value;
+  try {
+    return structuredClone(value);
+  } catch {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch {
+      return fallback;
+    }
+  }
+}
+
 /**
  * Validates a target specification against the registry.
  * Prohibits bare wildcards and ensures explicit node IDs or matching active capabilities.
@@ -176,10 +207,34 @@ export class FleetJobScheduler {
       throw err;
     }
 
-    // 4. Validate payload
+    // 4. Validate payload: must be a plain JSON-serializable object without functions or symbols
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       const err = new Error("payload must be an object");
       err.code = "invalid-payload";
+      throw err;
+    }
+
+    let clonedPayload;
+    try {
+      assertValidJsonPayload(payload);
+      clonedPayload = JSON.parse(JSON.stringify(payload));
+      if (!clonedPayload || typeof clonedPayload !== "object" || Array.isArray(clonedPayload)) {
+        const err = new Error("payload must be a valid JSON object");
+        err.code = "invalid-payload";
+        throw err;
+      }
+    } catch (e) {
+      const err = new Error(`payload must be JSON-serializable: ${e.message}`);
+      err.code = "invalid-payload";
+      throw err;
+    }
+
+    let clonedTargetSpec;
+    try {
+      clonedTargetSpec = JSON.parse(JSON.stringify(targetSpec));
+    } catch (e) {
+      const err = new Error(`targetSpec must be JSON-serializable: ${e.message}`);
+      err.code = "invalid-target-spec";
       throw err;
     }
 
@@ -198,8 +253,8 @@ export class FleetJobScheduler {
     const job = {
       jobId: finalJobId,
       taskType,
-      payload: { ...payload },
-      targetSpec: { ...targetSpec },
+      payload: clonedPayload,
+      targetSpec: clonedTargetSpec,
       requiredCapabilities: Array.isArray(requiredCapabilities) ? [...requiredCapabilities] : [],
       operatorPrincipal: String(operatorPrincipal || "operator"),
       createdAt: toIsoString(this.now()),
@@ -229,7 +284,7 @@ export class FleetJobScheduler {
 
   /**
    * Retrieves an immutable snapshot of a fleet job.
-   * Uses structuredClone to ensure deep isolation.
+   * Uses safeClone to ensure deep isolation without unhandled throwing.
    *
    * @param {string} jobId
    * @returns {object|null}
@@ -240,8 +295,8 @@ export class FleetJobScheduler {
     return {
       jobId: job.jobId,
       taskType: job.taskType,
-      payload: structuredClone(job.payload),
-      targetSpec: structuredClone(job.targetSpec),
+      payload: safeClone(job.payload, {}),
+      targetSpec: safeClone(job.targetSpec, {}),
       requiredCapabilities: [...job.requiredCapabilities],
       operatorPrincipal: job.operatorPrincipal,
       createdAt: job.createdAt,
@@ -249,7 +304,7 @@ export class FleetJobScheduler {
       finishedAt: job.finishedAt,
       status: job.status,
       summary: { ...job.summary },
-      results: structuredClone(job.results),
+      results: safeClone(job.results, {}),
     };
   }
 

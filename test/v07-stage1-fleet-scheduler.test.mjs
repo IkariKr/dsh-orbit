@@ -499,3 +499,80 @@ test("FleetJobScheduler capability filtering fails closed when registry row is m
   assert.equal(res.results[NODE_A].status, "skipped");
   assert.equal(res.results[NODE_A].reason, "target-not-found");
 });
+
+test("FleetJobScheduler rejects non-serializable payload upfront without ghost tasks or list poisoning", () => {
+  const mockRegistry = createMockRegistry({
+    nodeRows: { [NODE_A]: { node_id: NODE_A, state: "active" } },
+  });
+
+  const scheduler = new FleetJobScheduler({ registry: mockRegistry });
+
+  // Payload containing a function or circular reference
+  const circular = {};
+  circular.self = circular;
+
+  const uncloneablePayloads = [
+    { fn: () => {} },
+    { sym: Symbol("foo") },
+    circular,
+  ];
+
+  for (const badPayload of uncloneablePayloads) {
+    assert.throws(
+      () => {
+        scheduler.submitJob({
+          taskType: "command",
+          payload: badPayload,
+          targetSpec: { mode: "explicit", nodeIds: [NODE_A] },
+        });
+      },
+      (err) => err.code === "invalid-payload",
+    );
+  }
+
+  // Ensure no ghost tasks were registered and listJobs() is healthy
+  assert.equal(scheduler.listJobs().length, 0);
+  assert.equal(scheduler.jobs.size, 0);
+});
+
+test("FleetJobScheduler capability filtering fails closed when registry lacks getNodeRow or is null", async () => {
+  // Case A: Registry lacks getNodeRow
+  const registryWithoutGetNodeRow = {
+    listNodes: () => [{ nodeId: NODE_A, state: "active", health: { capabilities: [{ name: "diag", version: 1 }], capabilitiesStale: false } }],
+  };
+
+  const schedulerA = new FleetJobScheduler({
+    registry: registryWithoutGetNodeRow,
+    dispatchTransport: async () => ({ status: "completed" }),
+  });
+
+  const jobA = schedulerA.submitJob({
+    taskType: "diagnostic",
+    targetSpec: { mode: "capability", capability: "diag" },
+    requiredCapabilities: ["diag"],
+  });
+
+  await schedulerA.jobs.get(jobA.jobId)._executionPromise;
+  const resA = schedulerA.getJob(jobA.jobId);
+  assert.equal(resA.summary.skipped, 1);
+  assert.equal(resA.results[NODE_A].status, "skipped");
+  assert.equal(resA.results[NODE_A].reason, "capability-evidence-stale");
+
+  // Case B: Registry is completely null on scheduler
+  const schedulerB = new FleetJobScheduler({
+    registry: null,
+    dispatchTransport: async () => ({ status: "completed" }),
+  });
+
+  const jobB = schedulerB.submitJob({
+    taskType: "diagnostic",
+    targetSpec: { mode: "explicit", nodeIds: [NODE_A] },
+    requiredCapabilities: ["diag"],
+  });
+
+  await schedulerB.jobs.get(jobB.jobId)._executionPromise;
+  const resB = schedulerB.getJob(jobB.jobId);
+  assert.equal(resB.summary.skipped, 1);
+  assert.equal(resB.results[NODE_A].status, "skipped");
+  assert.equal(resB.results[NODE_A].reason, "capability-evidence-stale");
+});
