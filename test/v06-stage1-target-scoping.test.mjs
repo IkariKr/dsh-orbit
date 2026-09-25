@@ -482,3 +482,107 @@ test("Route proxy tracks active flows during HTTP request transit and decrements
     await new Promise((resolve) => backendServer.close(resolve));
   }
 });
+
+test("MultiNodeFlowTracker zero/negative limit does not leak phantom nodes, and rejects duplicate flow IDs", () => {
+  const trackerZero = new MultiNodeFlowTracker({ maxFlowsPerNode: 0 });
+  assert.throws(
+    () => trackerZero.trackFlow(NODE_A),
+    (err) => err.code === "node-flow-capacity-exceeded" && err.statusCode === 503,
+  );
+  assert.equal(trackerZero.getTotalActiveFlowCount(), 0);
+  assert.equal(trackerZero.getActiveNodeCount(), 0);
+  assert.deepEqual(trackerZero.getActiveNodeIds(), []);
+  assert.deepEqual(trackerZero.getSnapshot().nodes, {});
+
+  const tracker = new MultiNodeFlowTracker();
+  tracker.trackFlow(NODE_A, "unique_flow_1");
+  assert.throws(
+    () => tracker.trackFlow(NODE_B, "unique_flow_1"),
+    (err) => err.code === "duplicate-flow-id" && err.statusCode === 409,
+  );
+});
+
+test("Hub server returns 503 capacity-exhausted when flowTracker limits are reached, without server crash", async () => {
+  const registry = createTestRegistry();
+  registry.routeDomain = "dsh.example.com";
+
+  // Create backend server
+  const backendServer = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("backend ok");
+  });
+  await new Promise((resolve) => backendServer.listen(0, "127.0.0.1", resolve));
+  const backendPort = backendServer.address().port;
+
+  const { nodeId: nodeAId } = createSeededNode(registry, {
+    nodeId: NODE_A,
+    routeTarget: `http://127.0.0.1:${backendPort}`,
+  });
+
+  // Inject a flow tracker with capacity 0 to trigger capacity exhaustion on first request
+  const limitedTracker = new MultiNodeFlowTracker({ maxTotalFlows: 0 });
+
+  const testServer = await createTestServer(registry, {
+    flowTracker: limitedTracker,
+    lanBoundaryOnly: true,
+  });
+
+  try {
+    const routeAuthority = computeRouteAuthority(nodeAId, "dsh.example.com");
+    const serverPort = Number(new URL(testServer.baseUrl).port);
+
+    // 1. HTTP request returns 503 JSON without crashing
+    const httpRes = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port: serverPort,
+        path: "/test-endpoint",
+        headers: { host: routeAuthority },
+      }, (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+        });
+      });
+      req.on("error", reject);
+      req.end();
+    });
+
+    assert.equal(httpRes.status, 503);
+    assert.equal(httpRes.body.error.code, "capacity-exhausted");
+    assert.equal(httpRes.body.error.subcode, "flow-capacity-exceeded");
+
+    // 2. WebSocket upgrade returns 503 without crashing
+    const wsRes = await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port: serverPort,
+        path: "/test-ws",
+        headers: {
+          host: routeAuthority,
+          upgrade: "websocket",
+          connection: "Upgrade",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+          "sec-websocket-version": "13",
+        },
+      });
+      req.on("response", (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) });
+        });
+      });
+      req.on("error", reject);
+      req.end();
+    });
+
+    assert.equal(wsRes.status, 503);
+    assert.equal(wsRes.body.error.code, "capacity-exhausted");
+    assert.equal(wsRes.body.error.subcode, "flow-capacity-exceeded");
+  } finally {
+    await testServer.close();
+    await new Promise((resolve) => backendServer.close(resolve));
+  }
+});

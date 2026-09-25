@@ -317,7 +317,26 @@ export function createHubServer({ registry, options = {} }) {
         return;
       }
 
-      const endFlow = flowTracker.trackFlow(hostClass.nodeId);
+      let endFlow;
+      try {
+        endFlow = flowTracker.trackFlow(hostClass.nodeId);
+      } catch (err) {
+        if (err?.code === "flow-capacity-exceeded" || err?.code === "node-flow-capacity-exceeded") {
+          const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
+          response.writeHead(503, { "content-type": "application/json" });
+          response.end(JSON.stringify({
+            error: {
+              code: "capacity-exhausted",
+              subcode: err.code,
+              message: err.message,
+              selectorUrl,
+            },
+          }));
+          return;
+        }
+        throw err;
+      }
+
       let flowEnded = false;
       const onFlowDone = () => {
         if (!flowEnded) {
@@ -1112,7 +1131,24 @@ export function createHubServer({ registry, options = {} }) {
         return;
       }
 
-      const endWsFlow = flowTracker.trackFlow(hostClass.nodeId);
+      let endWsFlow;
+      try {
+        endWsFlow = flowTracker.trackFlow(hostClass.nodeId);
+      } catch (err) {
+        if (err?.code === "flow-capacity-exceeded" || err?.code === "node-flow-capacity-exceeded") {
+          const selectorUrl = getSelectorReturnUrl(registry.routeDomain, trustedExternalScheme);
+          sendSocketHttpError(socket, 503, "Service Unavailable", {}, {
+            error: {
+              code: "capacity-exhausted",
+              subcode: err.code,
+              message: err.message,
+              selectorUrl,
+            },
+          });
+          return;
+        }
+        throw err;
+      }
       socket.on("close", endWsFlow);
 
       if (eligibility.snapshot.routeMode === "reverse") {

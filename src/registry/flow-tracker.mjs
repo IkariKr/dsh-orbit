@@ -143,20 +143,28 @@ export class MultiNodeFlowTracker {
       throw error;
     }
 
-    let nodeSet = this.activeFlowsByNode.get(nodeId);
-    if (!nodeSet) {
-      nodeSet = new Set();
-      this.activeFlowsByNode.set(nodeId, nodeSet);
-    }
-
-    if (nodeSet.size >= this.maxFlowsPerNode) {
-      const error = new Error(`node flow capacity exceeded for ${nodeId}: ${nodeSet.size} >= ${this.maxFlowsPerNode}`);
+    const currentCount = this.activeFlowsByNode.get(nodeId)?.size ?? 0;
+    if (currentCount >= this.maxFlowsPerNode) {
+      const error = new Error(`node flow capacity exceeded for ${nodeId}: ${currentCount} >= ${this.maxFlowsPerNode}`);
       error.code = "node-flow-capacity-exceeded";
       error.statusCode = 503;
       throw error;
     }
 
     const flowId = explicitFlowId ?? `flow_${randomHex(16)}`;
+    if (this.flowToNode.has(flowId)) {
+      const error = new Error(`flowId already active: ${flowId}`);
+      error.code = "duplicate-flow-id";
+      error.statusCode = 409;
+      throw error;
+    }
+
+    let nodeSet = this.activeFlowsByNode.get(nodeId);
+    if (!nodeSet) {
+      nodeSet = new Set();
+      this.activeFlowsByNode.set(nodeId, nodeSet);
+    }
+
     nodeSet.add(flowId);
     this.flowToNode.set(flowId, nodeId);
 
