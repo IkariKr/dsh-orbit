@@ -45,7 +45,7 @@ The design deliberately maintains the core principles:
    - Real-time connection status tracking without page reload.
    - Dedicated launch/open actions binding explicitly to the target node's route authority.
 4. **D4: Resource Isolation Across Concurrent Nodes**
-   The Hub route proxy maintains independent routing lifecycles for distinct nodes. Reverse channel pools (`RFC-0012 D7`) are partitioned per node; high concurrency or a stalled channel on Node B cannot exhaust or delay data channels on Node A.
+   The Hub route proxy maintains independent routing lifecycles for distinct nodes. Reverse channel pools (RFC-0012 D5) are partitioned per node; high concurrency or a stalled channel on Node B cannot exhaust or delay data channels on Node A.
 5. **D5: Failure Containment & Outage Independence**
    If Node A fails, restarts, or loses reachability, active sessions and WebSocket streams to Node B continue completely uninterrupted. Node reachability status updates in the Hub read model do not tear down healthy peer connections.
 6. **D6: Acceptance Matrix for v0.6 (24 Canonical Fields)**
@@ -83,7 +83,7 @@ interface ScopedNodeAction {
 
 ### D3: Devices and Nodes read model & UI
 
-The Hub management API extends the read model (`GET /hub/nodes` / `GET /hub/overview`) with real-time session observability:
+The Hub management API extends the existing read model (`GET /hub/nodes`) with per-node `activeFlows` and introduces an authenticated overview endpoint (`GET /hub/overview`) with real-time session observability:
 
 ```json
 {
@@ -140,8 +140,8 @@ class MultiNodeFlowTracker {
 }
 ```
 
-- Reverse pools (`ReverseChannelPool`) are strictly partitioned per node ID.
-- Channel allocation waiters are scoped to `(nodeId, generation)` and cannot queue behind or interfere with other nodes.
+- Hub-side reverse channels (`ReverseChannelManager`, `src/registry/reverse-channel.mjs`) are strictly partitioned per node ID (`this.channels = new Map()`).
+- Channel allocation waiters in `ReverseChannelManager` are scoped to `(nodeId, sessionId)` and cannot queue behind or interfere with other nodes.
 
 ### D5: Failure independence
 
@@ -169,7 +169,7 @@ The v0.6 acceptance matrix defines 24 canonical fields:
 | 8 | `concurrentWebSocketPingPong` | mounted | Independent concurrent Ping/Pong exchanges on Node A and Node B |
 | 9 | `concurrentLargePayloadTransfer` | mounted | Concurrent large payloads (≥512 KiB) across nodes without channel blocking |
 | 10 | `cookieJarIsolationConcurrent` | mounted | Cookies set on Node A authority never leak or appear in Node B requests |
-| 11 | `originIsolationLocalStorage` | automated | Origin boundaries prevent cross-node DOM storage access |
+| 11 | `originIsolationLocalStorage` | mounted | Origin boundaries prevent cross-node DOM storage access |
 | 12 | `nodeAOutageNoImpactOnNodeB` | mounted | Node A container crash leaves concurrent Node B WebSocket and HTTP flows healthy |
 | 13 | `nodeBOutageNoImpactOnNodeA` | mounted | Node B reverse connection tear-down leaves Node A direct flows healthy |
 | 14 | `nodeARestartRecovery` | mounted | Restarting Node A restores its flows without interrupting Node B |

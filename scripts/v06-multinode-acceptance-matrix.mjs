@@ -12,7 +12,7 @@ const M24_DEFINITIONS = [
   { field: "concurrentWebSocketPingPong", minimumEvidence: "mounted" },
   { field: "concurrentLargePayloadTransfer", minimumEvidence: "mounted" },
   { field: "cookieJarIsolationConcurrent", minimumEvidence: "mounted" },
-  { field: "originIsolationLocalStorage", minimumEvidence: "automated" },
+  { field: "originIsolationLocalStorage", minimumEvidence: "mounted" },
   { field: "nodeAOutageNoImpactOnNodeB", minimumEvidence: "mounted" },
   { field: "nodeBOutageNoImpactOnNodeA", minimumEvidence: "mounted" },
   { field: "nodeARestartRecovery", minimumEvidence: "mounted" },

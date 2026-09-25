@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
@@ -16,6 +17,30 @@ const ROOT = new URL("../", import.meta.url);
 const read = (path) => readFile(new URL(path, ROOT), "utf8");
 
 const ACCEPTED_V05_CLOSURE = "bfcc541d84f3fc5fb3bb14fa54100276e41816ba";
+
+function gitObjectExists(commit) {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], {
+      cwd: new URL("../", import.meta.url),
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function gitIsAncestor(ancestor, descendant) {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+      cwd: new URL("../", import.meta.url),
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test("v0.6 construction package is anchored to the accepted v0.5 closure", async () => {
   const [authorizationJsonText, authorizationMdText, finalReviewText, roadmap, rfc, sop] = await Promise.all([
@@ -55,6 +80,22 @@ test("v0.6 construction package is anchored to the accepted v0.5 closure", async
   assert.match(sop, /Gate A/);
   assert.match(sop, /Gate B/);
   assert.match(sop, /Gate C/);
+
+  // Mechanically verify the authorization commit cited in the SOP
+  const sopAuthCommitMatch = /v0\.6 construction authorization commit:\s*```text\s*([0-9a-f]{40})\s*```/m.exec(sop);
+  assert.ok(sopAuthCommitMatch, "SOP must cite a 40-character lower-case hex authorization commit SHA");
+  const sopAuthCommit = sopAuthCommitMatch[1];
+  assert.equal(gitObjectExists(sopAuthCommit), true, `SOP authorization commit ${sopAuthCommit} must exist in git`);
+  assert.equal(
+    gitIsAncestor(ACCEPTED_V05_CLOSURE, sopAuthCommit),
+    true,
+    `SOP authorization commit must descend from accepted v0.5 closure ${ACCEPTED_V05_CLOSURE}`,
+  );
+  assert.equal(
+    gitIsAncestor(sopAuthCommit, "HEAD"),
+    true,
+    `current HEAD must descend from SOP authorization commit ${sopAuthCommit}`,
+  );
 });
 
 test("RFC-0013 freezes the exact 24-field multi-node acceptance matrix", async () => {
@@ -72,8 +113,8 @@ test("RFC-0013 freezes the exact 24-field multi-node acceptance matrix", async (
   assert.deepEqual(actual, expected);
   assert.deepEqual(M24_MATRIX_FIELDS, expected.map(({ field }) => field));
   assert.equal(new Set(M24_MATRIX_FIELDS).size, 24);
-  assert.equal(M24_AUTOMATED_FIELDS.length, 8);
-  assert.equal(M24_MOUNTED_REQUIRED_FIELDS.length, 16);
+  assert.equal(M24_AUTOMATED_FIELDS.length, 7);
+  assert.equal(M24_MOUNTED_REQUIRED_FIELDS.length, 17);
 });
 
 test("empty M24 matrix has exactly 24 NOT_EXECUTED fields", () => {
