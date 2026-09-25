@@ -17,6 +17,7 @@ import {
   mapDeleteResult,
   mapNodeDetail,
   mapNodeList,
+  mapOverview,
   mapTokenList,
   mapTokenMint,
 } from "./view-model.mjs";
@@ -267,9 +268,14 @@ export function createRegistryUi({ document, fetchImpl }) {
   async function loadNodes() {
     showBanner(LOADING_STATE);
     try {
-      const body = await api("/hub/nodes");
-      renderNodes(mapNodeList(body.nodes, body.activeSessions));
-      showBanner(body.nodes.length === 0 ? EMPTY_NODES_STATE : {});
+      const [nodesBody, overviewBody] = await Promise.all([
+        api("/hub/nodes"),
+        api("/hub/overview").catch(() => null),
+      ]);
+      const overview = overviewBody ? mapOverview(overviewBody) : null;
+      const activeSessions = overview?.activeSessions ?? nodesBody.activeSessions ?? null;
+      renderNodes(mapNodeList(nodesBody.nodes, activeSessions));
+      showBanner(nodesBody.nodes.length === 0 ? EMPTY_NODES_STATE : {});
     } catch (error) {
       if (error.sessionRequired) {
         if (await refreshSession()) return loadNodes();
@@ -411,6 +417,42 @@ export function createRegistryUi({ document, fetchImpl }) {
     }
   }
 
+  async function scopedOpenNode(nodeId) {
+    try {
+      const res = await api("/hub/actions/node", {
+        method: "POST",
+        body: { targetNodeId: nodeId, action: "open" },
+      });
+      if (res.url && typeof window !== "undefined") {
+        window.open(res.url, "_blank", "noopener,noreferrer");
+      }
+    } catch (error) {
+      if (error.sessionRequired) {
+        if (await refreshSession()) return scopedOpenNode(nodeId);
+        showBanner(SESSION_REQUIRED_STATE);
+      } else {
+        showBanner({ message: `node action failed: ${error.message}` });
+      }
+    }
+  }
+
+  async function scopedRefreshNode(nodeId) {
+    try {
+      await api("/hub/actions/node", {
+        method: "POST",
+        body: { targetNodeId: nodeId, action: "refresh" },
+      });
+      await loadNodes();
+    } catch (error) {
+      if (error.sessionRequired) {
+        if (await refreshSession()) return scopedRefreshNode(nodeId);
+        showBanner(SESSION_REQUIRED_STATE);
+      } else {
+        showBanner({ message: `node action failed: ${error.message}` });
+      }
+    }
+  }
+
   function wireActions() {
     $("nav-nodes").addEventListener("click", async () => {
       $("nav-nodes").classList.add("active");
@@ -444,23 +486,11 @@ export function createRegistryUi({ document, fetchImpl }) {
         return;
       }
       if (target.dataset?.scopedOpenId !== undefined) {
-        const nodeId = target.dataset.scopedOpenId;
-        const res = await api("/hub/actions/node", {
-          method: "POST",
-          body: { targetNodeId: nodeId, action: "open" },
-        });
-        if (res.url && typeof window !== "undefined") {
-          window.open(res.url, "_blank");
-        }
+        await scopedOpenNode(target.dataset.scopedOpenId);
         return;
       }
       if (target.dataset?.scopedRefreshId !== undefined) {
-        const nodeId = target.dataset.scopedRefreshId;
-        await api("/hub/actions/node", {
-          method: "POST",
-          body: { targetNodeId: nodeId, action: "refresh" },
-        });
-        await loadNodes();
+        await scopedRefreshNode(target.dataset.scopedRefreshId);
         return;
       }
       const row = target.closest(".node-id");

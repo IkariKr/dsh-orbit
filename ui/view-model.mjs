@@ -63,7 +63,14 @@ export function mapNodeRow(node) {
     state: node?.state ?? "unknown",
     routeMode: node?.routeMode ?? "direct",
     activeFlows: typeof node?.activeFlows === "number" ? node.activeFlows : 0,
-    targetScope: node?.nodeId ? { targetNodeId: node.nodeId, label: `target: ${node.nodeId.slice(0, 13)}…` } : null,
+    targetScope: node?.nodeId
+      ? {
+          targetNodeId: node.nodeId,
+          label: node.displayName
+            ? `target: ${node.displayName} (${node.nodeId.slice(0, 13)}…)`
+            : `target: ${node.nodeId.slice(0, 13)}…`,
+        }
+      : null,
     reversePresence: node?.reversePresence ?? null,
     reverseRouteReady: typeof node?.reverseRouteReady === "boolean" ? node.reverseRouteReady : null,
     reverseReason: node?.reverseReason ?? null,

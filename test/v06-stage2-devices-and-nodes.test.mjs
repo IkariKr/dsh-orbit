@@ -105,6 +105,13 @@ test("view-model: mapNodeRow maps activeFlows and targetScope", () => {
     label: `target: ${NODE_A.slice(0, 13)}…`,
   });
 
+  // Formats displayName when present
+  const namedRow = mapNodeRow({ nodeId: NODE_A, displayName: "Node Alfa" });
+  assert.deepEqual(namedRow.targetScope, {
+    targetNodeId: NODE_A,
+    label: `target: Node Alfa (${NODE_A.slice(0, 13)}…)`,
+  });
+
   // Default activeFlows is 0 when absent
   const defaultRow = mapNodeRow({ nodeId: NODE_B });
   assert.equal(defaultRow.activeFlows, 0);
@@ -251,28 +258,153 @@ test("app-level: scoped open and refresh actions dispatch to /hub/actions/node a
   const clickHandler = doc.getElementById("nodes-list").listeners["click"];
   assert.ok(typeof clickHandler === "function");
 
-  // 1. Simulate click on "open" scoped button
+  // 1. Simulate click on "open" scoped button with window.open spy
+  const openedWindows = [];
+  const origWindow = globalThis.window;
+  globalThis.window = {
+    open: (url, target, features) => {
+      openedWindows.push({ url, target, features });
+    },
+  };
+
+  try {
+    await clickHandler({
+      target: { dataset: { scopedOpenId: NODE_A } },
+    });
+
+    assert.equal(actionDispatches.length, 1);
+    assert.deepEqual(actionDispatches[0].payload, {
+      targetNodeId: NODE_A,
+      action: "open",
+    });
+    assert.equal(actionDispatches[0].headers["x-csrf-token"], "csrf123");
+    assert.equal(openedWindows.length, 1);
+    assert.equal(openedWindows[0].url, `https://n-${NODE_A.slice(5)}.dsh.example.com/`);
+    assert.equal(openedWindows[0].target, "_blank");
+    assert.equal(openedWindows[0].features, "noopener,noreferrer");
+
+    // 2. Simulate click on "refresh" scoped button
+    await clickHandler({
+      target: { dataset: { scopedRefreshId: NODE_A } },
+    });
+
+    assert.equal(actionDispatches.length, 2);
+    assert.deepEqual(actionDispatches[1].payload, {
+      targetNodeId: NODE_A,
+      action: "refresh",
+    });
+  } finally {
+    globalThis.window = origWindow;
+  }
+});
+
+test("app-level: scoped actions handle action error and display error banner", async () => {
+  const doc = createFakeDocument();
+
+  let fakeFetch = async (url, options = {}) => {
+    if (url === "/hub/session") {
+      return { ok: true, status: 200, json: async () => ({ principal: "admin@test", csrfToken: "csrf123" }) };
+    }
+    if (url === "/hub/nodes") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          nodes: [{ nodeId: NODE_A, state: "active", routeMode: "direct", activeFlows: 0 }],
+          activeSessions: { totalFlows: 0, distinctNodes: 0 },
+        }),
+      };
+    }
+    if (url === "/hub/actions/node") {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: {
+            code: "invalid-target-scope",
+            message: "targetNodeId must be a single string; arrays and multi-targets are denied",
+          },
+        }),
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+
+  const ui = createRegistryUi({ document: doc, fetchImpl: fakeFetch });
+  await ui.start();
+
+  const clickHandler = doc.getElementById("nodes-list").listeners["click"];
   await clickHandler({
     target: { dataset: { scopedOpenId: NODE_A } },
   });
 
-  assert.equal(actionDispatches.length, 1);
-  assert.deepEqual(actionDispatches[0].payload, {
-    targetNodeId: NODE_A,
-    action: "open",
-  });
-  assert.equal(actionDispatches[0].headers["x-csrf-token"], "csrf123");
+  const bannerHtml = doc.getElementById("state-banner").innerHTML;
+  assert.match(bannerHtml, /banner error/);
+  assert.match(bannerHtml, /node action failed: targetNodeId must be a single string/);
+});
 
-  // 2. Simulate click on "refresh" scoped button
+test("app-level: scoped actions recover from session expiration and retry action", async () => {
+  const doc = createFakeDocument();
+  let sessionCalls = 0;
+  let actionCalls = 0;
+  const tokensUsed = [];
+
+  let fakeFetch = async (url, options = {}) => {
+    if (url === "/hub/session") {
+      sessionCalls++;
+      const csrfToken = sessionCalls === 1 ? "csrf-initial" : "csrf-renewed";
+      return { ok: true, status: 200, json: async () => ({ principal: "admin@test", csrfToken }) };
+    }
+    if (url === "/hub/nodes") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          nodes: [{ nodeId: NODE_A, state: "active", routeMode: "direct", activeFlows: 0 }],
+          activeSessions: { totalFlows: 0, distinctNodes: 0 },
+        }),
+      };
+    }
+    if (url === "/hub/actions/node") {
+      actionCalls++;
+      tokensUsed.push(options.headers["x-csrf-token"]);
+      if (actionCalls === 1) {
+        // First attempt: session expired
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({
+            error: { code: "no-session", message: "session required" },
+          }),
+        };
+      }
+      // Second attempt after re-bootstrap: success
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          targetNodeId: NODE_A,
+          url: `https://n-${NODE_A.slice(5)}.dsh.example.com/`,
+        }),
+      };
+    }
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+
+  const ui = createRegistryUi({ document: doc, fetchImpl: fakeFetch });
+  await ui.start();
+
+  const clickHandler = doc.getElementById("nodes-list").listeners["click"];
   await clickHandler({
-    target: { dataset: { scopedRefreshId: NODE_A } },
+    target: { dataset: { scopedOpenId: NODE_A } },
   });
 
-  assert.equal(actionDispatches.length, 2);
-  assert.deepEqual(actionDispatches[1].payload, {
-    targetNodeId: NODE_A,
-    action: "refresh",
-  });
+  // Action retried after renewing session
+  assert.equal(sessionCalls, 2); // Initial bootstrap + refreshSession
+  assert.equal(actionCalls, 2);
+  assert.equal(tokensUsed[0], "csrf-initial");
+  assert.equal(tokensUsed[1], "csrf-renewed");
 });
 
 test("Hub Server integration: real-time multi-node read model and /hub/overview live query", async () => {
