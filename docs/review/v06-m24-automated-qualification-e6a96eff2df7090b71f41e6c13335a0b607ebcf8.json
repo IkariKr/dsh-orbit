@@ -6,8 +6,8 @@
   "candidateSha": "e6a96eff2df7090b71f41e6c13335a0b607ebcf8",
   "candidateFrozen": true,
   "branch": "chore/v0.6-stage5-candidate-freeze",
-  "runId": "v06-automated-e6a96eff2df7-20260926180000",
-  "executedAt": "2026-09-26T18:00:00.000Z",
+  "runId": "v06-automated-e6a96eff2df7-20260925192230",
+  "executedAt": "2026-09-25T19:22:30.000Z",
   "matrix": {
     "multiNodeListObservability": "PASS",
     "explicitTargetScopeRequired": "PASS",

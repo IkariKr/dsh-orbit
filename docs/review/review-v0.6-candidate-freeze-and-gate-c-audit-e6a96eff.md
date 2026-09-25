@@ -20,8 +20,8 @@
 
 ### Pre-freeze verification completed against the frozen candidate SHA:
 
-- `npm run check`：539 tests / 533 passed / 0 failed / 6 skipped; public-tree validation PASS
-- Focused v0.6 qualification suites (`test/v06-*.test.mjs`)：36 tests / 36 passed / 0 failed / 0 skipped
+- `npm run check`：540 tests / 534 passed / 0 failed / 6 skipped; public-tree validation PASS
+- Focused v0.6 qualification suites (`test/v06-*.test.mjs`)：37 tests / 37 passed / 0 failed / 0 skipped
 - `git diff --check`：PASS (clean)
 - local = remote：`e6a96eff2df7090b71f41e6c13335a0b607ebcf8` == `origin/chore/v0.6-stage5-candidate-freeze`
 - divergence：0/0
