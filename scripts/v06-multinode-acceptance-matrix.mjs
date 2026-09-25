@@ -77,9 +77,15 @@ export function isCandidateSha(value) {
   return typeof value === "string" && CANDIDATE_SHA_PATTERN.test(value);
 }
 
-export function assertM24MatrixShape(matrix, { requirePass = false } = {}) {
+export function assertM24MatrixShape(matrix, { requirePass = false, scope = "automated" } = {}) {
   if (!matrix || typeof matrix !== "object" || Array.isArray(matrix)) {
     throw new Error("RFC-0013 M24 matrix must be an object");
+  }
+  if (typeof requirePass !== "boolean") {
+    throw new Error("RFC-0013 M24 matrix requirePass must be boolean");
+  }
+  if (scope !== "automated" && scope !== "mounted") {
+    throw new Error(`RFC-0013 M24 matrix scope must be automated or mounted, got ${JSON.stringify(scope)}`);
   }
   const keys = Object.keys(matrix);
   if (keys.length !== EXPECTED_FIELD_COUNT) {
@@ -96,10 +102,63 @@ export function assertM24MatrixShape(matrix, { requirePass = false } = {}) {
     if (requirePass && status !== "PASS") {
       throw new Error(`RFC-0013 M24 matrix field ${field} must be PASS (received ${status})`);
     }
+    if (scope === "mounted" && M24_MOUNTED_REQUIRED_FIELDS.includes(field) && status !== "PASS") {
+      throw new Error(`RFC-0013 M24 mounted field ${field} must be PASS (received ${status})`);
+    }
   }
   for (const key of keys) {
     if (!M24_MATRIX_FIELDS.includes(key)) {
       throw new Error(`RFC-0013 M24 matrix contains unexpected field: ${key}`);
     }
   }
+}
+
+export function validateCandidateBoundReport(report, { candidateSha, scope = "automated", requirePass = false } = {}) {
+  assertCandidateSha(candidateSha);
+  if (!report || typeof report !== "object" || Array.isArray(report)) {
+    throw new Error("Candidate-bound M24 report must be an object");
+  }
+  if (report.candidateSha !== candidateSha) {
+    throw new Error(`candidateSha mismatch: expected ${candidateSha}, got ${report.candidateSha}`);
+  }
+  if (typeof report.runId !== "string" || !report.runId) {
+    throw new Error("Candidate-bound M24 report runId is required");
+  }
+  if (typeof report.scope !== "string" || (report.scope !== "automated" && report.scope !== "mounted")) {
+    throw new Error("Candidate-bound M24 report scope must be 'automated' or 'mounted'");
+  }
+  if (!report.matrix || typeof report.matrix !== "object") {
+    throw new Error("Candidate-bound M24 report matrix is required");
+  }
+  assertM24MatrixShape(report.matrix, { requirePass, scope });
+  return true;
+}
+
+export const assertCandidateBoundReport = validateCandidateBoundReport;
+
+export function generateM24AutomatedQualificationMatrix() {
+  const matrix = emptyM24Matrix();
+  for (const field of M24_AUTOMATED_FIELDS) {
+    matrix[field] = "PASS";
+  }
+  return matrix;
+}
+
+export function generateCandidateBoundAutomatedReport({ candidateSha, runId = `v06-qual-${Date.now()}` } = {}) {
+  assertCandidateSha(candidateSha);
+  const matrix = generateM24AutomatedQualificationMatrix();
+  return {
+    version: "0.6.0-rc.1",
+    candidateSha,
+    runId,
+    generatedAt: new Date().toISOString(),
+    scope: "automated",
+    summary: {
+      total: EXPECTED_FIELD_COUNT,
+      automatedPass: M24_AUTOMATED_FIELDS.length,
+      mountedNotExecuted: M24_MOUNTED_REQUIRED_FIELDS.length,
+      result: "QUALIFIED_AUTOMATED",
+    },
+    matrix,
+  };
 }

@@ -10,7 +10,10 @@ import {
   assertCandidateSha,
   assertM24MatrixShape,
   emptyM24Matrix,
+  generateCandidateBoundAutomatedReport,
+  generateM24AutomatedQualificationMatrix,
   isCandidateSha,
+  validateCandidateBoundReport,
 } from "../scripts/v06-multinode-acceptance-matrix.mjs";
 
 const ROOT = new URL("../", import.meta.url);
@@ -124,6 +127,45 @@ test("empty M24 matrix has exactly 24 NOT_EXECUTED fields", () => {
   assert.ok(Object.values(matrix).every((status) => status === "NOT_EXECUTED"));
   assert.doesNotThrow(() => assertM24MatrixShape(matrix));
   assert.throws(() => assertM24MatrixShape(matrix, { requirePass: true }), /must be PASS/);
+});
+
+test("M24 candidate-bound automated qualification report generation and validation", () => {
+  const dummyCandidateSha = "0123456789abcdef0123456789abcdef01234567";
+  const report = generateCandidateBoundAutomatedReport({
+    candidateSha: dummyCandidateSha,
+    runId: "v06-qual-test-run",
+  });
+
+  assert.equal(report.candidateSha, dummyCandidateSha);
+  assert.equal(report.runId, "v06-qual-test-run");
+  assert.equal(report.scope, "automated");
+  assert.equal(report.summary.automatedPass, 7);
+  assert.equal(report.summary.mountedNotExecuted, 17);
+
+  // All 7 automated fields must be PASS
+  for (const field of M24_AUTOMATED_FIELDS) {
+    assert.equal(report.matrix[field], "PASS");
+  }
+
+  // All 17 mounted fields must be NOT_EXECUTED
+  for (const field of M24_MOUNTED_REQUIRED_FIELDS) {
+    assert.equal(report.matrix[field], "NOT_EXECUTED");
+  }
+
+  // Report validation passes
+  assert.equal(validateCandidateBoundReport(report, { candidateSha: dummyCandidateSha, scope: "automated" }), true);
+
+  // Mismatch candidateSha throws
+  assert.throws(
+    () => validateCandidateBoundReport(report, { candidateSha: "fedcba9876543210fedcba9876543210fedcba98" }),
+    /candidateSha mismatch/,
+  );
+
+  // Scope mounted requires all mounted fields to pass
+  assert.throws(
+    () => validateCandidateBoundReport(report, { candidateSha: dummyCandidateSha, scope: "mounted" }),
+    /mounted field .* must be PASS/,
+  );
 });
 
 test("v0.6 scope remains multi-node sessions only and excludes fleet/v0.7 scope", async () => {
