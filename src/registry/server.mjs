@@ -908,7 +908,10 @@ export function createHubServer({ registry, options = {} }) {
   // RFC-0012 D4: live reverse control sessions are process memory only.
   // Runtime observability logs carry nodeIds and readiness only — never
   // session IDs, keys, or signatures (RFC-0012 D13).
-  const reverseChannels = options.reverseChannels ?? new ReverseChannelManager();
+  const reverseChannels =
+    options.reverseChannels && typeof options.reverseChannels.hasChannelForSession === "function"
+      ? options.reverseChannels
+      : new ReverseChannelManager(options.reverseChannels);
   const reverseSessions = options.reverseSessions ?? new ReverseSessionManager({
     idleTarget: reverseChannels.idleTarget,
     maxChannels: reverseChannels.maxChannels,
@@ -1149,7 +1152,16 @@ export function createHubServer({ registry, options = {} }) {
         }
         throw err;
       }
-      socket.on("close", endWsFlow);
+      let wsFlowEnded = false;
+      const onWsFlowDone = () => {
+        if (!wsFlowEnded) {
+          wsFlowEnded = true;
+          endWsFlow();
+        }
+      };
+      socket.on("close", onWsFlowDone);
+      socket.on("end", onWsFlowDone);
+      socket.on("error", onWsFlowDone);
 
       if (eligibility.snapshot.routeMode === "reverse") {
         void proxyReverseWebSocketUpgrade({

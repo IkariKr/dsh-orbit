@@ -912,6 +912,9 @@ export class ReverseChannelManager {
           flow.tearingDown = true;
           try { channel.sendJson({ type: "abort", requestId, code: "browser-close" }); } catch {}
         }
+        try {
+          if (!socket.destroyed) socket.destroy();
+        } catch {}
         flow.maybeIdle?.();
       };
       socket.on("data", onBrowserData);
