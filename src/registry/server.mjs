@@ -908,10 +908,17 @@ export function createHubServer({ registry, options = {} }) {
   // RFC-0012 D4: live reverse control sessions are process memory only.
   // Runtime observability logs carry nodeIds and readiness only — never
   // session IDs, keys, or signatures (RFC-0012 D13).
-  const reverseChannels =
-    options.reverseChannels && typeof options.reverseChannels.hasChannelForSession === "function"
-      ? options.reverseChannels
-      : new ReverseChannelManager(options.reverseChannels);
+  const rcOption = options.reverseChannels;
+  let reverseChannels;
+  if (rcOption === null || rcOption === undefined) {
+    reverseChannels = new ReverseChannelManager();
+  } else if (typeof rcOption.hasChannelForSession === "function" || typeof rcOption.registerChannel === "function") {
+    reverseChannels = rcOption;
+  } else if (typeof rcOption === "object") {
+    reverseChannels = new ReverseChannelManager(rcOption);
+  } else {
+    throw new TypeError("options.reverseChannels must be an object, ReverseChannelManager instance, or nullish");
+  }
   const reverseSessions = options.reverseSessions ?? new ReverseSessionManager({
     idleTarget: reverseChannels.idleTarget,
     maxChannels: reverseChannels.maxChannels,
