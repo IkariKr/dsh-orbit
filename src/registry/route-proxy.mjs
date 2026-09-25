@@ -269,11 +269,13 @@ export function sanitizeSetCookieHeader(headerValue) {
 }
 
 function sanitizeSingleCookie(cookieStr) {
-  // Split cookie attributes by semicolon
+  if (typeof cookieStr !== "string") return cookieStr;
+  // Split cookie attributes by semicolon; RFC 6265 §5.2 attribute parsing
   const parts = cookieStr.split(";");
-  const filtered = parts.filter((part) => {
+  const filtered = parts.filter((part, index) => {
+    if (index === 0) return true;
     const trimmed = part.trim();
-    return !trimmed.toLowerCase().startsWith("domain=");
+    return !/^domain\s*(=|$)/i.test(trimmed);
   });
   return filtered.join(";");
 }

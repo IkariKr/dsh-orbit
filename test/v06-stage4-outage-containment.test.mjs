@@ -6,6 +6,7 @@ import { createFrameParser, encodeFrame, computeSecWebSocketAccept, randomSecWeb
 import { generateNodeKeyPair, randomHex, sha256Hex } from "../src/registry/crypto.mjs";
 import { computeRouteAuthority, ROUTE_V1_LABEL } from "../src/registry/protocol.mjs";
 import { RouteNonceCache, signRouteRequest, verifyRouteRequest } from "../src/registry/route-auth.mjs";
+import { sanitizeSetCookieHeader } from "../src/registry/route-proxy.mjs";
 import { createTestRegistry, createTestServer } from "./helpers/registry-fixture.mjs";
 import { ReverseClient } from "../src/node/reverse-client.mjs";
 import { ReverseChannelPool } from "../src/node/reverse-channels.mjs";
@@ -93,8 +94,9 @@ async function startMockDsh({ label = "mock" } = {}) {
           "content-type": "text/plain",
           "x-node-fixture": label,
           "set-cookie": [
-            `session_${label}=secret_${label}; Domain=.${ROUTE_DOMAIN}; Path=/; HttpOnly; Secure`,
-            `pref_${label}=dark; Domain=.${ROUTE_DOMAIN}; Path=/`,
+            `session_${label}=secret_${label}; Domain = .${ROUTE_DOMAIN}; Path=/; HttpOnly; Secure`,
+            `pref_${label}=dark; Domain\t= .${ROUTE_DOMAIN}; Path=/`,
+            `flag_${label}=active; domain   = .${ROUTE_DOMAIN}; Path=/`,
           ],
         });
         res.end(`cookie-set-${label}`);
@@ -368,6 +370,86 @@ async function setupDualTopology() {
   };
 }
 
+class BrowserCookieJar {
+  constructor() {
+    this.cookies = []; // { name, value, host, domain, isHostOnly, path }
+  }
+
+  processSetCookieHeaders(responseHost, headers) {
+    const list = Array.isArray(headers) ? headers : (headers ? [headers] : []);
+    const host = responseHost.split(":")[0].toLowerCase();
+    for (const raw of list) {
+      if (!raw || typeof raw !== "string") continue;
+      const parts = raw.split(";");
+      const [nameVal, ...attrs] = parts;
+      const eqIdx = nameVal.indexOf("=");
+      if (eqIdx === -1) continue;
+      const name = nameVal.slice(0, eqIdx).trim();
+      const value = nameVal.slice(eqIdx + 1).trim();
+
+      let domain = null;
+      let path = "/";
+      for (const attr of attrs) {
+        const trimmed = attr.trim();
+        const aEq = trimmed.indexOf("=");
+        const aName = (aEq === -1 ? trimmed : trimmed.slice(0, aEq)).trim().toLowerCase();
+        const aVal = (aEq === -1 ? "" : trimmed.slice(aEq + 1)).trim();
+        if (aName === "domain" && aVal) {
+          domain = aVal.startsWith(".") ? aVal.slice(1).toLowerCase() : aVal.toLowerCase();
+        } else if (aName === "path" && aVal) {
+          path = aVal;
+        }
+      }
+
+      this.cookies.push({
+        name,
+        value,
+        host,
+        domain: domain || host,
+        isHostOnly: domain === null,
+        path,
+      });
+    }
+  }
+
+  getCookieHeader(targetHost) {
+    const target = targetHost.split(":")[0].toLowerCase();
+    const matched = [];
+    for (const c of this.cookies) {
+      if (c.isHostOnly) {
+        if (c.host === target) {
+          matched.push(`${c.name}=${c.value}`);
+        }
+      } else {
+        if (target === c.domain || target.endsWith(`.${c.domain}`)) {
+          matched.push(`${c.name}=${c.value}`);
+        }
+      }
+    }
+    return matched.length > 0 ? matched.join("; ") : null;
+  }
+}
+
+test("Stage 4: sanitizeSetCookieHeader strips Domain attributes with whitespace, tabs, and casing variants", () => {
+  const cases = [
+    ["c=1; Domain = .example.com; Path=/", "c=1; Path=/"],
+    ["c=2; Domain\t= .example.com; Path=/", "c=2; Path=/"],
+    ["c=3; domain   =example.com; Secure", "c=3; Secure"],
+    ["c=4; Domain; HttpOnly", "c=4; HttpOnly"],
+    ["c=5; domain=; Path=/", "c=5; Path=/"],
+    ["c=6; DOMAIN =foo.com; SameSite=Strict", "c=6; SameSite=Strict"],
+    ["domain=val; Domain = .sub.example.com; Path=/", "domain=val; Path=/"],
+  ];
+  for (const [input, expected] of cases) {
+    const result = sanitizeSetCookieHeader(input);
+    assert.equal(result, expected, `failed on input: ${input}`);
+    const attrs = result.split(";").slice(1).map((s) => s.trim().toLowerCase());
+    for (const a of attrs) {
+      assert.equal(/^domain\s*(=|$)/.test(a), false);
+    }
+  }
+});
+
 test("Stage 4: Cross-node route proof replay denial (RFC-0010 / RFC-0013 D1)", async () => {
   const env = await setupDualTopology();
   try {
@@ -450,13 +532,77 @@ test("Stage 4: Cross-node route proof replay denial (RFC-0010 / RFC-0013 D1)", a
     assert.equal(verifyUntrustedKey.status, 401);
 
     // Case 1d: Present tampered request directly to Node A RouteIngress over HTTP
-    const ingressRes = await requestHttp({
+    const ingressResA = await requestHttp({
       port: env.ingressA.port,
       host: env.authA,
       path: "/http",
       headers: tamperedHeaders,
     });
-    assert.equal(ingressRes.status, 401);
+    assert.equal(ingressResA.status, 401);
+
+    // Case 1e: Online RouteIngress for Node B rejects Node A's valid proof and cross-signed proof
+    const ingressB = new RouteIngress({
+      nodeId: env.nodeIdB,
+      routeDomain: ROUTE_DOMAIN,
+      dshTarget: env.dshB.target,
+      getTrustKeys: () => env.registry.getHubRouteKeysForNode(env.nodeIdB),
+    });
+    await ingressB.listen(0, "127.0.0.1");
+
+    try {
+      // Send proofA.headers directly to Node B's RouteIngress port
+      const crossToIngressB = await requestHttp({
+        port: ingressB.port,
+        host: env.authB,
+        path: "/http",
+        headers: proofA.headers,
+      });
+      assert.equal(crossToIngressB.status, 401);
+      const parsedCross = JSON.parse(crossToIngressB.body.toString());
+      assert.equal(parsedCross.error.code, "node-mismatch");
+
+      // Send tamperedHeaders (nodeId: Node B, but signed with Node A key) to Node B's RouteIngress
+      const tamperedToIngressB = await requestHttp({
+        port: ingressB.port,
+        host: env.authB,
+        path: "/http",
+        headers: tamperedHeaders,
+      });
+      assert.equal(tamperedToIngressB.status, 401);
+      const parsedTampered = JSON.parse(tamperedToIngressB.body.toString());
+      assert.equal(parsedTampered.error.code, "unknown-key");
+    } finally {
+      await ingressB.close();
+    }
+
+    // Case 1f: Online ReverseChannelPool for Node B rejects Node A's proof on channel open
+    const mockChannel = {
+      sessionId: "session-test",
+      state: "idle",
+      sentMessages: [],
+      closedCode: null,
+      sendJson: (msg) => { mockChannel.sentMessages.push(msg); return true; },
+      sendClose: (code) => { mockChannel.closedCode = code; },
+    };
+    await env.poolB.onChannelOpen(mockChannel, {
+      requestId: "req-replay-test",
+      mode: "http",
+      method: "GET",
+      rawTarget: "/http",
+      routeAuthority: env.authB,
+      headers: [["host", env.authB]],
+      routeProof: {
+        nodeId: proofA.headers["x-orbit-route-node"],
+        keyId: proofA.headers["x-orbit-route-key"],
+        timestamp: proofA.headers["x-orbit-route-timestamp"],
+        nonce: proofA.headers["x-orbit-route-nonce"],
+        signature: proofA.headers["x-orbit-route-signature"],
+      },
+    });
+    assert.equal(mockChannel.closedCode, 1008);
+    const abortMsg = mockChannel.sentMessages.find((m) => m.type === "abort");
+    assert.ok(abortMsg);
+    assert.equal(abortMsg.code, "node-mismatch");
   } finally {
     await env.close();
   }
@@ -465,6 +611,8 @@ test("Stage 4: Cross-node route proof replay denial (RFC-0010 / RFC-0013 D1)", a
 test("Stage 4: Cookie jar and origin isolation under concurrent multi-node browser access", async () => {
   const env = await setupDualTopology();
   try {
+    const jar = new BrowserCookieJar();
+
     // 1. Fetch cookie-test endpoint on Node A (direct)
     const resA = await requestHttp({
       port: env.hubPort,
@@ -479,8 +627,12 @@ test("Stage 4: Cookie jar and origin isolation under concurrent multi-node brows
       : [resA.headers["set-cookie"]];
 
     for (const sc of setCookiesA) {
-      assert.equal(sc.toLowerCase().includes("domain="), false, "Set-Cookie domain attribute must be stripped");
+      const attrs = sc.split(";").slice(1).map((s) => s.trim().toLowerCase());
+      for (const attr of attrs) {
+        assert.equal(/^domain\s*(=|$)/.test(attr), false, `Domain attribute must be stripped: ${attr}`);
+      }
     }
+    jar.processSetCookieHeaders(env.authA, setCookiesA);
 
     // 2. Fetch cookie-test endpoint on Node B (reverse)
     const resB = await requestHttp({
@@ -495,36 +647,64 @@ test("Stage 4: Cookie jar and origin isolation under concurrent multi-node brows
       : [resB.headers["set-cookie"]];
 
     for (const sc of setCookiesB) {
-      assert.equal(sc.toLowerCase().includes("domain="), false, "Set-Cookie domain attribute must be stripped");
+      const attrs = sc.split(";").slice(1).map((s) => s.trim().toLowerCase());
+      for (const attr of attrs) {
+        assert.equal(/^domain\s*(=|$)/.test(attr), false, `Domain attribute must be stripped: ${attr}`);
+      }
+    }
+    jar.processSetCookieHeaders(env.authB, setCookiesB);
+
+    // 3. Verify all cookies in the jar are strictly Host-Only
+    for (const cookie of jar.cookies) {
+      assert.equal(cookie.isHostOnly, true, `cookie ${cookie.name} must be host-only`);
     }
 
-    // 3. Verify browser origin cookie isolation:
-    // A compliant browser stores cookies per exact host authority (Host-Only).
-    // Send request to Node A with Node A's cookies
-    const inspectA = await requestHttp({
-      port: env.hubPort,
-      host: env.authA,
-      path: "/inspect-cookies",
-      headers: { cookie: "session_direct-a=secret_direct-a; pref_direct-a=dark" },
-    });
-    assert.equal(inspectA.status, 200);
-    const dataA = JSON.parse(inspectA.body.toString());
-    assert.equal(dataA.fixture, "direct-a");
-    assert.match(dataA.cookieHeader, /session_direct-a=secret_direct-a/);
-    assert.doesNotMatch(dataA.cookieHeader, /session_reverse-b/);
+    // 4. Verify browser origin cookie isolation using the simulated jar:
+    // When requesting Node B, jar must only supply Node B's cookies
+    const cookieForB = jar.getCookieHeader(env.authB);
+    assert.ok(cookieForB, "cookie header for Node B must not be empty");
+    assert.match(cookieForB, /session_reverse-b=/);
+    assert.doesNotMatch(cookieForB, /session_direct-a/);
+    assert.doesNotMatch(cookieForB, /pref_direct-a/);
 
-    // Send request to Node B with Node B's cookies
     const inspectB = await requestHttp({
       port: env.hubPort,
       host: env.authB,
       path: "/inspect-cookies",
-      headers: { cookie: "session_reverse-b=secret_reverse-b; pref_reverse-b=dark" },
+      headers: { cookie: cookieForB },
     });
     assert.equal(inspectB.status, 200);
     const dataB = JSON.parse(inspectB.body.toString());
     assert.equal(dataB.fixture, "reverse-b");
-    assert.match(dataB.cookieHeader, /session_reverse-b=secret_reverse-b/);
+    assert.match(dataB.cookieHeader, /session_reverse-b=/);
     assert.doesNotMatch(dataB.cookieHeader, /session_direct-a/);
+
+    // When requesting Node A, jar must only supply Node A's cookies
+    const cookieForA = jar.getCookieHeader(env.authA);
+    assert.ok(cookieForA, "cookie header for Node A must not be empty");
+    assert.match(cookieForA, /session_direct-a=/);
+    assert.doesNotMatch(cookieForA, /session_reverse-b/);
+    assert.doesNotMatch(cookieForA, /pref_reverse-b/);
+
+    const inspectA = await requestHttp({
+      port: env.hubPort,
+      host: env.authA,
+      path: "/inspect-cookies",
+      headers: { cookie: cookieForA },
+    });
+    assert.equal(inspectA.status, 200);
+    const dataA = JSON.parse(inspectA.body.toString());
+    assert.equal(dataA.fixture, "direct-a");
+    assert.match(dataA.cookieHeader, /session_direct-a=/);
+    assert.doesNotMatch(dataA.cookieHeader, /session_reverse-b/);
+
+    // 5. Negative counter-factual proof:
+    // If an UNSANITIZED header with Domain were received, verify that the jar DOES leak it
+    // across nodes, proving that the jar's domain logic actually tests the sanitization behavior.
+    const testJar = new BrowserCookieJar();
+    testJar.processSetCookieHeaders(env.authA, [`leak_cookie=leaked_val; Domain = .${ROUTE_DOMAIN}; Path=/`]);
+    const crossLeakedToB = testJar.getCookieHeader(env.authB);
+    assert.match(crossLeakedToB, /leak_cookie=leaked_val/, "Unsanitized domain cookie would leak across nodes");
   } finally {
     await env.close();
   }
