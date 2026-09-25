@@ -74,7 +74,7 @@ Construction is authorized by `V06-CONSTRUCTION-20260925-A1`
 built on the accepted v0.5 closure `bfcc541d84f3fc5fb3bb14fa54100276e41816ba`.
 The construction design package is [RFC-0013](rfc/0013-multi-node-sessions-and-target-scope.md)
 and the [v0.6 multistage SOP](sop/v0.6-multi-node-sessions-multistage-sop.md).
-RFC-0013 must receive Stage 0 / Gate A Architecture Review GO before v0.6 product runtime construction begins.
+v0.6 engineering acceptance is CLOSED (Final Review PASS, 24/24 M24 multi-node acceptance matrix PASS, release closure `6ef5c5118ddd69f580afd6c7e9d911de068d2f2a`, release tag `v0.6.0-rc.1`, see `docs/release-attestations/v0.6-stage6-final-review-2026-09-26.md`). Production promotion and DNS cutover each remain separately authorized.
 
 - concurrent connections to multiple selected nodes;
 - clear target scope in the UI;
@@ -89,10 +89,23 @@ Frozen scope for 0.6 construction:
 
 ## 0.7: fleet workflows
 
+Construction is authorized by `V07-CONSTRUCTION-20260926-A1`
+(`docs/release-attestations/v0.7-construction-authorization-2026-09-26.md`),
+built on the accepted v0.6 closure `6ef5c5118ddd69f580afd6c7e9d911de068d2f2a`.
+The construction design package is RFC-0014
+and the v0.7 multistage SOP.
+RFC-0014 must receive Stage 0 / Gate A Architecture Review GO before v0.7 product runtime construction begins.
+
 - explicit tasks targeting selected nodes;
 - capability-aware scheduling;
 - aggregated results;
 - auditability of target selection and execution scope.
+
+Frozen scope for 0.7 construction:
+
+- **MUST**: an RFC-first design record for fleet workflows and capability-aware scheduling (RFC-0014) before product construction; explicit tasks targeting selected registered nodes with strict target selection validation; capability-aware scheduling matching required capabilities against registered node capabilities; aggregated execution results, status summaries, and per-node result collection without silent drop; auditability of target selection, execution scope, operator identity, and job timeline; candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.7 release candidate; operator documentation (SOP) and architecture/API reference updates for fleet workflows.
+- **SHOULD**: first-class Fleet Workflows panel in the authenticated operator surface; real-time execution progress tracking across target nodes without full-page reloads; graceful handling of target node disconnection or outage during job execution.
+- **OUT OF SCOPE**: a new route authority system beyond RFC-0010; a new selector system beyond RFC-0011; a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy; unrelated UI refactor; unrelated runtime refactor; tag or release creation/mutation without separate authorization; production promotion; DNS cutover.
 
 ## Design constraints
 

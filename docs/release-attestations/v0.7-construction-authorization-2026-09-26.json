@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "authorizationId": "V07-CONSTRUCTION-20260926-A1",
+  "status": "AUTHORIZED_FOR_V07_CONSTRUCTION",
+  "issuedDate": "2026-09-26",
+  "acceptedV06Closure": "6ef5c5118ddd69f580afd6c7e9d911de068d2f2a",
+  "governancePredecessor": "docs/release-attestations/v0.6-stage6-final-review-2026-09-26.md",
+  "constructionLineage": {
+    "root": "the pushed commit containing this authorization record",
+    "mustDescendFromAcceptedV06Closure": true,
+    "mustDescendFromGovernancePredecessor": true,
+    "forbiddenBases": [
+      "historical unaccepted closure attempts",
+      "pre-final-review candidates",
+      "experimental worktrees"
+    ]
+  },
+  "objective": "v0.7 fleet workflows per docs/roadmap.md section 0.7: explicit tasks targeting selected nodes, capability-aware scheduling, aggregated results, auditability of target selection and execution scope",
+  "scopeFreeze": {
+    "must": [
+      "RFC-first design record for fleet workflows and capability-aware scheduling (RFC-0014) before product construction",
+      "explicit tasks targeting selected registered nodes with strict target selection validation",
+      "capability-aware scheduling matching required capabilities against registered node capabilities",
+      "aggregated execution results, status summaries, and per-node result collection without silent drop",
+      "auditability of target selection, execution scope, operator identity, and job timeline",
+      "candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.7 release candidate",
+      "operator documentation (SOP) and architecture/API reference updates for fleet workflows"
+    ],
+    "should": [
+      "first-class Fleet Workflows panel in the authenticated operator surface",
+      "real-time execution progress tracking across target nodes without full-page reloads",
+      "graceful handling of target node disconnection or outage during job execution"
+    ],
+    "outOfScope": [
+      "a new route authority system beyond RFC-0010",
+      "a new selector system beyond RFC-0011",
+      "a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy",
+      "unrelated UI refactor",
+      "unrelated runtime refactor",
+      "tag or release creation/mutation without separate authorization",
+      "production promotion without separate authorization",
+      "DNS cutover without separate authorization"
+    ]
+  },
+  "allowedPathRules": [
+    "docs/**",
+    "src/**",
+    "bin/**",
+    "ui/**",
+    "test/**",
+    "scripts/**",
+    "docker-registry/**",
+    "CHANGELOG.md",
+    "README.md",
+    "package.json: dependency changes require recorded justification",
+    "package-lock.json: only mechanically resulting changes"
+  ],
+  "forbiddenActions": [
+    "reopening or rewriting the accepted v0.6 closure lineage or its attestation",
+    "product construction before RFC-0014 and Stage 0 Gate A approval is recorded",
+    "changing the DSH baseline outside the DSH baseline promotion policy",
+    "tag or release creation/mutation without separate authorization",
+    "production promotion without separate authorization",
+    "DNS cutover without separate authorization"
+  ],
+  "evidenceRequirements": {
+    "candidateMustBeFrozenBeforeEvidence": true,
+    "candidateFreezeRule": "exactly one frozen candidate per evidence round; once frozen, later phases produce only qualification/evidence; a real problem means a new candidate and fresh candidate-bound evidence",
+    "fleetWorkflowMatrixRequired": "a dedicated fleet workflow acceptance matrix must be defined in RFC-0014 and mechanically enforced before the v0.7 mounted evidence run",
+    "closureRule": "one evidence-only closure, direct child of the frozen candidate, attestation must not reference its own closure SHA",
+    "finalReviewRequired": true
+  },
+  "separationOfPowers": {
+    "tagReleaseAuthorizationSeparate": true,
+    "productionPromotionAuthorizationSeparate": true,
+    "dnsCutoverAuthorizationSeparate": true,
+    "v07NotGatedOnProductionPromotionOrDnsCutover": true
+  }
+}
