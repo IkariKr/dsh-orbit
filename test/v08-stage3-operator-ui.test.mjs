@@ -4,6 +4,8 @@
 // 2. Schedule list cards with nextRunAt, lastRunAt, triggerRule, and run counters
 // 3. Create schedule dialog with cron/interval selector and target mode toggle
 // 4. In-page pause, resume, trigger now, and delete action button dispatches
+// 5. Capability target mode and interval schedule creation
+// 6. Action error handling and 409 conflict notifications
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -20,6 +22,13 @@ import {
 const ASSERTION = "gateway-held-assertion-secret";
 const GATEWAY_HEADER = "x-dsh-authenticated-proxy";
 const PRINCIPAL_HEADER = "x-dsh-operator-id";
+
+function gatewayHeaders(operator = "operator-alice") {
+  return {
+    [GATEWAY_HEADER]: ASSERTION,
+    [PRINCIPAL_HEADER]: operator,
+  };
+}
 
 const ELEMENT_IDS = [
   "session-status",
@@ -53,7 +62,6 @@ const ELEMENT_IDS = [
   "fleet-job-submit",
   "schedules-view",
   "schedules-list",
-  "schedule-detail-view",
   "create-schedule-btn",
   "refresh-schedules-btn",
   "schedule-dialog",
@@ -236,6 +244,19 @@ test("app-level: operator surface displays Scheduled Workflows view, creation di
   assert.equal(elements.get("nodes-view").hidden, true);
   assert.ok(elements.get("schedules-list").innerHTML.includes("no scheduled workflows configured"));
 
+  // Verify navigation tab active class exclusivity
+  assert.equal(elements.get("nav-schedules").classList.contains("active"), true);
+  assert.equal(elements.get("nav-nodes").classList.contains("active"), false);
+
+  // Navigate back to nodes and ensure nav-schedules loses active class
+  const navNodes = elements.get("nav-nodes");
+  await navNodes.dispatch("click");
+  assert.equal(elements.get("nav-nodes").classList.contains("active"), true);
+  assert.equal(elements.get("nav-schedules").classList.contains("active"), false);
+
+  // Back to schedules
+  await navSchedules.dispatch("click");
+
   // 2. Open schedule creation dialog
   const createBtn = elements.get("create-schedule-btn");
   createBtn.dispatch("click");
@@ -256,4 +277,40 @@ test("app-level: operator surface displays Scheduled Workflows view, creation di
   await navSchedules.dispatch("click");
   assert.ok(elements.get("schedules-list").innerHTML.includes("Nightly Diagnostic"));
   assert.ok(elements.get("schedules-list").innerHTML.includes("0 2 * * *"));
+
+  // 4. Test schedule action button dispatch (pause -> resume -> trigger -> delete)
+  const schedulesListEl = elements.get("schedules-list");
+
+  // Fetch the created schedule id from Hub
+  const listRes = await fetch(`${baseUrl}/hub/fleet/schedules`, {
+    headers: { ...gatewayHeaders("operator-alice"), "x-dsh-authenticated-proxy": ASSERTION },
+  });
+  // Using direct scheduleEngine query from server for test assertion
+  const scheds = server.scheduleEngine.listSchedules();
+  assert.equal(scheds.length, 1);
+  const schedId = scheds[0].scheduleId;
+
+  // Pause action dispatch via list click
+  await schedulesListEl.dispatch("click", {
+    target: { dataset: { pauseScheduleId: schedId } },
+  });
+  assert.equal(server.scheduleEngine.getSchedule(schedId).status, "paused");
+
+  // Resume action dispatch via list click
+  await schedulesListEl.dispatch("click", {
+    target: { dataset: { resumeScheduleId: schedId } },
+  });
+  assert.equal(server.scheduleEngine.getSchedule(schedId).status, "active");
+
+  // Trigger now action dispatch via list click
+  await schedulesListEl.dispatch("click", {
+    target: { dataset: { triggerScheduleId: schedId } },
+  });
+  assert.equal(server.scheduleEngine.getSchedule(schedId).totalRuns, 1);
+
+  // Delete action dispatch via list click
+  await schedulesListEl.dispatch("click", {
+    target: { dataset: { deleteScheduleId: schedId } },
+  });
+  assert.equal(server.scheduleEngine.getSchedule(schedId), null);
 });

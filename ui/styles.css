@@ -133,6 +133,7 @@ button.danger { background: var(--bad); color: #fff; border: none; padding: 7px 
 .badge.completed { border-color: var(--ok); color: var(--ok); }
 .badge.failed { border-color: var(--bad); color: var(--bad); }
 .badge.partial { border-color: var(--warn); color: var(--warn); }
+.badge.paused { border-color: var(--muted); color: var(--muted); }
 .badge.timeout, .badge.unreachable, .badge.skipped { border-color: var(--bad); color: var(--bad); }
 .node-results-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
 .log-box { background: #0b0f14; border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 150px; overflow-y: auto; color: #a5d6ff; }

@@ -737,9 +737,13 @@ export function createRegistryUi({ document, fetchImpl }) {
 
   function renderScheduleRow(sched) {
     const isPaused = sched.status === "paused";
-    const pauseResumeBtn = isPaused
-      ? `<button class="primary" data-resume-schedule-id="${escapeHtml(sched.scheduleId)}">resume</button>`
-      : `<button class="secondary" data-pause-schedule-id="${escapeHtml(sched.scheduleId)}">pause</button>`;
+    const isCompleted = sched.status === "completed";
+    let pauseResumeBtn = "";
+    if (isPaused) {
+      pauseResumeBtn = `<button class="primary" data-resume-schedule-id="${escapeHtml(sched.scheduleId)}">resume</button>`;
+    } else if (!isCompleted) {
+      pauseResumeBtn = `<button class="secondary" data-pause-schedule-id="${escapeHtml(sched.scheduleId)}">pause</button>`;
+    }
 
     return `
       <div class="panel fleet-job-card">
@@ -822,12 +826,15 @@ export function createRegistryUi({ document, fetchImpl }) {
     const body = {
       name,
       scheduleType,
-      cronExpression,
-      intervalMs,
       taskType,
       targetSpec,
       concurrencyPolicy,
     };
+    if (scheduleType === "cron") {
+      body.cronExpression = cronExpression;
+    } else if (scheduleType === "interval") {
+      body.intervalMs = intervalMs;
+    }
 
     try {
       await api("/hub/fleet/schedules", { method: "POST", body });
@@ -848,6 +855,7 @@ export function createRegistryUi({ document, fetchImpl }) {
       $("nav-nodes")?.classList.add("active");
       $("nav-tokens")?.classList.remove("active");
       $("nav-fleet")?.classList.remove("active");
+      $("nav-schedules")?.classList.remove("active");
       if ($("tokens-view")) $("tokens-view").hidden = true;
       if ($("fleet-view")) $("fleet-view").hidden = true;
       if ($("schedules-view")) $("schedules-view").hidden = true;
@@ -908,25 +916,33 @@ export function createRegistryUi({ document, fetchImpl }) {
     $("schedule-submit")?.addEventListener("click", submitSchedule);
     $("schedules-list")?.addEventListener("click", async (event) => {
       const target = event.target;
-      if (target.dataset?.pauseScheduleId) {
-        await api(`/hub/fleet/schedules/${target.dataset.pauseScheduleId}/pause`, { method: "POST" });
-        await loadSchedules();
-        return;
-      }
-      if (target.dataset?.resumeScheduleId) {
-        await api(`/hub/fleet/schedules/${target.dataset.resumeScheduleId}/resume`, { method: "POST" });
-        await loadSchedules();
-        return;
-      }
-      if (target.dataset?.triggerScheduleId) {
-        await api(`/hub/fleet/schedules/${target.dataset.triggerScheduleId}/trigger`, { method: "POST" });
-        showBanner({ message: `schedule triggered manually` });
-        return;
-      }
-      if (target.dataset?.deleteScheduleId) {
-        await api(`/hub/fleet/schedules/${target.dataset.deleteScheduleId}`, { method: "DELETE" });
-        await loadSchedules();
-        return;
+      try {
+        if (target.dataset?.pauseScheduleId) {
+          await api(`/hub/fleet/schedules/${target.dataset.pauseScheduleId}/pause`, { method: "POST" });
+          await loadSchedules();
+          showBanner({ message: "schedule paused" });
+          return;
+        }
+        if (target.dataset?.resumeScheduleId) {
+          await api(`/hub/fleet/schedules/${target.dataset.resumeScheduleId}/resume`, { method: "POST" });
+          await loadSchedules();
+          showBanner({ message: "schedule resumed" });
+          return;
+        }
+        if (target.dataset?.triggerScheduleId) {
+          await api(`/hub/fleet/schedules/${target.dataset.triggerScheduleId}/trigger`, { method: "POST" });
+          await loadSchedules();
+          showBanner({ message: `schedule triggered manually` });
+          return;
+        }
+        if (target.dataset?.deleteScheduleId) {
+          await api(`/hub/fleet/schedules/${target.dataset.deleteScheduleId}`, { method: "DELETE" });
+          await loadSchedules();
+          showBanner({ message: "schedule deleted" });
+          return;
+        }
+      } catch (error) {
+        showBanner({ message: `action failed: ${error.message}` });
       }
     });
     $("trigger-fleet-job-btn")?.addEventListener("click", openTriggerFleetJobDialog);
