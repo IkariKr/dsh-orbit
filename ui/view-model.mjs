@@ -204,28 +204,35 @@ export function mapDeleteResult(result) {
 
 export function mapFleetJobRow(job) {
   const summary = job?.summary ?? {};
-  const total = typeof summary.totalTargets === "number" ? summary.totalTargets : 0;
-  const completed = typeof summary.completed === "number" ? summary.completed : 0;
-  const failed = typeof summary.failed === "number" ? summary.failed : 0;
-  const timeout = typeof summary.timeout === "number" ? summary.timeout : 0;
-  const unreachable = typeof summary.unreachable === "number" ? summary.unreachable : 0;
-  const skipped = typeof summary.skipped === "number" ? summary.skipped : 0;
+  const toNonNegativeInt = (v) => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+  const total = toNonNegativeInt(summary.totalTargets);
+  const completed = toNonNegativeInt(summary.completed);
+  const failed = toNonNegativeInt(summary.failed);
+  const timeout = toNonNegativeInt(summary.timeout);
+  const unreachable = toNonNegativeInt(summary.unreachable);
+  const skipped = toNonNegativeInt(summary.skipped);
   const settled = completed + failed + timeout + unreachable + skipped;
+  const status = job?.status ?? job?.state ?? "pending";
+  const isCompleted = status === "completed";
   const progressPercent =
     total > 0
-      ? Math.min(100, Math.round((settled / total) * 100))
-      : job?.state === "completed"
+      ? Math.min(100, Math.max(0, Math.round((settled / total) * 100)))
+      : isCompleted
         ? 100
         : 0;
+
+  const finishedAt = job?.finishedAt ?? job?.completedAt ?? null;
 
   return {
     jobId: job?.jobId ?? null,
     taskType: job?.taskType ?? "diagnostic",
-    state: job?.state ?? "pending",
+    status,
+    state: status,
     createdAt: job?.createdAt ?? null,
     updatedAt: job?.updatedAt ?? null,
     startedAt: job?.startedAt ?? null,
-    completedAt: job?.completedAt ?? null,
+    finishedAt,
+    completedAt: finishedAt,
     totalTargets: total,
     completed,
     failed,
@@ -254,19 +261,27 @@ export function mapFleetJobDetail(job) {
   const nodeResults = Object.entries(results).map(([nodeId, res]) => ({
     nodeId,
     status: res?.status ?? "pending",
-    exitCode: typeof res?.exitCode === "number" ? res.exitCode : null,
-    durationMs: typeof res?.durationMs === "number" ? res.durationMs : null,
+    exitCode: Number.isFinite(res?.exitCode) ? Math.floor(res.exitCode) : null,
+    durationMs: Number.isFinite(res?.durationMs) && res.durationMs >= 0 ? Math.floor(res.durationMs) : null,
     startedAt: res?.startedAt ?? null,
-    completedAt: res?.completedAt ?? null,
+    finishedAt: res?.finishedAt ?? res?.completedAt ?? null,
+    completedAt: res?.finishedAt ?? res?.completedAt ?? null,
     stdout: typeof res?.stdout === "string" ? res.stdout : "",
     stderr: typeof res?.stderr === "string" ? res.stderr : "",
     error: res?.error ?? null,
   }));
 
+  const timeoutMs =
+    Number.isFinite(job?.timeoutMs) && job.timeoutMs > 0
+      ? Math.floor(job.timeoutMs)
+      : Number.isFinite(job?.payload?.timeoutMs) && job.payload.timeoutMs > 0
+        ? Math.floor(job.payload.timeoutMs)
+        : null;
+
   return {
     ...base,
     payload: job?.payload ?? null,
-    timeoutMs: typeof job?.timeoutMs === "number" ? job.timeoutMs : null,
+    timeoutMs,
     nodeResults,
   };
 }

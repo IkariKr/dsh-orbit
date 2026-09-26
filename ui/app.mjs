@@ -465,17 +465,18 @@ export function createRegistryUi({ document, fetchImpl }) {
   }
 
   function renderFleetJobRow(job) {
-    const isTerminal = job.state === "completed" || job.state === "failed" || job.state === "partial";
+    const status = job.status ?? job.state ?? "pending";
+    const isTerminal = status === "completed" || status === "failed" || status === "partial";
     const cancelBtn = !isTerminal
       ? `<button class="danger" data-cancel-job-id="${escapeHtml(job.jobId)}">cancel</button>`
       : "";
-    const progressClass = job.state === "completed" ? "completed" : job.state === "failed" ? "failed" : "";
+    const progressClass = status === "completed" ? "completed" : status === "failed" ? "failed" : "";
     return `<div class="panel fleet-job-row" data-job-id="${escapeHtml(job.jobId)}">
       <div class="fleet-job-header">
         <div>
           <span class="job-id" data-view-job-id="${escapeHtml(job.jobId)}">${escapeHtml(job.jobId)}</span>
-          <span class="badge ${badgeClass("taskType", job.taskType)}">${escapeHtml(job.taskType)}</span>
-          <span class="badge ${badgeClass("state", job.state)}">${escapeHtml(job.state)}</span>
+          <span class="${badgeClass("taskType", job.taskType)}">${escapeHtml(job.taskType)}</span>
+          <span class="${badgeClass("state", status)}">${escapeHtml(status)}</span>
         </div>
         <div class="node-actions">
           <button class="secondary" data-view-job-id="${escapeHtml(job.jobId)}">view details</button>
@@ -506,7 +507,8 @@ export function createRegistryUi({ document, fetchImpl }) {
   function renderFleetJobDetail(detail) {
     const detailView = $("fleet-job-detail-view");
     if (!detailView) return;
-    const isTerminal = detail.state === "completed" || detail.state === "failed" || detail.state === "partial";
+    const status = detail.status ?? detail.state ?? "pending";
+    const isTerminal = status === "completed" || status === "failed" || status === "partial";
     const cancelBtn = !isTerminal
       ? `<button class="danger" id="cancel-detail-job" data-job-id="${escapeHtml(detail.jobId)}">cancel job</button>`
       : "";
@@ -518,7 +520,7 @@ export function createRegistryUi({ document, fetchImpl }) {
       if (r.error) output += `<div class="banner error" style="margin-top:4px;">${escapeHtml(typeof r.error === "object" ? JSON.stringify(r.error) : r.error)}</div>`;
       return `<tr>
         <td style="font-family:ui-monospace,monospace;">${escapeHtml(r.nodeId)}</td>
-        <td><span class="badge ${badgeClass("status", r.status)}">${escapeHtml(r.status)}</span></td>
+        <td><span class="${badgeClass("status", r.status)}">${escapeHtml(r.status)}</span></td>
         <td>${r.durationMs !== null ? `${r.durationMs}ms` : "-"}</td>
         <td>${r.exitCode !== null ? r.exitCode : "-"}</td>
         <td style="max-width:400px;">${output || "-"}</td>
@@ -533,6 +535,8 @@ export function createRegistryUi({ document, fetchImpl }) {
       ? JSON.stringify(detail.payload, null, 2)
       : "none";
 
+    const completedAtText = detail.completedAt ?? detail.finishedAt ?? "-";
+
     detailView.innerHTML = `
       <div style="margin-bottom:12px; display:flex; gap:10px; align-items:center;">
         <button id="back-to-fleet-jobs" class="secondary">← back to jobs</button>
@@ -542,11 +546,11 @@ export function createRegistryUi({ document, fetchImpl }) {
         <h2>Fleet Job: ${escapeHtml(detail.jobId)}</h2>
         <dl class="detail-grid">
           <dt>task type</dt><dd>${escapeHtml(detail.taskType)}</dd>
-          <dt>state</dt><dd><span class="badge ${badgeClass("state", detail.state)}">${escapeHtml(detail.state)}</span></dd>
+          <dt>state</dt><dd><span class="${badgeClass("state", status)}">${escapeHtml(status)}</span></dd>
           <dt>created</dt><dd>${escapeHtml(detail.createdAt ?? "-")}</dd>
           <dt>updated</dt><dd>${escapeHtml(detail.updatedAt ?? "-")}</dd>
           <dt>started</dt><dd>${escapeHtml(detail.startedAt ?? "-")}</dd>
-          <dt>completed</dt><dd>${escapeHtml(detail.completedAt ?? "-")}</dd>
+          <dt>completed</dt><dd>${escapeHtml(completedAtText)}</dd>
           <dt>timeout</dt><dd>${detail.timeoutMs !== null ? `${detail.timeoutMs}ms` : "-"}</dd>
         </dl>
       </div>
@@ -556,7 +560,7 @@ export function createRegistryUi({ document, fetchImpl }) {
           Progress: ${detail.progressPercent}% (${detail.settled} / ${detail.totalTargets} settled)
         </div>
         <div class="progress-bar-container">
-          <div class="progress-bar-fill ${detail.state === "completed" ? "completed" : detail.state === "failed" ? "failed" : ""}" style="width: ${detail.progressPercent}%"></div>
+          <div class="progress-bar-fill ${status === "completed" ? "completed" : status === "failed" ? "failed" : ""}" style="width: ${detail.progressPercent}%"></div>
         </div>
         <div class="dimension-badges" style="margin-top:10px;">
           <span class="badge"><span class="dimension">total</span>${detail.totalTargets}</span>
@@ -707,7 +711,11 @@ export function createRegistryUi({ document, fetchImpl }) {
     }
 
     const body = { taskType, targetSpec, timeoutMs };
-    if (payload !== undefined) body.payload = payload;
+    if (payload !== undefined) {
+      body.payload = { ...payload, timeoutMs };
+    } else {
+      body.payload = { timeoutMs };
+    }
 
     try {
       const res = await api("/hub/fleet/jobs", { method: "POST", body });

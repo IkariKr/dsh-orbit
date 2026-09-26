@@ -284,6 +284,7 @@ export class FleetJobScheduler {
     payload = {},
     targetSpec,
     requiredCapabilities = [],
+    timeoutMs = null,
     operatorPrincipal = "operator",
   }) {
     // 1. Idempotency check on existing jobId
@@ -347,6 +348,13 @@ export class FleetJobScheduler {
     // 5. Generate jobId if needed
     const finalJobId = jobId || `job_${randomHex(16)}`;
 
+    const parsedTimeout =
+      Number.isFinite(timeoutMs) && timeoutMs > 0
+        ? Math.floor(timeoutMs)
+        : Number.isFinite(clonedPayload?.timeoutMs) && clonedPayload.timeoutMs > 0
+          ? Math.floor(clonedPayload.timeoutMs)
+          : null;
+
     // 6. Initialize per-node results
     const results = {};
     for (const nodeId of targetValidation.resolvedNodeIds) {
@@ -362,6 +370,7 @@ export class FleetJobScheduler {
       payload: clonedPayload,
       targetSpec: clonedTargetSpec,
       requiredCapabilities: Array.isArray(requiredCapabilities) ? [...requiredCapabilities] : [],
+      timeoutMs: parsedTimeout,
       operatorPrincipal: String(operatorPrincipal || "operator"),
       createdAt: toIsoString(this.now()),
       startedAt: null,
@@ -408,6 +417,7 @@ export class FleetJobScheduler {
       payload: scrub ? scrubSensitiveCredentials(rawPayload) : rawPayload,
       targetSpec: safeClone(job.targetSpec, {}),
       requiredCapabilities: [...job.requiredCapabilities],
+      timeoutMs: job.timeoutMs ?? null,
       operatorPrincipal: job.operatorPrincipal,
       createdAt: job.createdAt,
       startedAt: job.startedAt,
@@ -526,9 +536,12 @@ export class FleetJobScheduler {
       const startMs = this.now() instanceof Date ? this.now().getTime() : Date.now();
 
       try {
-        const timeoutMs = typeof job.payload.timeoutMs === "number" && job.payload.timeoutMs > 0
-          ? job.payload.timeoutMs
-          : this.defaultTimeoutMs;
+        const timeoutMs =
+          typeof job.timeoutMs === "number" && job.timeoutMs > 0
+            ? job.timeoutMs
+            : typeof job.payload?.timeoutMs === "number" && job.payload.timeoutMs > 0
+              ? job.payload.timeoutMs
+              : this.defaultTimeoutMs;
 
         const result = await this.dispatchWithTimeout(nodeId, job, timeoutMs);
 

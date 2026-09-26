@@ -820,6 +820,7 @@ export function createHubServer({ registry, options = {} }) {
           payload: body.payload,
           targetSpec: body.targetSpec,
           requiredCapabilities: body.requiredCapabilities,
+          timeoutMs: body.timeoutMs,
           operatorPrincipal: session.operatorPrincipal,
         });
       } catch (err) {

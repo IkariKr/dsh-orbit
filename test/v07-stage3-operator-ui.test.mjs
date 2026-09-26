@@ -1,6 +1,6 @@
 // RFC-0014 M28 Acceptance Matrix Field 10: operatorUiFleetWorkflowsView (Stage 3).
 // Tests operator UI Fleet Workflows view, job trigger dialog, progress indicators,
-// aggregated summary view, and detail inspect / cancel flows.
+// aggregated summary view, capability mode switching, detail inspect, and cancel flows.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -156,7 +156,7 @@ async function withHub(t, options = {}) {
   return { registry, server, baseUrl };
 }
 
-async function enrollRawNode(baseUrl, registry) {
+async function enrollRawNode(baseUrl, registry, capabilities = []) {
   const plain = registry.mintEnrollmentToken({ actor: "operator", purpose: "enroll" });
   const response = await fetch(`${baseUrl}/api/v1/enroll`, {
     method: "POST",
@@ -168,7 +168,14 @@ async function enrollRawNode(baseUrl, registry) {
     }),
   });
   assert.equal(response.status, 200);
-  return (await response.json()).nodeId;
+  const { nodeId } = await response.json();
+  if (capabilities.length > 0) {
+    const caps = capabilities.map((name) => ({ name, version: 1 }));
+    registry.db.prepare(
+      "UPDATE nodes SET capabilities = ?, capabilities_stale = 0 WHERE node_id = ?",
+    ).run(JSON.stringify(caps), nodeId);
+  }
+  return nodeId;
 }
 
 async function click(element, eventData = {}) {
@@ -181,14 +188,15 @@ async function click(element, eventData = {}) {
 // -----------------------------------------------------------------------------
 
 test("view-model: mapFleetJobRow computes progress percentage and maps all metrics accurately", () => {
-  const job = {
+  // Test with real Hub contract: status and finishedAt
+  const jobFromHub = {
     jobId: "job_12345678",
     taskType: "diagnostic",
-    state: "running",
+    status: "running",
     createdAt: "2026-09-26T00:00:00.000Z",
     updatedAt: "2026-09-26T00:00:01.000Z",
     startedAt: "2026-09-26T00:00:00.500Z",
-    completedAt: null,
+    finishedAt: null,
     summary: {
       totalTargets: 10,
       completed: 4,
@@ -202,9 +210,10 @@ test("view-model: mapFleetJobRow computes progress percentage and maps all metri
     targetSpec: { mode: "explicit", nodeIds: ["node_1"] },
   };
 
-  const row = mapFleetJobRow(job);
+  const row = mapFleetJobRow(jobFromHub);
   assert.equal(row.jobId, "job_12345678");
   assert.equal(row.taskType, "diagnostic");
+  assert.equal(row.status, "running");
   assert.equal(row.state, "running");
   assert.equal(row.totalTargets, 10);
   assert.equal(row.completed, 4);
@@ -215,9 +224,10 @@ test("view-model: mapFleetJobRow computes progress percentage and maps all metri
   assert.equal(row.settled, 8); // 4 + 1 + 1 + 1 + 1 = 8
   assert.equal(row.progressPercent, 80); // 8 / 10 = 80%
 
-  // Edge cases
-  assert.equal(mapFleetJobRow({ summary: { totalTargets: 0 }, state: "completed" }).progressPercent, 100);
-  assert.equal(mapFleetJobRow({ summary: { totalTargets: 0 }, state: "pending" }).progressPercent, 0);
+  // Edge cases & defensive handling: zero targets, NaN, negative counts
+  assert.equal(mapFleetJobRow({ summary: { totalTargets: 0 }, status: "completed" }).progressPercent, 100);
+  assert.equal(mapFleetJobRow({ summary: { totalTargets: 0 }, status: "pending" }).progressPercent, 0);
+  assert.equal(mapFleetJobRow({ summary: { totalTargets: NaN, completed: -5 }, status: "completed" }).progressPercent, 100);
   assert.equal(mapFleetJobRow(null).jobId, null);
 });
 
@@ -227,15 +237,17 @@ test("view-model: mapFleetJobList handles empty, malformed, and populated lists"
   assert.deepEqual(mapFleetJobList("not-array"), EMPTY_FLEET_JOBS_STATE);
 
   const populated = mapFleetJobList([
-    { jobId: "j1", taskType: "diagnostic", summary: { totalTargets: 2, completed: 2 } },
-    { jobId: "j2", taskType: "maintenance", summary: { totalTargets: 5, completed: 1 } },
+    { jobId: "j1", taskType: "diagnostic", status: "completed", summary: { totalTargets: 2, completed: 2 } },
+    { jobId: "j2", taskType: "maintenance", status: "running", summary: { totalTargets: 5, completed: 1 } },
   ]);
   assert.equal(populated.kind, "fleet-jobs");
   assert.equal(populated.totalJobs, 2);
   assert.equal(populated.rows.length, 2);
   assert.equal(populated.rows[0].jobId, "j1");
+  assert.equal(populated.rows[0].status, "completed");
   assert.equal(populated.rows[0].progressPercent, 100);
   assert.equal(populated.rows[1].jobId, "j2");
+  assert.equal(populated.rows[1].status, "running");
   assert.equal(populated.rows[1].progressPercent, 20);
 });
 
@@ -243,7 +255,7 @@ test("view-model: mapFleetJobDetail maps results dictionary into structured arra
   const detail = mapFleetJobDetail({
     jobId: "job_xyz",
     taskType: "diagnostic",
-    state: "partial",
+    status: "partial",
     payload: { action: "ping" },
     timeoutMs: 15000,
     summary: { totalTargets: 2, completed: 1, failed: 1 },
@@ -267,6 +279,7 @@ test("view-model: mapFleetJobDetail maps results dictionary into structured arra
   });
 
   assert.equal(detail.jobId, "job_xyz");
+  assert.equal(detail.status, "partial");
   assert.equal(detail.state, "partial");
   assert.deepEqual(detail.payload, { action: "ping" });
   assert.equal(detail.timeoutMs, 15000);
@@ -285,6 +298,13 @@ test("view-model: mapFleetJobDetail maps results dictionary into structured arra
   assert.equal(beta.exitCode, 1);
   assert.equal(beta.stderr, "connection reset");
   assert.equal(beta.error, "ECONNRESET");
+
+  // Fallback to payload.timeoutMs if top-level timeoutMs is missing
+  const detailFallback = mapFleetJobDetail({
+    jobId: "job_fallback",
+    payload: { timeoutMs: 25000 },
+  });
+  assert.equal(detailFallback.timeoutMs, 25000);
 });
 
 // -----------------------------------------------------------------------------
@@ -344,7 +364,8 @@ test("app-level: operator surface displays Fleet Workflows view and job triggers
   assert.ok(errorEl.textContent.includes("invalid JSON payload"));
   assert.equal(dialog.opened, true);
 
-  // 5. Submit valid Fleet Job
+  // 5. Submit valid Fleet Job with timeout
+  dom.getElementById("fleet-job-timeout").value = "15000";
   dom.getElementById("fleet-job-payload").value = JSON.stringify({ check: "system-health" });
   await click(submitBtn);
 
@@ -363,12 +384,14 @@ test("app-level: operator surface displays Fleet Workflows view and job triggers
   const jobsListHtml = dom.getElementById("fleet-jobs-list").innerHTML;
   assert.ok(jobsListHtml.includes(jobs[0].jobId));
   assert.ok(jobsListHtml.includes("diagnostic"));
-  assert.ok(jobsListHtml.includes("completed"));
   assert.ok(jobsListHtml.includes("100%"));
+  // Verify state badge is completed (P1)
+  assert.ok(jobsListHtml.includes(`class="badge completed">completed</span>`));
+  // Verify completed job has no cancel button rendered
+  assert.ok(!jobsListHtml.includes(`data-cancel-job-id="${jobs[0].jobId}"`));
 
   // 6. View Fleet Job Details
   const jobsListEl = dom.getElementById("fleet-jobs-list");
-  // Simulate clicking on the "view details" button
   await jobsListEl.listeners.click({
     target: { dataset: { viewJobId: jobs[0].jobId } },
   });
@@ -377,10 +400,14 @@ test("app-level: operator surface displays Fleet Workflows view and job triggers
   const detailViewEl = dom.getElementById("fleet-job-detail-view");
   assert.equal(detailViewEl.hidden, false);
   assert.ok(detailViewEl.innerHTML.includes(`Fleet Job: ${jobs[0].jobId}`));
+  assert.ok(detailViewEl.innerHTML.includes(`class="badge completed">completed</span>`));
+  assert.ok(detailViewEl.innerHTML.includes("15000ms")); // Timeout displayed (P2)
   assert.ok(detailViewEl.innerHTML.includes("diag: ok"));
   assert.ok(detailViewEl.innerHTML.includes("all services nominal"));
   assert.ok(detailViewEl.innerHTML.includes(nodeA));
   assert.ok(detailViewEl.innerHTML.includes(nodeB));
+  // Cancel button should NOT be rendered for completed job
+  assert.ok(!detailViewEl.innerHTML.includes("cancel-detail-job"));
 
   // 7. Back button navigation from detail view
   await detailViewEl.listeners.click({
@@ -391,7 +418,46 @@ test("app-level: operator surface displays Fleet Workflows view and job triggers
   assert.equal(dom.getElementById("fleet-jobs-list").hidden, false);
 });
 
-test("app-level: job cancellation via UI invokes cancellation endpoint and updates view", async (t) => {
+test("app-level: capability mode switching and target capability validation in dialog (P3)", async (t) => {
+  const { registry, server, baseUrl } = await withHub(t);
+  const dom = new FakeDom();
+  const fetchImpl = browserFetch(baseUrl, "operator-alice");
+  const ui = createRegistryUi({ document: dom, fetchImpl });
+  await ui.start();
+
+  const nodeA = await enrollRawNode(baseUrl, registry, ["web.routes"]);
+
+  await click(dom.getElementById("nav-fleet"));
+  await click(dom.getElementById("trigger-fleet-job-btn"));
+
+  const modeSelect = dom.getElementById("fleet-job-target-mode");
+  modeSelect.value = "capability";
+  // Trigger change listener
+  await modeSelect.listeners.change({ target: { value: "capability" } });
+
+  assert.equal(dom.getElementById("fleet-job-explicit-group").style.display, "none");
+  assert.equal(dom.getElementById("fleet-job-capability-group").style.display, "block");
+
+  // Attempt submit with empty capability
+  dom.getElementById("fleet-job-target-capability").value = "";
+  await click(dom.getElementById("fleet-job-submit"));
+
+  const errorEl = dom.getElementById("fleet-job-error");
+  assert.equal(errorEl.style.display, "block");
+  assert.ok(errorEl.textContent.includes("capability mode requires non-empty capability name"));
+
+  // Fill valid capability and submit
+  dom.getElementById("fleet-job-target-capability").value = "web.routes";
+  await click(dom.getElementById("fleet-job-submit"));
+
+  assert.equal(dom.getElementById("fleet-job-dialog").opened, false);
+  const jobs = Array.from(server.fleetScheduler.jobs.values());
+  assert.equal(jobs.length, 1);
+  assert.deepEqual(jobs[0].targetSpec, { mode: "capability", capability: "web.routes" });
+  assert.deepEqual(Object.keys(jobs[0].results), [nodeA]);
+});
+
+test("app-level: job cancellation via UI list button and detail view button (P1, P3)", async (t) => {
   let finishTask = null;
   const taskPromise = new Promise((resolve) => {
     finishTask = resolve;
@@ -407,13 +473,12 @@ test("app-level: job cancellation via UI invokes cancellation endpoint and updat
   });
 
   const nodeA = await enrollRawNode(baseUrl, registry);
-
   const dom = new FakeDom();
   const fetchImpl = browserFetch(baseUrl, "operator-alice");
   const ui = createRegistryUi({ document: dom, fetchImpl });
   await ui.start();
 
-  // Trigger an in-flight job via UI
+  // 1. Test cancel from job list
   await click(dom.getElementById("nav-fleet"));
   await click(dom.getElementById("trigger-fleet-job-btn"));
   dom.getElementById("fleet-job-task-type").value = "diagnostic";
@@ -436,6 +501,47 @@ test("app-level: job cancellation via UI invokes cancellation endpoint and updat
   assert.ok(dom.getElementById("state-banner").innerHTML.includes("cancellation requested"));
   assert.equal(server.fleetScheduler.jobs.get(jobId).status, "failed");
 
+  // 2. Test cancel from job detail view
+  let finishTask2 = null;
+  const taskPromise2 = new Promise((resolve) => {
+    finishTask2 = resolve;
+  });
+  server.fleetScheduler.dispatchTransport = async (_nodeId, { signal }) => {
+    signal?.addEventListener("abort", () => {
+      setImmediate(() => finishTask2({ status: "failed", error: "aborted" }));
+    });
+    return await taskPromise2;
+  };
+
+  await click(dom.getElementById("trigger-fleet-job-btn"));
+  dom.getElementById("fleet-job-task-type").value = "diagnostic";
+  dom.getElementById("fleet-job-target-mode").value = "explicit";
+  dom.getElementById("fleet-job-target-nodes").value = nodeA;
+  dom.getElementById("fleet-job-timeout").value = "60000";
+  await click(dom.getElementById("fleet-job-submit"));
+
+  const jobsAfter = Array.from(server.fleetScheduler.jobs.values());
+  assert.equal(jobsAfter.length, 2);
+  const job2 = jobsAfter[1];
+
+  // Open detail view for in-flight job2
+  await jobsListEl.listeners.click({
+    target: { dataset: { viewJobId: job2.jobId } },
+  });
+
+  const detailViewEl = dom.getElementById("fleet-job-detail-view");
+  assert.equal(detailViewEl.hidden, false);
+  assert.ok(detailViewEl.innerHTML.includes("cancel-detail-job"));
+
+  // Click cancel inside detail view
+  await detailViewEl.listeners.click({
+    target: { id: "cancel-detail-job", dataset: { jobId: job2.jobId } },
+  });
+
+  assert.ok(dom.getElementById("state-banner").innerHTML.includes("cancellation requested"));
+  assert.equal(server.fleetScheduler.jobs.get(job2.jobId).status, "failed");
+
   // Unblock hung dispatch transport
   finishTask?.({ status: "failed", error: "aborted" });
+  finishTask2?.({ status: "failed", error: "aborted" });
 });
