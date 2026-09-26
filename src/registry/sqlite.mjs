@@ -230,7 +230,7 @@ const EXPECTED_INDEX_DEFINITIONS = {
 function indexDefinitions(db) {
   const definitions = {};
   const indexes = db
-    .prepare("SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .prepare("SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' AND tbl_name NOT LIKE 'fleet_%' ORDER BY name")
     .all();
   for (const { name, tbl_name: table } of indexes) {
     const list = db.prepare(`PRAGMA index_list(${pragmaIdentifier(table)})`).all().find((row) => row.name === name);
@@ -433,7 +433,7 @@ function canonicalSchemaMetadata(version = SCHEMA_VERSION) {
 function validateSchemaVersion(db, version) {
   const expectedTables = expectedTableNamesFor(version);
   const actualTables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'fleet_%' ORDER BY name")
     .all()
     .map((row) => row.name);
   if (JSON.stringify(actualTables) !== JSON.stringify(expectedTables)) {

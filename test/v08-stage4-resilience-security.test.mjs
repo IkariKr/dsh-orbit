@@ -8,9 +8,13 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openRegistryDatabase } from "../src/registry/sqlite.mjs";
 import { Registry } from "../src/registry/registry.mjs";
+import { createHubServer } from "../src/registry/server.mjs";
 import { FleetJobScheduler } from "../src/registry/fleet-scheduler.mjs";
 import { ScheduledWorkflowEngine } from "../src/registry/schedule-engine.mjs";
 
@@ -434,4 +438,51 @@ test("hub restart recovery resilience: uncalculable schedule transitions to erro
 
   engineAfterRestart.stop();
   db.close();
+});
+
+test("persistent database lifecycle: Hub server start, schedule creation, restart with openRegistryDatabase maintains schema integrity", async () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "orbit-hub-restart-"));
+  const dbPath = join(tmpDir, "hub-persistent.db");
+
+  try {
+    // 1. Initial Hub launch with fresh persistent database
+    let db = openRegistryDatabase(dbPath);
+    let registry = new Registry({ db });
+    let hub = createHubServer({ registry });
+    await new Promise((r) => hub.server.listen(0, "127.0.0.1", r));
+
+    // Create a schedule using the attached scheduleEngine
+    assert.ok(hub.scheduleEngine);
+    const sched = hub.scheduleEngine.createSchedule({
+      name: "Persistent Test Schedule",
+      scheduleType: "interval",
+      intervalMs: 15000,
+      taskType: "diagnostic",
+      targetSpec: { mode: "explicit", nodeIds: ["node_11111111111111111111111111111111"] },
+    });
+
+    // Close Hub and DB cleanly
+    await new Promise((r) => hub.server.close(r));
+    db.close();
+
+    // 2. Hub restart against existing persistent DB: must not fail with malformed-schema
+    let restartedDb;
+    assert.doesNotThrow(() => {
+      restartedDb = openRegistryDatabase(dbPath);
+    });
+
+    let restartedRegistry = new Registry({ db: restartedDb });
+    let restartedHub = createHubServer({ registry: restartedRegistry });
+    await new Promise((r) => restartedHub.server.listen(0, "127.0.0.1", r));
+
+    // Verify schedule was loaded and is active
+    const persisted = restartedHub.scheduleEngine.getSchedule(sched.scheduleId);
+    assert.equal(persisted.name, "Persistent Test Schedule");
+    assert.equal(persisted.status, "active");
+
+    await new Promise((r) => restartedHub.server.close(r));
+    restartedDb.close();
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
