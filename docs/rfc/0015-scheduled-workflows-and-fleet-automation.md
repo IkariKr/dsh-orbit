@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS fleet_schedules (
 CREATE TABLE IF NOT EXISTS fleet_schedule_runs (
   run_id TEXT PRIMARY KEY,
   schedule_id TEXT NOT NULL REFERENCES fleet_schedules(schedule_id) ON DELETE CASCADE,
-  job_id TEXT REFERENCES fleet_jobs(job_id),
+  job_id TEXT, -- references in-memory/audit fleet job
   triggered_at TEXT NOT NULL,
   trigger_type TEXT NOT NULL, -- 'scheduled' | 'manual' | 'catch-up'
   status TEXT NOT NULL, -- 'dispatched' | 'completed' | 'failed' | 'skipped'
