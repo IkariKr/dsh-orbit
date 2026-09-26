@@ -1,0 +1,43 @@
+{
+  "version": "0.7.0-rc.1",
+  "candidateSha": "a23b627d3b9fd000a19a7f24064942073fdefbb9",
+  "runId": "v07-automated-a23b627d3b9f-20260926071500",
+  "generatedAt": "2026-09-26T03:21:50.143Z",
+  "scope": "automated",
+  "summary": {
+    "total": 28,
+    "automatedPass": 13,
+    "mountedNotExecuted": 15,
+    "result": "QUALIFIED_AUTOMATED"
+  },
+  "matrix": {
+    "fleetJobListObservability": "PASS",
+    "fleetJobTargetSpecExplicitList": "PASS",
+    "fleetJobTargetSpecEmptyRejected": "PASS",
+    "fleetJobWildcardWithoutFilterDenied": "PASS",
+    "capabilityAwareSchedulingMatching": "PASS",
+    "capabilityAwareSchedulingStaleSkipped": "PASS",
+    "fleetJobAggregatedResultsComplete": "PASS",
+    "fleetJobAuditLogRecorded": "PASS",
+    "fleetJobSingleNodeTimeoutContainment": "PASS",
+    "operatorUiFleetWorkflowsView": "PASS",
+    "fleetJobDuplicateIdempotent": "PASS",
+    "concurrentFleetJobExecution": "NOT_EXECUTED",
+    "fleetTaskExecutionDirectNode": "NOT_EXECUTED",
+    "fleetTaskExecutionReverseNode": "NOT_EXECUTED",
+    "concurrentTaskDispatchDirectAndReverse": "NOT_EXECUTED",
+    "fleetTaskResultAggregationDirectAndReverse": "NOT_EXECUTED",
+    "targetNodeOutageDuringJobExecution": "NOT_EXECUTED",
+    "reverseNodeDisconnectDuringJobExecution": "NOT_EXECUTED",
+    "fleetJobLargeOutputAggregation": "NOT_EXECUTED",
+    "fleetJobStreamingProgressEvents": "NOT_EXECUTED",
+    "capabilityMismatchNodeFiltered": "NOT_EXECUTED",
+    "tombstonedNodeTargetRejected": "NOT_EXECUTED",
+    "hubRestartPendingJobReconciliation": "NOT_EXECUTED",
+    "nodeRestartDuringFleetJob": "NOT_EXECUTED",
+    "auditLogQueryFiltering": "PASS",
+    "fleetJobCancellation": "NOT_EXECUTED",
+    "zeroCrossNodeCredentialLeakInJob": "NOT_EXECUTED",
+    "noImplicitBroadcastExecution": "PASS"
+  }
+}
