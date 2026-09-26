@@ -92,9 +92,9 @@ Frozen scope for 0.6 construction:
 Construction is authorized by `V07-CONSTRUCTION-20260926-A1`
 (`docs/release-attestations/v0.7-construction-authorization-2026-09-26.md`),
 built on the accepted v0.6 closure `6ef5c5118ddd69f580afd6c7e9d911de068d2f2a`.
-The construction design package is RFC-0014
-and the v0.7 multistage SOP.
-RFC-0014 must receive Stage 0 / Gate A Architecture Review GO before v0.7 product runtime construction begins.
+The construction design package is [RFC-0014](rfc/0014-fleet-workflows-and-scheduling.md)
+and the [v0.7 multistage SOP](sop/v0.7-fleet-workflows-multistage-sop.md).
+v0.7 engineering acceptance is CLOSED (Final Review PASS, 28/28 M28 fleet acceptance matrix PASS, release closure `53e29f3ea56ad6b1374b0319de0059252558db9d`, release tag `v0.7.0-rc.1`, see `docs/review/2026-09-26-v07-stage6-final-review-53e29f3.md`). Production promotion and DNS cutover each remain separately authorized.
 
 - explicit tasks targeting selected nodes;
 - capability-aware scheduling;
@@ -106,6 +106,27 @@ Frozen scope for 0.7 construction:
 - **MUST**: an RFC-first design record for fleet workflows and capability-aware scheduling (RFC-0014) before product construction; explicit tasks targeting selected registered nodes with strict target selection validation; capability-aware scheduling matching required capabilities against registered node capabilities; aggregated execution results, status summaries, and per-node result collection without silent drop; auditability of target selection, execution scope, operator identity, and job timeline; candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.7 release candidate; operator documentation (SOP) and architecture/API reference updates for fleet workflows.
 - **SHOULD**: first-class Fleet Workflows panel in the authenticated operator surface; real-time execution progress tracking across target nodes without full-page reloads; graceful handling of target node disconnection or outage during job execution.
 - **OUT OF SCOPE**: a new route authority system beyond RFC-0010; a new selector system beyond RFC-0011; a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy; unrelated UI refactor; unrelated runtime refactor; tag or release creation/mutation without separate authorization; production promotion; DNS cutover.
+
+## 0.8: scheduled workflows and fleet automation
+
+Construction is authorized by `V08-CONSTRUCTION-20260926-A1`
+(`docs/release-attestations/v0.8-construction-authorization-2026-09-26.md`),
+built on the accepted v0.7 closure `53e29f3ea56ad6b1374b0319de0059252558db9d`.
+The construction design package is RFC-0015
+and the v0.8 multistage SOP.
+RFC-0015 must receive Stage 0 / Gate A Architecture Review GO before v0.8 product runtime construction begins.
+
+- persistent schedule definitions (cron and interval triggers);
+- deterministic execution dispatch via v0.7 FleetJobScheduler;
+- persistent execution history, execution window tracking, and missed-run recovery;
+- operator schedule controls (pause, resume, manual trigger, cancel, mutate);
+- auditability of schedule mutations, trigger events, and execution results.
+
+Frozen scope for 0.8 construction:
+
+- **MUST**: an RFC-first design record for scheduled workflows and fleet automation (RFC-0015) before product construction; persistent schedule storage in SQLite with atomic status transitions; cron expression and interval parsing with timezone pinning and invalid schedule rejection; scheduling dispatch delegating strictly to RFC-0014 fleet execution; missed-run policy (skip vs immediate run); execution history and schedule run logs; audit logging of schedule creation, pause, resume, mutation, deletion, and dispatch; candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.8 release candidate; operator SOP and reference documentation.
+- **SHOULD**: first-class Scheduled Workflows panel in the operator UI with cron schedule inspector, next-run timers, and trigger controls; real-time schedule trigger status updates; schedule execution history inspection modal.
+- **OUT OF SCOPE**: a new route authority system beyond RFC-0010; a new selector system beyond RFC-0011; a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy; distributed external cron daemons; unrelated UI refactor; unrelated runtime refactor; tag or release creation/mutation without separate authorization; production promotion; DNS cutover.
 
 ## Design constraints
 

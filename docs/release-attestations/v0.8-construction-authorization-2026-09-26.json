@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "authorizationId": "V08-CONSTRUCTION-20260926-A1",
+  "status": "AUTHORIZED_FOR_V08_CONSTRUCTION",
+  "issuedDate": "2026-09-26",
+  "acceptedV07Closure": "53e29f3ea56ad6b1374b0319de0059252558db9d",
+  "governancePredecessor": "docs/review/2026-09-26-v07-stage6-final-review-53e29f3.md",
+  "constructionLineage": {
+    "root": "the pushed commit containing this authorization record",
+    "mustDescendFromAcceptedV07Closure": true,
+    "mustDescendFromGovernancePredecessor": true,
+    "forbiddenBases": [
+      "historical unaccepted closure attempts",
+      "pre-final-review candidates",
+      "experimental worktrees"
+    ]
+  },
+  "objective": "v0.8 scheduled workflows and fleet automation per docs/roadmap.md section 0.8: persistent schedule definitions (cron and interval triggers), deterministic execution dispatch via FleetJobScheduler, persistent execution history, operator schedule controls, and auditability",
+  "scopeFreeze": {
+    "must": [
+      "RFC-first design record for scheduled workflows and fleet automation (RFC-0015) before product construction",
+      "persistent schedule storage in SQLite with atomic status transitions (active, paused, completed, error)",
+      "cron expression and interval parsing with timezone pinning and invalid schedule rejection",
+      "scheduling dispatch delegating strictly to RFC-0014 fleet execution without bypassing target validation",
+      "missed-run policy handling (skip vs immediate run) and execution window tracking",
+      "execution history and schedule run logs recording dispatch timeline and results",
+      "audit logging of schedule creation, pause, resume, mutation, deletion, and dispatch",
+      "candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.8 release candidate",
+      "operator SOP and reference documentation"
+    ],
+    "should": [
+      "first-class Scheduled Workflows panel in the operator UI with cron schedule inspector and next-run timers",
+      "real-time schedule trigger status updates",
+      "schedule execution history inspection modal"
+    ],
+    "outOfScope": [
+      "a new route authority system beyond RFC-0010",
+      "a new selector system beyond RFC-0011",
+      "a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy",
+      "distributed external cron daemons",
+      "unrelated UI refactor",
+      "unrelated runtime refactor",
+      "tag or release creation/mutation without separate authorization",
+      "production promotion without separate authorization",
+      "DNS cutover without separate authorization"
+    ]
+  },
+  "allowedPathRules": [
+    "docs/**",
+    "src/**",
+    "bin/**",
+    "ui/**",
+    "test/**",
+    "scripts/**",
+    "docker-registry/**",
+    "CHANGELOG.md",
+    "README.md",
+    "package.json: dependency changes require recorded justification",
+    "package-lock.json: only mechanically resulting changes"
+  ],
+  "forbiddenActions": [
+    "reopening or rewriting the accepted v0.7 closure lineage or its attestation",
+    "product construction before RFC-0015 and Stage 0 Gate A approval is recorded",
+    "changing the DSH baseline outside the DSH baseline promotion policy",
+    "tag or release creation/mutation without separate authorization",
+    "production promotion without separate authorization",
+    "DNS cutover without separate authorization"
+  ],
+  "evidenceRequirements": {
+    "candidateMustBeFrozenBeforeEvidence": true,
+    "candidateFreezeRule": "exactly one frozen candidate per evidence round; once frozen, later phases produce only qualification/evidence; a real problem means a new candidate and fresh candidate-bound evidence",
+    "scheduledWorkflowMatrixRequired": "a dedicated scheduled workflow acceptance matrix must be defined in RFC-0015 and mechanically enforced before the v0.8 mounted evidence run",
+    "closureRule": "one evidence-only closure, direct child of the frozen candidate, attestation must not reference its own closure SHA",
+    "finalReviewRequired": true
+  },
+  "separationOfPowers": {
+    "tagReleaseAuthorizationSeparate": true,
+    "productionPromotionAuthorizationSeparate": true,
+    "dnsCutoverAuthorizationSeparate": true,
+    "v08NotGatedOnProductionPromotionOrDnsCutover": true
+  }
+}
