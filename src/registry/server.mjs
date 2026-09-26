@@ -1086,6 +1086,7 @@ export function createHubServer({ registry, options = {} }) {
     : new FleetJobScheduler({
         registry,
         reverseChannels,
+        reverseSessions,
         dispatchTransport: options.fleetDispatchTransport ?? null,
         onJobCompleted: (completedJob) => {
           try {

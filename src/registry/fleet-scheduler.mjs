@@ -256,6 +256,7 @@ export class FleetJobScheduler {
   constructor({
     registry = null,
     reverseChannels = null,
+    reverseSessions = null,
     maxConcurrentDispatches = 8,
     defaultTimeoutMs = 30000,
     dispatchTransport = null,
@@ -264,6 +265,7 @@ export class FleetJobScheduler {
   } = {}) {
     this.registry = registry;
     this.reverseChannels = reverseChannels;
+    this.reverseSessions = reverseSessions;
     this.maxConcurrentDispatches = Math.max(1, Math.min(128, maxConcurrentDispatches));
     this.defaultTimeoutMs = Math.max(100, defaultTimeoutMs);
     this.dispatchTransport = dispatchTransport;
@@ -699,12 +701,48 @@ export class FleetJobScheduler {
 
     // Reverse route dispatch
     if (nodeRow.route_mode === "reverse") {
-      if (!this.reverseChannels || typeof this.reverseChannels.hasChannelForSession !== "function") {
+      const payloadBytes = Buffer.byteLength(JSON.stringify(job.payload ?? {}));
+      if (payloadBytes > 32 * 1024) {
+        return {
+          status: "failed",
+          error: {
+            code: "payload-too-large",
+            message: `reverse task payload (${payloadBytes} bytes) exceeds 32 KiB limit`,
+          },
+        };
+      }
+
+      if (this.reverseSessions && typeof this.reverseSessions.getSessionInfo === "function") {
+        const sessionInfo = this.reverseSessions.getSessionInfo(nodeId);
+        if (!sessionInfo) {
+          return {
+            status: "unreachable",
+            error: { code: "reverse-session-offline", message: `reverse session offline for node ${nodeId}` },
+          };
+        }
+        if (!sessionInfo.routeReady) {
+          return {
+            status: "unreachable",
+            error: { code: "reverse-route-unreachable", message: `reverse route not ready for node ${nodeId}` },
+          };
+        }
+        if (
+          this.reverseChannels &&
+          typeof this.reverseChannels.hasChannelForSession === "function" &&
+          !this.reverseChannels.hasChannelForSession(nodeId, sessionInfo.reverseSessionId)
+        ) {
+          return {
+            status: "unreachable",
+            error: { code: "reverse-capacity", message: `no reverse data channel available for node ${nodeId}` },
+          };
+        }
+      } else if (!this.reverseChannels || typeof this.reverseChannels.hasChannelForSession !== "function") {
         return {
           status: "unreachable",
           error: { code: "reverse-capacity", message: "no reverse channel manager available" },
         };
       }
+
       return {
         status: "completed",
         exitCode: 0,
