@@ -32,6 +32,7 @@ import {
   validateScopedAction,
 } from "./flow-tracker.mjs";
 import { FleetJobScheduler } from "./fleet-scheduler.mjs";
+import { ScheduledWorkflowEngine } from "./schedule-engine.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -765,6 +766,44 @@ export function createHubServer({ registry, options = {} }) {
       if (path === "/hub/fleet/jobs" || path === "/hub/fleet/jobs/") {
         return sendJson(response, 200, { jobs: fleetScheduler.listJobs() });
       }
+      if (path === "/hub/fleet/schedules" || path === "/hub/fleet/schedules/") {
+        if (!scheduleEngine) {
+          return sendJson(response, 503, { error: { code: "schedule-engine-unavailable", message: "schedule engine is not configured" } });
+        }
+        return sendJson(response, 200, { schedules: scheduleEngine.listSchedules() });
+      }
+      const scheduleRunsMatch = path.match(/^\/hub\/fleet\/schedules\/([^/]+)\/runs\/?$/);
+      if (scheduleRunsMatch) {
+        if (!scheduleEngine) {
+          return sendJson(response, 503, { error: { code: "schedule-engine-unavailable", message: "schedule engine is not configured" } });
+        }
+        const rawScheduleId = scheduleRunsMatch[1];
+        const scheduleId = safeDecodeUri(rawScheduleId);
+        if (scheduleId === null) {
+          return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+        }
+        const schedule = scheduleEngine.getSchedule(scheduleId);
+        if (!schedule) {
+          return sendJson(response, 404, { error: { code: "not-found", message: "no such schedule" } });
+        }
+        return sendJson(response, 200, { scheduleId, runs: scheduleEngine.listScheduleRuns(scheduleId) });
+      }
+      const scheduleDetailMatch = path.match(/^\/hub\/fleet\/schedules\/([^/]+)\/?$/);
+      if (scheduleDetailMatch) {
+        if (!scheduleEngine) {
+          return sendJson(response, 503, { error: { code: "schedule-engine-unavailable", message: "schedule engine is not configured" } });
+        }
+        const rawScheduleId = scheduleDetailMatch[1];
+        const scheduleId = safeDecodeUri(rawScheduleId);
+        if (scheduleId === null) {
+          return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+        }
+        const schedule = scheduleEngine.getSchedule(scheduleId);
+        if (!schedule) {
+          return sendJson(response, 404, { error: { code: "not-found", message: "no such schedule" } });
+        }
+        return sendJson(response, 200, schedule);
+      }
       const fleetJobMatch = path.match(/^\/hub\/fleet\/jobs\/([^/]+)\/?$/);
       if (fleetJobMatch) {
         const rawJobId = fleetJobMatch[1];
@@ -888,6 +927,152 @@ export function createHubServer({ registry, options = {} }) {
         return sendJson(response, status, { error: { code, message: err.message } });
       }
       return sendJson(response, 200, { audit: auditEntries });
+    }
+
+    if (path === "/hub/fleet/schedules" || path === "/hub/fleet/schedules/") {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      if (!scheduleEngine) {
+        return sendJson(response, 503, { error: { code: "schedule-engine-unavailable", message: "schedule engine is not configured" } });
+      }
+      const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "body must be an object" } });
+      }
+      let schedule;
+      try {
+        schedule = scheduleEngine.createSchedule({
+          scheduleId: body.scheduleId,
+          name: body.name,
+          description: body.description,
+          scheduleType: body.scheduleType,
+          cronExpression: body.cronExpression,
+          intervalMs: body.intervalMs,
+          taskType: body.taskType,
+          payload: body.payload,
+          targetSpec: body.targetSpec,
+          requiredCapabilities: body.requiredCapabilities,
+          timeoutMs: body.timeoutMs,
+          concurrencyPolicy: body.concurrencyPolicy,
+          missedRunPolicy: body.missedRunPolicy,
+          maxRuns: body.maxRuns,
+          createdBy: session.operatorPrincipal,
+        });
+      } catch (err) {
+        return sendJson(response, 400, { error: { code: err.code || "invalid-schedule", message: err.message } });
+      }
+      registry.recordAudit(session.operatorPrincipal, "fleet.schedule.create", {
+        scheduleId: schedule.scheduleId,
+        name: schedule.name,
+        scheduleType: schedule.scheduleType,
+        targetSpec: schedule.targetSpec,
+        nextRunAt: schedule.nextRunAt,
+      });
+      return sendJson(response, 201, schedule);
+    }
+
+    const schedulePauseMatch = path.match(/^\/hub\/fleet\/schedules\/([^/]+)\/pause\/?$/);
+    if (schedulePauseMatch) {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      if (!scheduleEngine) {
+        return sendJson(response, 503, { error: { code: "schedule-engine-unavailable", message: "schedule engine is not configured" } });
+      }
+      const rawScheduleId = schedulePauseMatch[1];
+      const scheduleId = safeDecodeUri(rawScheduleId);
+      if (scheduleId === null) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+      }
+      const schedule = scheduleEngine.getSchedule(scheduleId);
+      if (!schedule) {
+        return sendJson(response, 404, { error: { code: "not-found", message: "no such schedule" } });
+      }
+      const paused = scheduleEngine.pauseSchedule(scheduleId);
+      if (!paused) {
+        return sendJson(response, 409, {
+          error: { code: "schedule-not-active", message: `schedule ${scheduleId} is not in active state: ${schedule.status}` },
+          scheduleId,
+          status: schedule.status,
+        });
+      }
+      registry.recordAudit(session.operatorPrincipal, "fleet.schedule.pause", { scheduleId });
+      return sendJson(response, 200, { ok: true, scheduleId, status: "paused" });
+    }
+
+    const scheduleResumeMatch = path.match(/^\/hub\/fleet\/schedules\/([^/]+)\/resume\/?$/);
+    if (scheduleResumeMatch) {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      if (!scheduleEngine) {
+        return sendJson(response, 503, { error: { code: "schedule-engine-unavailable", message: "schedule engine is not configured" } });
+      }
+      const rawScheduleId = scheduleResumeMatch[1];
+      const scheduleId = safeDecodeUri(rawScheduleId);
+      if (scheduleId === null) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+      }
+      const schedule = scheduleEngine.getSchedule(scheduleId);
+      if (!schedule) {
+        return sendJson(response, 404, { error: { code: "not-found", message: "no such schedule" } });
+      }
+      const resumed = scheduleEngine.resumeSchedule(scheduleId);
+      if (!resumed) {
+        return sendJson(response, 409, {
+          error: { code: "schedule-not-paused", message: `schedule ${scheduleId} is not in paused state: ${schedule.status}` },
+          scheduleId,
+          status: schedule.status,
+        });
+      }
+      registry.recordAudit(session.operatorPrincipal, "fleet.schedule.resume", { scheduleId });
+      return sendJson(response, 200, { ok: true, scheduleId, status: "active" });
+    }
+
+    const scheduleTriggerMatch = path.match(/^\/hub\/fleet\/schedules\/([^/]+)\/trigger\/?$/);
+    if (scheduleTriggerMatch) {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      if (!scheduleEngine) {
+        return sendJson(response, 503, { error: { code: "schedule-engine-unavailable", message: "schedule engine is not configured" } });
+      }
+      const rawScheduleId = scheduleTriggerMatch[1];
+      const scheduleId = safeDecodeUri(rawScheduleId);
+      if (scheduleId === null) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+      }
+      const schedule = scheduleEngine.getSchedule(scheduleId);
+      if (!schedule) {
+        return sendJson(response, 404, { error: { code: "not-found", message: "no such schedule" } });
+      }
+      const runResult = await scheduleEngine.dispatchScheduleRun(schedule, "manual");
+      registry.recordAudit(session.operatorPrincipal, "fleet.schedule.trigger", {
+        scheduleId,
+        runId: runResult.runId,
+        jobId: runResult.jobId,
+      });
+      return sendJson(response, 200, runResult);
+    }
+
+    const scheduleDeleteMatch = path.match(/^\/hub\/fleet\/schedules\/([^/]+)\/?$/);
+    if (scheduleDeleteMatch && request.method === "DELETE") {
+      if (!scheduleEngine) {
+        return sendJson(response, 503, { error: { code: "schedule-engine-unavailable", message: "schedule engine is not configured" } });
+      }
+      const rawScheduleId = scheduleDeleteMatch[1];
+      const scheduleId = safeDecodeUri(rawScheduleId);
+      if (scheduleId === null) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+      }
+      const schedule = scheduleEngine.getSchedule(scheduleId);
+      if (!schedule) {
+        return sendJson(response, 404, { error: { code: "not-found", message: "no such schedule" } });
+      }
+      scheduleEngine.deleteSchedule(scheduleId);
+      registry.recordAudit(session.operatorPrincipal, "fleet.schedule.delete", { scheduleId });
+      return sendJson(response, 200, { ok: true, scheduleId, status: "deleted" });
     }
 
     if (
@@ -1103,6 +1288,22 @@ export function createHubServer({ registry, options = {} }) {
         },
         now: () => registry.now(),
       });
+
+  const scheduleEngine = options.scheduleEngine instanceof ScheduledWorkflowEngine
+    ? options.scheduleEngine
+    : registry && registry.db
+      ? new ScheduledWorkflowEngine({
+          db: registry.db,
+          fleetScheduler,
+          registry,
+          onScheduleDispatched: (event) => {
+            try {
+              registry.recordAudit("system:scheduler", "fleet.schedule.dispatch", event);
+            } catch {}
+          },
+          now: () => registry.now(),
+        })
+      : null;
 
   function managementNodeSummary(node) {
     const summary = node;
@@ -1401,9 +1602,11 @@ export function createHubServer({ registry, options = {} }) {
     wsTracker.destroyAll();
     reverseSessions.closeAll("hub-shutdown");
     flowTracker.clear();
+    scheduleEngine?.stop();
   });
 
   server.flowTracker = flowTracker;
   server.fleetScheduler = fleetScheduler;
-  return { server, wsTracker, reverseSessions, reverseChannels, flowTracker, fleetScheduler };
+  server.scheduleEngine = scheduleEngine;
+  return { server, wsTracker, reverseSessions, reverseChannels, flowTracker, fleetScheduler, scheduleEngine };
 }
