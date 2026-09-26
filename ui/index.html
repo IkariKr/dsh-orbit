@@ -15,6 +15,7 @@
   <nav>
     <button id="nav-nodes" class="nav-button active" type="button">Nodes</button>
     <button id="nav-tokens" class="nav-button" type="button">Tokens</button>
+    <button id="nav-fleet" class="nav-button" type="button">Fleet Workflows</button>
     <button id="nav-logout" class="nav-button" type="button">Logout</button>
   </nav>
 
@@ -39,7 +40,51 @@
         </table>
       </div>
     </section>
+    <section id="fleet-view" hidden>
+      <div class="panel fleet-actions-panel">
+        <button id="trigger-fleet-job-btn" class="primary" type="button">Trigger Fleet Job</button>
+        <button id="refresh-fleet-jobs-btn" class="secondary" type="button">Refresh Jobs</button>
+      </div>
+      <div id="fleet-jobs-list"></div>
+      <div id="fleet-job-detail-view" hidden></div>
+    </section>
   </main>
+
+  <dialog id="fleet-job-dialog">
+    <h3>Trigger Fleet Job</h3>
+    <div style="display:flex; flex-direction:column; gap:12px; min-width:320px;">
+      <label>Task Type
+        <input id="fleet-job-task-type" type="text" value="diagnostic" required>
+      </label>
+      <label>Target Mode
+        <select id="fleet-job-target-mode">
+          <option value="explicit">Explicit Node IDs</option>
+          <option value="capability">Capability Matching</option>
+        </select>
+      </label>
+      <div id="fleet-job-explicit-group">
+        <label>Node IDs (comma-separated 32-hex)
+          <input id="fleet-job-target-nodes" type="text" placeholder="node_..., node_...">
+        </label>
+      </div>
+      <div id="fleet-job-capability-group" style="display:none;">
+        <label>Required Capability
+          <input id="fleet-job-target-capability" type="text" placeholder="web.routes">
+        </label>
+      </div>
+      <label>Timeout (ms)
+        <input id="fleet-job-timeout" type="number" value="30000" min="1000" max="300000">
+      </label>
+      <label>Payload (JSON optional)
+        <textarea id="fleet-job-payload" rows="3" placeholder='{"action":"healthcheck"}'></textarea>
+      </label>
+      <div id="fleet-job-error" class="banner error" style="display:none;"></div>
+      <div class="dialog-actions">
+        <button id="fleet-job-cancel" type="button">Cancel</button>
+        <button id="fleet-job-submit" class="primary" type="button">Dispatch Job</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="confirm-dialog">
     <p id="confirm-dialog-message"></p>

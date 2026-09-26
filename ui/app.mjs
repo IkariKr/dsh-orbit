@@ -10,6 +10,7 @@ import {
   BOOTSTRAP_ERROR_STATE,
   EMPTY_NODES_STATE,
   EMPTY_TOKENS_STATE,
+  EMPTY_FLEET_JOBS_STATE,
   LOADING_STATE,
   SESSION_REQUIRED_STATE,
   createDeleteRequestId,
@@ -20,6 +21,9 @@ import {
   mapOverview,
   mapTokenList,
   mapTokenMint,
+  mapFleetJobRow,
+  mapFleetJobList,
+  mapFleetJobDetail,
 } from "./view-model.mjs";
 
 const SESSION_ERRORS = new Set(["gateway-denied", "no-principal", "no-session"]);
@@ -75,6 +79,8 @@ export function createRegistryUi({ document, fetchImpl }) {
       banner.innerHTML = `<div class="banner empty">no nodes registered yet</div>`;
     } else if (state.kind === "empty-tokens") {
       banner.innerHTML = `<div class="banner empty">no enrollment tokens yet — mint the first one below</div>`;
+    } else if (state.kind === "empty-fleet-jobs") {
+      banner.innerHTML = `<div class="banner empty">no fleet jobs submitted yet</div>`;
     } else if (state.kind === "session-required") {
       banner.innerHTML = `<div class="banner">session required; retrying&hellip;</div>`;
     } else if (state.kind === "bootstrap-error") {
@@ -458,20 +464,337 @@ export function createRegistryUi({ document, fetchImpl }) {
     }
   }
 
+  function renderFleetJobRow(job) {
+    const isTerminal = job.state === "completed" || job.state === "failed" || job.state === "partial";
+    const cancelBtn = !isTerminal
+      ? `<button class="danger" data-cancel-job-id="${escapeHtml(job.jobId)}">cancel</button>`
+      : "";
+    const progressClass = job.state === "completed" ? "completed" : job.state === "failed" ? "failed" : "";
+    return `<div class="panel fleet-job-row" data-job-id="${escapeHtml(job.jobId)}">
+      <div class="fleet-job-header">
+        <div>
+          <span class="job-id" data-view-job-id="${escapeHtml(job.jobId)}">${escapeHtml(job.jobId)}</span>
+          <span class="badge ${badgeClass("taskType", job.taskType)}">${escapeHtml(job.taskType)}</span>
+          <span class="badge ${badgeClass("state", job.state)}">${escapeHtml(job.state)}</span>
+        </div>
+        <div class="node-actions">
+          <button class="secondary" data-view-job-id="${escapeHtml(job.jobId)}">view details</button>
+          ${cancelBtn}
+        </div>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar-fill ${progressClass}" style="width: ${job.progressPercent}%"></div>
+      </div>
+      <div class="node-meta">
+        <strong>Progress:</strong> ${job.progressPercent}% (${job.settled}/${job.totalTargets} settled) ·
+        completed ${job.completed} · failed ${job.failed} · timeout ${job.timeout} · unreachable ${job.unreachable} · skipped ${job.skipped} ·
+        created ${escapeHtml(job.createdAt ?? "-")}
+      </div>
+    </div>`;
+  }
+
+  function renderFleetJobs(view) {
+    const list = $("fleet-jobs-list");
+    if (!list) return;
+    if (view.kind !== "fleet-jobs" || view.rows.length === 0) {
+      list.innerHTML = `<div class="panel"><div class="banner empty">no fleet jobs submitted yet</div></div>`;
+      return;
+    }
+    list.innerHTML = view.rows.map(renderFleetJobRow).join("");
+  }
+
+  function renderFleetJobDetail(detail) {
+    const detailView = $("fleet-job-detail-view");
+    if (!detailView) return;
+    const isTerminal = detail.state === "completed" || detail.state === "failed" || detail.state === "partial";
+    const cancelBtn = !isTerminal
+      ? `<button class="danger" id="cancel-detail-job" data-job-id="${escapeHtml(detail.jobId)}">cancel job</button>`
+      : "";
+
+    const rowsHtml = detail.nodeResults.map((r) => {
+      let output = "";
+      if (r.stdout) output += `<div class="log-box"><strong>stdout:</strong>\n${escapeHtml(r.stdout)}</div>`;
+      if (r.stderr) output += `<div class="log-box" style="margin-top:4px; color:#ff7b72;"><strong>stderr:</strong>\n${escapeHtml(r.stderr)}</div>`;
+      if (r.error) output += `<div class="banner error" style="margin-top:4px;">${escapeHtml(typeof r.error === "object" ? JSON.stringify(r.error) : r.error)}</div>`;
+      return `<tr>
+        <td style="font-family:ui-monospace,monospace;">${escapeHtml(r.nodeId)}</td>
+        <td><span class="badge ${badgeClass("status", r.status)}">${escapeHtml(r.status)}</span></td>
+        <td>${r.durationMs !== null ? `${r.durationMs}ms` : "-"}</td>
+        <td>${r.exitCode !== null ? r.exitCode : "-"}</td>
+        <td style="max-width:400px;">${output || "-"}</td>
+      </tr>`;
+    }).join("");
+
+    const targetSpecText = detail.targetSpec
+      ? JSON.stringify(detail.targetSpec, null, 2)
+      : "-";
+
+    const payloadText = detail.payload
+      ? JSON.stringify(detail.payload, null, 2)
+      : "none";
+
+    detailView.innerHTML = `
+      <div style="margin-bottom:12px; display:flex; gap:10px; align-items:center;">
+        <button id="back-to-fleet-jobs" class="secondary">← back to jobs</button>
+        ${cancelBtn}
+      </div>
+      <div class="panel">
+        <h2>Fleet Job: ${escapeHtml(detail.jobId)}</h2>
+        <dl class="detail-grid">
+          <dt>task type</dt><dd>${escapeHtml(detail.taskType)}</dd>
+          <dt>state</dt><dd><span class="badge ${badgeClass("state", detail.state)}">${escapeHtml(detail.state)}</span></dd>
+          <dt>created</dt><dd>${escapeHtml(detail.createdAt ?? "-")}</dd>
+          <dt>updated</dt><dd>${escapeHtml(detail.updatedAt ?? "-")}</dd>
+          <dt>started</dt><dd>${escapeHtml(detail.startedAt ?? "-")}</dd>
+          <dt>completed</dt><dd>${escapeHtml(detail.completedAt ?? "-")}</dd>
+          <dt>timeout</dt><dd>${detail.timeoutMs !== null ? `${detail.timeoutMs}ms` : "-"}</dd>
+        </dl>
+      </div>
+      <div class="panel">
+        <h3>Summary</h3>
+        <div class="node-meta" style="margin-bottom:8px;">
+          Progress: ${detail.progressPercent}% (${detail.settled} / ${detail.totalTargets} settled)
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill ${detail.state === "completed" ? "completed" : detail.state === "failed" ? "failed" : ""}" style="width: ${detail.progressPercent}%"></div>
+        </div>
+        <div class="dimension-badges" style="margin-top:10px;">
+          <span class="badge"><span class="dimension">total</span>${detail.totalTargets}</span>
+          <span class="badge ok"><span class="dimension">completed</span>${detail.completed}</span>
+          <span class="badge bad"><span class="dimension">failed</span>${detail.failed}</span>
+          <span class="badge warn"><span class="dimension">timeout</span>${detail.timeout}</span>
+          <span class="badge bad"><span class="dimension">unreachable</span>${detail.unreachable}</span>
+          <span class="badge warn"><span class="dimension">skipped</span>${detail.skipped}</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>Target Specification</h3>
+        <pre class="log-box">${escapeHtml(targetSpecText)}</pre>
+      </div>
+      <div class="panel">
+        <h3>Payload</h3>
+        <pre class="log-box">${escapeHtml(payloadText)}</pre>
+      </div>
+      <div class="panel">
+        <h3>Target Node Results</h3>
+        <table class="node-results-table">
+          <thead>
+            <tr>
+              <th>Node ID</th>
+              <th>Status</th>
+              <th>Duration</th>
+              <th>Exit Code</th>
+              <th>Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml || '<tr><td colspan="5"><div class="banner empty">no target results recorded</div></td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  async function loadFleetJobs() {
+    showBanner(LOADING_STATE);
+    try {
+      const body = await api("/hub/fleet/jobs");
+      const mapped = mapFleetJobList(body?.jobs);
+      renderFleetJobs(mapped);
+      showBanner(mapped.kind === "empty-fleet-jobs" ? EMPTY_FLEET_JOBS_STATE : {});
+    } catch (error) {
+      if (error.sessionRequired) {
+        if (await refreshSession()) return loadFleetJobs();
+        showBanner(SESSION_REQUIRED_STATE);
+      } else {
+        showBanner({ message: `failed to load fleet jobs: ${error.message}` });
+      }
+    }
+  }
+
+  async function loadFleetJobDetail(jobId) {
+    showBanner(LOADING_STATE);
+    try {
+      const body = await api(`/hub/fleet/jobs/${jobId}`);
+      const detail = mapFleetJobDetail(body);
+      const list = $("fleet-jobs-list");
+      const detailView = $("fleet-job-detail-view");
+      if (list) list.hidden = true;
+      if (detailView) {
+        detailView.hidden = false;
+        renderFleetJobDetail(detail);
+      }
+      showBanner({});
+    } catch (error) {
+      showBanner({ message: `failed to load fleet job detail: ${error.message}` });
+    }
+  }
+
+  async function cancelFleetJob(jobId) {
+    try {
+      await api(`/hub/fleet/jobs/${jobId}/cancel`, { method: "POST" });
+      const detailView = $("fleet-job-detail-view");
+      if (detailView && !detailView.hidden) {
+        await loadFleetJobDetail(jobId);
+      } else {
+        await loadFleetJobs();
+      }
+      showBanner({ message: `job ${jobId} cancellation requested` });
+    } catch (error) {
+      showBanner({ message: `cancel failed: ${error.message}` });
+    }
+  }
+
+  function openTriggerFleetJobDialog() {
+    const dialog = $("fleet-job-dialog");
+    const err = $("fleet-job-error");
+    if (err) {
+      err.style.display = "none";
+      err.textContent = "";
+    }
+    if (dialog && typeof dialog.showModal === "function") {
+      dialog.showModal();
+    }
+  }
+
+  async function submitFleetJob() {
+    const err = $("fleet-job-error");
+    if (err) {
+      err.style.display = "none";
+      err.textContent = "";
+    }
+    const taskType = $("fleet-job-task-type")?.value?.trim() || "diagnostic";
+    const mode = $("fleet-job-target-mode")?.value || "explicit";
+    let targetSpec;
+    if (mode === "explicit") {
+      const rawNodes = $("fleet-job-target-nodes")?.value || "";
+      const nodeIds = rawNodes.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+      if (nodeIds.length === 0) {
+        if (err) {
+          err.textContent = "explicit mode requires at least one node ID";
+          err.style.display = "block";
+        }
+        return;
+      }
+      targetSpec = { mode: "explicit", nodeIds };
+    } else {
+      const capability = $("fleet-job-target-capability")?.value?.trim() || "";
+      if (!capability) {
+        if (err) {
+          err.textContent = "capability mode requires non-empty capability name";
+          err.style.display = "block";
+        }
+        return;
+      }
+      targetSpec = { mode: "capability", capability };
+    }
+
+    const rawTimeout = $("fleet-job-timeout")?.value;
+    const timeoutMs = rawTimeout ? parseInt(rawTimeout, 10) : 30000;
+
+    let payload;
+    const rawPayload = $("fleet-job-payload")?.value?.trim() || "";
+    if (rawPayload) {
+      try {
+        payload = JSON.parse(rawPayload);
+      } catch (e) {
+        if (err) {
+          err.textContent = `invalid JSON payload: ${e.message}`;
+          err.style.display = "block";
+        }
+        return;
+      }
+    }
+
+    const body = { taskType, targetSpec, timeoutMs };
+    if (payload !== undefined) body.payload = payload;
+
+    try {
+      const res = await api("/hub/fleet/jobs", { method: "POST", body });
+      const dialog = $("fleet-job-dialog");
+      if (dialog && typeof dialog.close === "function") {
+        dialog.close();
+      }
+      await loadFleetJobs();
+      showBanner({ message: `fleet job ${res.jobId} submitted` });
+    } catch (error) {
+      if (err) {
+        err.textContent = `submit failed: ${error.message}`;
+        err.style.display = "block";
+      }
+    }
+  }
+
   function wireActions() {
-    $("nav-nodes").addEventListener("click", async () => {
-      $("nav-nodes").classList.add("active");
-      $("nav-tokens").classList.remove("active");
-      $("tokens-view").hidden = true;
-      $("nodes-view").hidden = false;
+    $("nav-nodes")?.addEventListener("click", async () => {
+      $("nav-nodes")?.classList.add("active");
+      $("nav-tokens")?.classList.remove("active");
+      $("nav-fleet")?.classList.remove("active");
+      if ($("tokens-view")) $("tokens-view").hidden = true;
+      if ($("fleet-view")) $("fleet-view").hidden = true;
+      if ($("nodes-view")) $("nodes-view").hidden = false;
       await loadNodes();
     });
-    $("nav-tokens").addEventListener("click", async () => {
-      $("nav-tokens").classList.add("active");
-      $("nav-nodes").classList.remove("active");
-      $("nodes-view").hidden = true;
-      $("tokens-view").hidden = false;
+    $("nav-tokens")?.addEventListener("click", async () => {
+      $("nav-tokens")?.classList.add("active");
+      $("nav-nodes")?.classList.remove("active");
+      $("nav-fleet")?.classList.remove("active");
+      if ($("nodes-view")) $("nodes-view").hidden = true;
+      if ($("fleet-view")) $("fleet-view").hidden = true;
+      if ($("tokens-view")) $("tokens-view").hidden = false;
       await loadTokens();
+    });
+    $("nav-fleet")?.addEventListener("click", async () => {
+      $("nav-fleet")?.classList.add("active");
+      $("nav-nodes")?.classList.remove("active");
+      $("nav-tokens")?.classList.remove("active");
+      if ($("nodes-view")) $("nodes-view").hidden = true;
+      if ($("tokens-view")) $("tokens-view").hidden = true;
+      if ($("fleet-view")) $("fleet-view").hidden = false;
+      if ($("fleet-jobs-list")) $("fleet-jobs-list").hidden = false;
+      if ($("fleet-job-detail-view")) $("fleet-job-detail-view").hidden = true;
+      await loadFleetJobs();
+    });
+    $("trigger-fleet-job-btn")?.addEventListener("click", openTriggerFleetJobDialog);
+    $("refresh-fleet-jobs-btn")?.addEventListener("click", loadFleetJobs);
+    $("fleet-job-target-mode")?.addEventListener("change", (e) => {
+      const mode = e.target?.value;
+      if ($("fleet-job-explicit-group")) $("fleet-job-explicit-group").style.display = mode === "explicit" ? "block" : "none";
+      if ($("fleet-job-capability-group")) $("fleet-job-capability-group").style.display = mode === "capability" ? "block" : "none";
+    });
+    $("fleet-job-cancel")?.addEventListener("click", () => {
+      const dialog = $("fleet-job-dialog");
+      if (dialog && typeof dialog.close === "function") dialog.close();
+    });
+    $("fleet-job-submit")?.addEventListener("click", submitFleetJob);
+    $("fleet-jobs-list")?.addEventListener("click", async (event) => {
+      const target = event.target;
+      if (target.dataset?.cancelJobId !== undefined) {
+        await cancelFleetJob(target.dataset.cancelJobId);
+        return;
+      }
+      if (target.dataset?.viewJobId !== undefined) {
+        await loadFleetJobDetail(target.dataset.viewJobId);
+        return;
+      }
+      const row = target.closest(".job-id");
+      if (row) {
+        const jobId = row.dataset?.viewJobId || row.textContent.trim();
+        await loadFleetJobDetail(jobId);
+      }
+    });
+    $("fleet-job-detail-view")?.addEventListener("click", async (event) => {
+      if (event.target.id === "back-to-fleet-jobs") {
+        if ($("fleet-job-detail-view")) $("fleet-job-detail-view").hidden = true;
+        if ($("fleet-jobs-list")) $("fleet-jobs-list").hidden = false;
+        await loadFleetJobs();
+        return;
+      }
+      if (event.target.id === "cancel-detail-job") {
+        const jobId = event.target.dataset?.jobId;
+        if (jobId) await cancelFleetJob(jobId);
+        return;
+      }
     });
     $("mint-token").addEventListener("click", () => mintEnrollmentToken());
     $("mint-pair-token").addEventListener("click", () => mintPairToken());

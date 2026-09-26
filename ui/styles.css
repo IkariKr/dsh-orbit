@@ -118,3 +118,21 @@ button.danger { background: var(--bad); color: #fff; border: none; padding: 7px 
 .events-list { display: block; }
 .events-list div { display: grid; grid-template-columns: 180px 120px 1fr; gap: 8px; font-size: 12px; border-bottom: 1px solid var(--border); padding: 3px 0; }
 .events-list .dim { color: var(--muted); }
+
+.fleet-actions-panel { display: flex; gap: 10px; align-items: center; }
+.fleet-job-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.fleet-job-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.job-id { font-family: ui-monospace, monospace; font-weight: bold; cursor: pointer; color: var(--info); }
+.job-id:hover { text-decoration: underline; }
+.progress-bar-container { background: var(--panel-2); border-radius: 4px; height: 8px; width: 100%; overflow: hidden; margin: 4px 0; border: 1px solid var(--border); }
+.progress-bar-fill { background: var(--info); height: 100%; transition: width 0.3s ease; }
+.progress-bar-fill.completed { background: var(--ok); }
+.progress-bar-fill.failed { background: var(--bad); }
+.badge.pending { border-color: var(--info); color: var(--info); }
+.badge.running { border-color: var(--warn); color: var(--warn); }
+.badge.completed { border-color: var(--ok); color: var(--ok); }
+.badge.failed { border-color: var(--bad); color: var(--bad); }
+.badge.partial { border-color: var(--warn); color: var(--warn); }
+.badge.timeout, .badge.unreachable, .badge.skipped { border-color: var(--bad); color: var(--bad); }
+.node-results-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.log-box { background: #0b0f14; border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 150px; overflow-y: auto; color: #a5d6ff; }

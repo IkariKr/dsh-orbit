@@ -6,6 +6,7 @@
 export const LOADING_STATE = { kind: "loading" };
 export const EMPTY_NODES_STATE = { kind: "empty-nodes" };
 export const EMPTY_TOKENS_STATE = { kind: "empty-tokens" };
+export const EMPTY_FLEET_JOBS_STATE = { kind: "empty-fleet-jobs" };
 export const SESSION_REQUIRED_STATE = { kind: "session-required" };
 export const BOOTSTRAP_ERROR_STATE = { kind: "bootstrap-error" };
 
@@ -198,5 +199,74 @@ export function mapDeleteResult(result) {
     nodeId: result?.nodeId ?? null,
     state: result?.state ?? null,
     idempotentReplay: result?.idempotentReplay === true,
+  };
+}
+
+export function mapFleetJobRow(job) {
+  const summary = job?.summary ?? {};
+  const total = typeof summary.totalTargets === "number" ? summary.totalTargets : 0;
+  const completed = typeof summary.completed === "number" ? summary.completed : 0;
+  const failed = typeof summary.failed === "number" ? summary.failed : 0;
+  const timeout = typeof summary.timeout === "number" ? summary.timeout : 0;
+  const unreachable = typeof summary.unreachable === "number" ? summary.unreachable : 0;
+  const skipped = typeof summary.skipped === "number" ? summary.skipped : 0;
+  const settled = completed + failed + timeout + unreachable + skipped;
+  const progressPercent =
+    total > 0
+      ? Math.min(100, Math.round((settled / total) * 100))
+      : job?.state === "completed"
+        ? 100
+        : 0;
+
+  return {
+    jobId: job?.jobId ?? null,
+    taskType: job?.taskType ?? "diagnostic",
+    state: job?.state ?? "pending",
+    createdAt: job?.createdAt ?? null,
+    updatedAt: job?.updatedAt ?? null,
+    startedAt: job?.startedAt ?? null,
+    completedAt: job?.completedAt ?? null,
+    totalTargets: total,
+    completed,
+    failed,
+    timeout,
+    unreachable,
+    skipped,
+    settled,
+    progressPercent,
+    targetSpec: job?.targetSpec ?? null,
+  };
+}
+
+export function mapFleetJobList(jobs) {
+  if (!Array.isArray(jobs)) return EMPTY_FLEET_JOBS_STATE;
+  if (jobs.length === 0) return EMPTY_FLEET_JOBS_STATE;
+  return {
+    kind: "fleet-jobs",
+    rows: jobs.map(mapFleetJobRow),
+    totalJobs: jobs.length,
+  };
+}
+
+export function mapFleetJobDetail(job) {
+  const base = mapFleetJobRow(job);
+  const results = job?.results && typeof job.results === "object" ? job.results : {};
+  const nodeResults = Object.entries(results).map(([nodeId, res]) => ({
+    nodeId,
+    status: res?.status ?? "pending",
+    exitCode: typeof res?.exitCode === "number" ? res.exitCode : null,
+    durationMs: typeof res?.durationMs === "number" ? res.durationMs : null,
+    startedAt: res?.startedAt ?? null,
+    completedAt: res?.completedAt ?? null,
+    stdout: typeof res?.stdout === "string" ? res.stdout : "",
+    stderr: typeof res?.stderr === "string" ? res.stderr : "",
+    error: res?.error ?? null,
+  }));
+
+  return {
+    ...base,
+    payload: job?.payload ?? null,
+    timeoutMs: typeof job?.timeoutMs === "number" ? job.timeoutMs : null,
+    nodeResults,
   };
 }
