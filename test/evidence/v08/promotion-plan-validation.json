@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "kind": "v08-formal-promotion-plan-validation",
+  "candidateSha": "7e7154c058d8315b66599d6a819b1476d861adb2",
+  "runId": "v08-live-drill-1790425200",
+  "executedAt": "2026-09-26T12:30:00.000Z",
+  "status": "PLAN_DOCUMENTED_PROMOTION_DEFERRED_UNTIL_FINAL_REVIEW",
+  "cutoverPerformed": false,
+  "verification": {
+    "pass": 1,
+    "fail": 0,
+    "checks": [
+      {
+        "name": "promotion-deferred",
+        "result": "PASS",
+        "detail": "no release tag, production promotion, or DNS cutover was performed"
+      }
+    ]
+  }
+}

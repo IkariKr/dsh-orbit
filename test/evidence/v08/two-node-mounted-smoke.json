@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "kind": "v08-final-two-node-mounted-smoke",
+  "execution": "executed",
+  "result": "PASS",
+  "startedAt": "2026-09-26T12:31:13.426Z",
+  "finishedAt": "2026-09-26T12:31:14.250Z",
+  "candidateSha": "7e7154c058d8315b66599d6a819b1476d861adb2",
+  "runId": "v08-live-drill-1790425200",
+  "nodes": {
+    "a": "node_e85dee101ab63047af22b07a43635df9",
+    "b": "node_4f13b81f8a10220d9c36cc3474e6a7a1"
+  },
+  "routeModes": {
+    "a": "direct",
+    "b": "reverse"
+  },
+  "routeAuthorities": {
+    "a": "n-e85dee101ab63047af22b07a43635df9.dsh-orbit.test:8547",
+    "b": "n-4f13b81f8a10220d9c36cc3474e6a7a1.dsh-orbit.test:8547"
+  },
+  "inboundDeniedProbe": {
+    "nodeId": "node_4f13b81f8a10220d9c36cc3474e6a7a1",
+    "source": "registry-hub network namespace",
+    "targetPort": 9445,
+    "result": "connection-refused",
+    "at": "2026-09-26T12:31:13.600Z"
+  },
+  "aDirectRouteTarget": "https://dsh-a:9444",
+  "dsh": {
+    "version": "0.1.1-rc.2",
+    "profile": "dsh-0.1.1-rc.2",
+    "commitSha": "b150a551b8d465e31e418e1b2eaf5e79bbb7d28e",
+    "cliSha256": "c0226687bb20f45c603ec6fe50f3de16d1c3510c3a803304ec575ef9bc366c62"
+  },
+  "tls": {
+    "validation": "enabled",
+    "caFingerprint": "sha256 Fingerprint=65:74:38:ED:93:F5:E6:67:EE:34:F3:EC:1F:3E:B9:DD:21:AE:AA:D4:A2:BF:1C:BC:C7:FA:3F:BD:96:DE:A2:E7",
+    "leafFingerprint": "sha256 Fingerprint=65:20:FF:B3:79:70:6C:9F:A1:C5:37:A4:6D:2C:3A:59:4D:FB:A3:FB:3C:EC:18:19:A0:25:D3:AD:3C:D1:EB:FE"
+  },
+  "browser": {
+    "producer": "runner-owned-firefox-selenium",
+    "challengeDigest": "031218b784a6b85e9a83cbd62d4bd9095a6f406cadd6f99055f2fd4e62adf9a1",
+    "trustMode": "firefox-profile-nss",
+    "gatewayUrl": "https://127.0.0.1:8547"
+  },
+  "reverseProvenance": {
+    "mode": "reverse-only",
+    "generationStatus": "ready-current",
+    "nodeId": "node_4f13b81f8a10220d9c36cc3474e6a7a1",
+    "observedReadyAt": "2026-09-26T12:31:13.520Z"
+  },
+  "scheduledWorkflows": {
+    "automatedDispatchVerified": true,
+    "lifecycleAndAuditVerified": true,
+    "activeSchedulesCount": 1,
+    "successfulRunsCount": 1
+  }
+}

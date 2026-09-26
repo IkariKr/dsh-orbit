@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "kind": "v08-final-evidence-manifest",
+  "candidateSha": "7e7154c058d8315b66599d6a819b1476d861adb2",
+  "runId": "v08-live-drill-1790425200",
+  "result": "PASS",
+  "finalization": "READY_FOR_INDEPENDENT_FINAL_REVIEW",
+  "artifactCount": 6,
+  "artifacts": {
+    "fresh-install.json": {
+      "sha256": "06b569071906600889178d39c35c7771ce3fe944ca8f04abdf59f19a3f652ed6",
+      "byteCount": 821
+    },
+    "migration.json": {
+      "sha256": "58270f664a46138dfc899f2a811989b90ccee00dbade29083dcbad10a4b36adf",
+      "byteCount": 907
+    },
+    "backup-restore.json": {
+      "sha256": "dbe28b929c0db233ee65c4df05477822fd76ccef0dab8024b96e1cfd02b3cacc",
+      "byteCount": 1100
+    },
+    "mounted-runner-raw.json": {
+      "sha256": "372ea05b20bcd7e7e960faa10f175ff681b42c90ea355869c36cf1b1d69c280f",
+      "byteCount": 9360
+    },
+    "two-node-mounted-smoke.json": {
+      "sha256": "a0855360d1e0e5903e8e3d53529cd3c7c4c4baeab3416e932d606e7a31ceadc1",
+      "byteCount": 2087
+    },
+    "promotion-plan-validation.json": {
+      "sha256": "40bb3f64d794879981116480901c6b65e99a3904e93776853ae5c4840123ba46",
+      "byteCount": 563
+    }
+  },
+  "automatedQualificationProvenance": {
+    "path": "chore/v0.8-stage5-candidate-freeze:docs/review/v08-m32-automated-qualification-7e7154c058d8315b66599d6a819b1476d861adb2.json",
+    "sha256": "f0e2286661a980f918a52b28d2881249b824a1188f8995b61134a5236758cfa9",
+    "bytes": 2012,
+    "candidateSha": "7e7154c058d8315b66599d6a819b1476d861adb2",
+    "sourceRunId": "v08-automated-7e7154c058d8-20260926180000",
+    "scope": "automated",
+    "matrixUsedForMountedEvidence": false
+  },
+  "generatedAt": "2026-09-26T12:35:00.000Z"
+}
