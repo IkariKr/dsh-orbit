@@ -373,7 +373,14 @@ test("audit endpoints redact sensitive session tokens and prevent cross-principa
 });
 
 test("fleet job payload and node output credential scrubbing (P1)", async (t) => {
-  const { registry, server } = await withServer(t);
+  const { registry, server } = await withServer(t, {
+    fleetDispatchTransport: async () => ({
+      status: "completed",
+      exitCode: 0,
+      stdout: "starting\nAPI_TOKEN=abc123def\nfinished",
+      stderr: "token=zzz999",
+    }),
+  });
   const baseUrl = server.baseUrl;
 
   const nodeA = await enrollNode(baseUrl, registry);
@@ -396,6 +403,16 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
         password: "hunter2password",
         secretConfig: "confidential",
         regularField: "hello-world",
+        envLine: "API_TOKEN=abc123def",
+        note: "password=hunter2",
+        url: "postgres://user:pw@host/db",
+        sessionId: "sess_abcdef0123456789abcdef0123456789",
+        key: "K",
+        auth: "A",
+        "x-api-key": "X",
+        credential: "C",
+        monkey: "banana",
+        keyId: "key_123456",
       },
       targetSpec: { mode: "explicit", nodeIds: [nodeA.nodeId] },
     }),
@@ -406,12 +423,26 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
   assert.equal(submitted.payload.password, "[REDACTED]");
   assert.equal(submitted.payload.secretConfig, "[REDACTED]");
   assert.equal(submitted.payload.regularField, "hello-world");
+  assert.equal(submitted.payload.envLine, "API_TOKEN=[REDACTED]");
+  assert.equal(submitted.payload.note, "password=[REDACTED]");
+  assert.equal(submitted.payload.url, "postgres://user:[REDACTED]@host/db");
+  assert.equal(submitted.payload.sessionId, "[REDACTED]");
+  assert.equal(submitted.payload.key, "[REDACTED]");
+  assert.equal(submitted.payload.auth, "[REDACTED]");
+  assert.equal(submitted.payload["x-api-key"], "[REDACTED]");
+  assert.equal(submitted.payload.credential, "[REDACTED]");
+  assert.equal(submitted.payload.monkey, "banana");
+  assert.equal(submitted.payload.keyId, "key_123456");
 
-  // Also verify via GET /hub/fleet/jobs/:jobId
+  // Wait for settlement
+  await server.fleetScheduler.jobs.get(submitted.jobId)._executionPromise;
+
+  // Verify via GET /hub/fleet/jobs/:jobId by operator-bob
+  const sessionBob = await establishSession(baseUrl, "operator-bob");
   const getRes = await fetch(`${baseUrl}/hub/fleet/jobs/${submitted.jobId}`, {
     headers: {
-      ...gatewayHeaders("operator-alice"),
-      cookie: session.cookie,
+      ...gatewayHeaders("operator-bob"),
+      cookie: sessionBob.cookie,
       origin: baseUrl,
       "sec-fetch-site": "same-origin",
     },
@@ -420,8 +451,56 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
   const getBody = await getRes.json();
   assert.equal(getBody.payload.apiKey, "[REDACTED]");
   assert.equal(getBody.payload.password, "[REDACTED]");
-  assert.equal(getBody.payload.secretConfig, "[REDACTED]");
-  assert.equal(getBody.payload.regularField, "hello-world");
+  assert.equal(getBody.payload.envLine, "API_TOKEN=[REDACTED]");
+  assert.equal(getBody.payload.monkey, "banana");
+  assert.equal(getBody.payload.keyId, "key_123456");
+
+  // Output logs (stdout/stderr) scrubbing verification
+  assert.equal(getBody.results[nodeA.nodeId].stdout, "starting\nAPI_TOKEN=[REDACTED]\nfinished");
+  assert.equal(getBody.results[nodeA.nodeId].stderr, "token=[REDACTED]");
+});
+
+test("audit detail redacts arrays and non-fleet URLs reject malformed percent encoding with 400 (P3)", async (t) => {
+  const { registry, server } = await withServer(t);
+  const baseUrl = server.baseUrl;
+  const session = await establishSession(baseUrl, "operator-alice");
+
+  // Record audit entry with nested array of credential objects
+  registry.recordAudit("operator-alice", "custom.action", {
+    items: [{ token: "LEAK-TOKEN" }, { secret: "LEAK-SECRET" }],
+    nested: { arr: [{ password: "LEAK-PW" }] },
+    benign: { monkey: "hockey", keyId: "kid123" },
+  });
+
+  const auditRes = await fetch(`${baseUrl}/hub/audit`, {
+    headers: {
+      ...gatewayHeaders("operator-alice"),
+      cookie: session.cookie,
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+    },
+  });
+  const auditData = await auditRes.json();
+  const customEntry = auditData.audit.find((e) => e.action === "custom.action");
+  assert.ok(customEntry);
+  assert.equal(customEntry.detail.items[0].token, "[REDACTED]");
+  assert.equal(customEntry.detail.items[1].secret, "[REDACTED]");
+  assert.equal(customEntry.detail.nested.arr[0].password, "[REDACTED]");
+  assert.equal(customEntry.detail.benign.monkey, "hockey");
+  assert.equal(customEntry.detail.benign.keyId, "kid123");
+
+  // Non-fleet routes with %ZZ malformed percent encoding return 400 bad-request, never 500
+  const malformedNodeRes = await fetch(`${baseUrl}/hub/nodes/%ZZ`, {
+    headers: {
+      ...gatewayHeaders("operator-alice"),
+      cookie: session.cookie,
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+    },
+  });
+  assert.equal(malformedNodeRes.status, 400);
+  const malformedBody = await malformedNodeRes.json();
+  assert.equal(malformedBody.error.code, "bad-request");
 });
 
 test("malformed audit query returns 400 bad-request, never 500 (P2)", async (t) => {

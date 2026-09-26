@@ -56,39 +56,70 @@ function assertValidJsonPayload(val, depth = 0) {
   }
 }
 
+export function isSensitiveKey(k) {
+  const lower = String(k).toLowerCase();
+  if (
+    lower.endsWith("id") &&
+    (lower === "keyid" ||
+      lower === "tokenid" ||
+      lower === "nodeid" ||
+      lower === "requestid" ||
+      lower === "currentkeyid" ||
+      lower === "newkeyid")
+  ) {
+    return false;
+  }
+  if (lower === "monkey" || lower === "hockey") return false;
+  return (
+    lower.includes("secret") ||
+    lower.includes("password") ||
+    lower.includes("passwd") ||
+    lower.includes("token") ||
+    lower.includes("apikey") ||
+    lower.includes("api_key") ||
+    lower.includes("api-key") ||
+    lower.includes("credential") ||
+    lower.includes("privatekey") ||
+    lower.includes("private_key") ||
+    lower.includes("private-key") ||
+    lower.includes("session") ||
+    lower.includes("auth") ||
+    lower.includes("cookie") ||
+    lower.includes("csrf") ||
+    lower === "key"
+  );
+}
+
+export function scrubString(str) {
+  if (typeof str !== "string") return str;
+  let s = str;
+  if (/-----BEGIN[ A-Z0-9_-]*PRIVATE KEY-----/.test(s)) {
+    s = s.replace(
+      /-----BEGIN[ A-Z0-9_-]*PRIVATE KEY-----[\s\S]*?-----END[ A-Z0-9_-]*PRIVATE KEY-----/g,
+      "[REDACTED_PRIVATE_KEY]",
+    );
+  }
+  s = s.replace(/([a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/:]+:)([^/@]+)(@)/g, "$1[REDACTED]$3");
+  s = s.replace(/bearer\s+[a-zA-Z0-9._~+/-]+=*/gi, "Bearer [REDACTED_TOKEN]");
+  s = s.replace(/dsh-orbit-hub-session=[^;\s]+/gi, "dsh-orbit-hub-session=[REDACTED_SESSION]");
+  s = s.replace(/\bsess_[0-9a-fA-F]{16,}\b/g, "[REDACTED_SESSION]");
+  s = s.replace(
+    /(\b(?:api[_-]?)?(?:token|secret|password|passwd|key|credential|authorization|session[_-]?id)\b\s*[:=]\s*)([^\s,;\x27\x22]+)/gim,
+    "$1[REDACTED]",
+  );
+  return s;
+}
+
 export function scrubSensitiveCredentials(data) {
   if (data === null || data === undefined) return data;
-  if (typeof data === "string") {
-    if (/-----BEGIN[ A-Z0-9_-]*PRIVATE KEY-----/.test(data)) {
-      return "[REDACTED_PRIVATE_KEY]";
-    }
-    if (/bearer\s+[a-zA-Z0-9._~+/-]+=*/i.test(data)) {
-      return data.replace(/bearer\s+[a-zA-Z0-9._~+/-]+=*/gi, "Bearer [REDACTED_TOKEN]");
-    }
-    if (/dsh-orbit-hub-session=[^;\s]+/i.test(data)) {
-      return data.replace(/dsh-orbit-hub-session=[^;\s]+/gi, "dsh-orbit-hub-session=[REDACTED_SESSION]");
-    }
-    return data;
-  }
+  if (typeof data === "string") return scrubString(data);
   if (Array.isArray(data)) {
     return data.map((item) => scrubSensitiveCredentials(item));
   }
   if (typeof data === "object") {
     const scrubbed = {};
     for (const [k, v] of Object.entries(data)) {
-      const lower = k.toLowerCase();
-      if (
-        lower.includes("secret") ||
-        lower.includes("password") ||
-        lower.includes("token") ||
-        lower.includes("apikey") ||
-        lower.includes("api_key") ||
-        lower.includes("privatekey") ||
-        lower.includes("private_key") ||
-        lower === "authorization" ||
-        lower === "cookie" ||
-        lower === "set-cookie"
-      ) {
+      if (isSensitiveKey(k)) {
         scrubbed[k] = "[REDACTED]";
       } else {
         scrubbed[k] = scrubSensitiveCredentials(v);

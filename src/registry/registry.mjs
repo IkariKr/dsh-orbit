@@ -56,23 +56,51 @@ import {
 } from "./protocol.mjs";
 import { nowIso, withTransaction } from "./sqlite.mjs";
 
+function isSensitiveKey(k) {
+  const lower = String(k).toLowerCase();
+  if (
+    lower.endsWith("id") &&
+    (lower === "keyid" ||
+      lower === "tokenid" ||
+      lower === "nodeid" ||
+      lower === "requestid" ||
+      lower === "currentkeyid" ||
+      lower === "newkeyid")
+  ) {
+    return false;
+  }
+  if (lower === "monkey" || lower === "hockey") return false;
+  return (
+    lower.includes("secret") ||
+    lower.includes("password") ||
+    lower.includes("passwd") ||
+    lower.includes("token") ||
+    lower.includes("apikey") ||
+    lower.includes("api_key") ||
+    lower.includes("api-key") ||
+    lower.includes("credential") ||
+    lower.includes("privatekey") ||
+    lower.includes("private_key") ||
+    lower.includes("private-key") ||
+    lower.includes("session") ||
+    lower.includes("auth") ||
+    lower.includes("cookie") ||
+    lower.includes("csrf") ||
+    lower === "key"
+  );
+}
+
 function sanitizeAuditDetail(detail) {
-  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return {};
+  if (detail === null || detail === undefined) return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => sanitizeAuditDetail(item));
+  }
+  if (typeof detail !== "object") return detail;
   const sanitized = {};
   for (const [k, v] of Object.entries(detail)) {
-    const lowerKey = k.toLowerCase();
-    if (
-      lowerKey.includes("session") ||
-      lowerKey.includes("token") ||
-      lowerKey.includes("secret") ||
-      lowerKey.includes("key") ||
-      lowerKey.includes("password") ||
-      lowerKey.includes("cookie") ||
-      lowerKey.includes("csrf") ||
-      lowerKey.includes("auth")
-    ) {
+    if (isSensitiveKey(k)) {
       sanitized[k] = "[REDACTED]";
-    } else if (v && typeof v === "object" && !Array.isArray(v)) {
+    } else if (v && typeof v === "object") {
       sanitized[k] = sanitizeAuditDetail(v);
     } else {
       sanitized[k] = v;

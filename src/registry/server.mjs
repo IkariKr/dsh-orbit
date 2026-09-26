@@ -744,7 +744,10 @@ export function createHubServer({ registry, options = {} }) {
       }
       const nodeMatch = path.match(/^\/hub\/nodes\/([^/]+)\/?$/);
       if (nodeMatch) {
-        const rawNodeId = decodeURIComponent(nodeMatch[1]);
+        const rawNodeId = safeDecodeUri(nodeMatch[1]);
+        if (rawNodeId === null) {
+          return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+        }
         const targetScope = validateTargetScope(rawNodeId);
         if (!targetScope.valid) {
           return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });
@@ -929,7 +932,10 @@ export function createHubServer({ registry, options = {} }) {
       if (request.method !== "PUT") {
         return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected PUT" } });
       }
-      const rawNodeId = decodeURIComponent(routeModeMatch[1]);
+      const rawNodeId = safeDecodeUri(routeModeMatch[1]);
+      if (rawNodeId === null) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+      }
       const targetScope = validateTargetScope(rawNodeId);
       if (!targetScope.valid) {
         return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });
@@ -949,7 +955,10 @@ export function createHubServer({ registry, options = {} }) {
 
     const routeTargetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
     if (routeTargetMatch) {
-      const rawNodeId = decodeURIComponent(routeTargetMatch[1]);
+      const rawNodeId = safeDecodeUri(routeTargetMatch[1]);
+      if (rawNodeId === null) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+      }
       const targetScope = validateTargetScope(rawNodeId);
       if (!targetScope.valid) {
         return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });
