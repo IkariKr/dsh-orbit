@@ -56,6 +56,49 @@ function assertValidJsonPayload(val, depth = 0) {
   }
 }
 
+export function scrubSensitiveCredentials(data) {
+  if (data === null || data === undefined) return data;
+  if (typeof data === "string") {
+    if (/-----BEGIN[ A-Z0-9_-]*PRIVATE KEY-----/.test(data)) {
+      return "[REDACTED_PRIVATE_KEY]";
+    }
+    if (/bearer\s+[a-zA-Z0-9._~+/-]+=*/i.test(data)) {
+      return data.replace(/bearer\s+[a-zA-Z0-9._~+/-]+=*/gi, "Bearer [REDACTED_TOKEN]");
+    }
+    if (/dsh-orbit-hub-session=[^;\s]+/i.test(data)) {
+      return data.replace(/dsh-orbit-hub-session=[^;\s]+/gi, "dsh-orbit-hub-session=[REDACTED_SESSION]");
+    }
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => scrubSensitiveCredentials(item));
+  }
+  if (typeof data === "object") {
+    const scrubbed = {};
+    for (const [k, v] of Object.entries(data)) {
+      const lower = k.toLowerCase();
+      if (
+        lower.includes("secret") ||
+        lower.includes("password") ||
+        lower.includes("token") ||
+        lower.includes("apikey") ||
+        lower.includes("api_key") ||
+        lower.includes("privatekey") ||
+        lower.includes("private_key") ||
+        lower === "authorization" ||
+        lower === "cookie" ||
+        lower === "set-cookie"
+      ) {
+        scrubbed[k] = "[REDACTED]";
+      } else {
+        scrubbed[k] = scrubSensitiveCredentials(v);
+      }
+    }
+    return scrubbed;
+  }
+  return data;
+}
+
 function safeClone(value, fallback = {}) {
   if (value === null || value === undefined) return value;
   try {
@@ -285,19 +328,23 @@ export class FleetJobScheduler {
   }
 
   /**
-   * Retrieves an immutable snapshot of a fleet job.
+   * Retrieves an immutable snapshot of a fleet job with credentials scrubbed.
    * Uses safeClone to ensure deep isolation without unhandled throwing.
    *
    * @param {string} jobId
+   * @param {object} [options]
+   * @param {boolean} [options.scrub=true]
    * @returns {object|null}
    */
-  getJob(jobId) {
+  getJob(jobId, { scrub = true } = {}) {
     const job = this.jobs.get(jobId);
     if (!job) return null;
+    const rawPayload = safeClone(job.payload, {});
+    const rawResults = safeClone(job.results, {});
     return {
       jobId: job.jobId,
       taskType: job.taskType,
-      payload: safeClone(job.payload, {}),
+      payload: scrub ? scrubSensitiveCredentials(rawPayload) : rawPayload,
       targetSpec: safeClone(job.targetSpec, {}),
       requiredCapabilities: [...job.requiredCapabilities],
       operatorPrincipal: job.operatorPrincipal,
@@ -306,7 +353,7 @@ export class FleetJobScheduler {
       finishedAt: job.finishedAt,
       status: job.status,
       summary: { ...job.summary },
-      results: safeClone(job.results, {}),
+      results: scrub ? scrubSensitiveCredentials(rawResults) : rawResults,
     };
   }
 

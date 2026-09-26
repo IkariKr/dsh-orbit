@@ -322,3 +322,219 @@ test("audit log recording and query filtering (field 8, 25)", async (t) => {
   const allAudit = await allAuditRes.json();
   assert.ok(allAudit.audit.length >= 4); // sessions + jobs
 });
+
+test("audit endpoints redact sensitive session tokens and prevent cross-principal session hijack (P0)", async (t) => {
+  const { server } = await withServer(t);
+  const baseUrl = server.baseUrl;
+
+  const sessionAlice = await establishSession(baseUrl, "operator-alice");
+  const sessionBob = await establishSession(baseUrl, "operator-bob");
+
+  // Bob queries audit logs
+  const auditRes = await fetch(`${baseUrl}/hub/audit`, {
+    headers: {
+      ...gatewayHeaders("operator-bob"),
+      cookie: sessionBob.cookie,
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+    },
+  });
+  assert.equal(auditRes.status, 200);
+  const auditData = await auditRes.json();
+  assert.ok(auditData.audit.length > 0);
+
+  // All session IDs, tokens, secrets must be redacted
+  for (const entry of auditData.audit) {
+    if (entry.detail) {
+      if ("sessionId" in entry.detail) {
+        assert.equal(entry.detail.sessionId, "[REDACTED]");
+      }
+      if ("session_id" in entry.detail) {
+        assert.equal(entry.detail.session_id, "[REDACTED]");
+      }
+      if ("csrfToken" in entry.detail) {
+        assert.equal(entry.detail.csrfToken, "[REDACTED]");
+      }
+    }
+  }
+
+  // If Bob attempts to use Alice's session cookie under Bob's admitted identity, reject with 403
+  const hijackAttempt = await fetch(`${baseUrl}/hub/session`, {
+    headers: {
+      ...gatewayHeaders("operator-bob"),
+      cookie: sessionAlice.cookie, // Alice's cookie
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+    },
+  });
+  assert.equal(hijackAttempt.status, 403);
+  const hijackBody = await hijackAttempt.json();
+  assert.equal(hijackBody.error.code, "principal-mismatch");
+});
+
+test("fleet job payload and node output credential scrubbing (P1)", async (t) => {
+  const { registry, server } = await withServer(t);
+  const baseUrl = server.baseUrl;
+
+  const nodeA = await enrollNode(baseUrl, registry);
+  const session = await establishSession(baseUrl, "operator-alice");
+
+  const submitRes = await fetch(`${baseUrl}/hub/fleet/jobs`, {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders("operator-alice"),
+      cookie: session.cookie,
+      [CSRF_HEADER]: session.csrfToken,
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      taskType: "diagnostic",
+      payload: {
+        apiKey: "sk-live-SUPERSECRET123",
+        password: "hunter2password",
+        secretConfig: "confidential",
+        regularField: "hello-world",
+      },
+      targetSpec: { mode: "explicit", nodeIds: [nodeA.nodeId] },
+    }),
+  });
+  assert.equal(submitRes.status, 201);
+  const submitted = await submitRes.json();
+  assert.equal(submitted.payload.apiKey, "[REDACTED]");
+  assert.equal(submitted.payload.password, "[REDACTED]");
+  assert.equal(submitted.payload.secretConfig, "[REDACTED]");
+  assert.equal(submitted.payload.regularField, "hello-world");
+
+  // Also verify via GET /hub/fleet/jobs/:jobId
+  const getRes = await fetch(`${baseUrl}/hub/fleet/jobs/${submitted.jobId}`, {
+    headers: {
+      ...gatewayHeaders("operator-alice"),
+      cookie: session.cookie,
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+    },
+  });
+  assert.equal(getRes.status, 200);
+  const getBody = await getRes.json();
+  assert.equal(getBody.payload.apiKey, "[REDACTED]");
+  assert.equal(getBody.payload.password, "[REDACTED]");
+  assert.equal(getBody.payload.secretConfig, "[REDACTED]");
+  assert.equal(getBody.payload.regularField, "hello-world");
+});
+
+test("malformed audit query returns 400 bad-request, never 500 (P2)", async (t) => {
+  const { server } = await withServer(t);
+  const baseUrl = server.baseUrl;
+  const session = await establishSession(baseUrl, "operator-alice");
+
+  const malformedQueries = [
+    { jobId: {} },
+    { jobId: ["array"] },
+    { action: {} },
+    { since: 123 },
+    { until: [] },
+    { limit: 10.5 },
+    { limit: -5 },
+  ];
+
+  for (const badQuery of malformedQueries) {
+    const res = await fetch(`${baseUrl}/hub/audit/query`, {
+      method: "POST",
+      headers: {
+        ...gatewayHeaders("operator-alice"),
+        cookie: session.cookie,
+        [CSRF_HEADER]: session.csrfToken,
+        origin: baseUrl,
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(badQuery),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.error.code, "bad-request");
+  }
+});
+
+test("cancel on terminal job returns 409 conflict, and replay of duplicate jobId avoids duplicate create audit (P2)", async (t) => {
+  const { registry, server } = await withServer(t);
+  const baseUrl = server.baseUrl;
+
+  const nodeA = await enrollNode(baseUrl, registry);
+  const session = await establishSession(baseUrl, "operator-alice");
+
+  const fixedJobId = "job_11112222333344445555666677778888";
+
+  // First submit
+  const res1 = await fetch(`${baseUrl}/hub/fleet/jobs`, {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders("operator-alice"),
+      cookie: session.cookie,
+      [CSRF_HEADER]: session.csrfToken,
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      jobId: fixedJobId,
+      taskType: "diagnostic",
+      targetSpec: { mode: "explicit", nodeIds: [nodeA.nodeId] },
+    }),
+  });
+  assert.equal(res1.status, 201);
+
+  // Wait for settlement
+  await server.fleetScheduler.jobs.get(fixedJobId)._executionPromise;
+
+  // Re-submit identical jobId (replay): returns 200, does not duplicate create audit
+  const res2 = await fetch(`${baseUrl}/hub/fleet/jobs`, {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders("operator-alice"),
+      cookie: session.cookie,
+      [CSRF_HEADER]: session.csrfToken,
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      jobId: fixedJobId,
+      taskType: "diagnostic",
+      targetSpec: { mode: "explicit", nodeIds: [nodeA.nodeId] },
+    }),
+  });
+  assert.equal(res2.status, 200);
+
+  // Audit query: exactly 1 create audit row exists
+  const auditRes = await fetch(`${baseUrl}/hub/fleet/jobs/${fixedJobId}/audit`, {
+    headers: {
+      ...gatewayHeaders("operator-alice"),
+      cookie: session.cookie,
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+    },
+  });
+  assert.equal(auditRes.status, 200);
+  const auditData = await auditRes.json();
+  const creates = auditData.audit.filter((a) => a.action === "fleet.job.create");
+  assert.equal(creates.length, 1);
+
+  // Attempt cancel on already-terminal job -> 409 conflict
+  const cancelRes = await fetch(`${baseUrl}/hub/fleet/jobs/${fixedJobId}/cancel`, {
+    method: "POST",
+    headers: {
+      ...gatewayHeaders("operator-alice"),
+      cookie: session.cookie,
+      [CSRF_HEADER]: session.csrfToken,
+      origin: baseUrl,
+      "sec-fetch-site": "same-origin",
+    },
+  });
+  assert.equal(cancelRes.status, 409);
+  const cancelBody = await cancelRes.json();
+  assert.equal(cancelBody.error.code, "job-already-terminal");
+  assert.equal(cancelBody.status, "completed");
+});

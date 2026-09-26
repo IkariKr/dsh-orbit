@@ -56,6 +56,31 @@ import {
 } from "./protocol.mjs";
 import { nowIso, withTransaction } from "./sqlite.mjs";
 
+function sanitizeAuditDetail(detail) {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) return {};
+  const sanitized = {};
+  for (const [k, v] of Object.entries(detail)) {
+    const lowerKey = k.toLowerCase();
+    if (
+      lowerKey.includes("session") ||
+      lowerKey.includes("token") ||
+      lowerKey.includes("secret") ||
+      lowerKey.includes("key") ||
+      lowerKey.includes("password") ||
+      lowerKey.includes("cookie") ||
+      lowerKey.includes("csrf") ||
+      lowerKey.includes("auth")
+    ) {
+      sanitized[k] = "[REDACTED]";
+    } else if (v && typeof v === "object" && !Array.isArray(v)) {
+      sanitized[k] = sanitizeAuditDetail(v);
+    } else {
+      sanitized[k] = v;
+    }
+  }
+  return sanitized;
+}
+
 export class DeniedError extends Error {
   constructor(status, code, message) {
     super(message);
@@ -336,7 +361,30 @@ export class Registry {
       .run(nowIso(this.now()), actor, action, JSON.stringify(detail ?? {}));
   }
 
-  queryAudit({ jobId, operator, actor, action, since, until, limit = 100 } = {}) {
+  queryAudit({ jobId = null, operator = null, actor = null, action = null, since = null, until = null, limit = 100 } = {}) {
+    if (jobId !== null && typeof jobId !== "string") {
+      throw new DeniedError(400, "bad-request", "jobId must be a string");
+    }
+    if (operator !== null && typeof operator !== "string") {
+      throw new DeniedError(400, "bad-request", "operator must be a string");
+    }
+    if (actor !== null && typeof actor !== "string") {
+      throw new DeniedError(400, "bad-request", "actor must be a string");
+    }
+    if (action !== null && typeof action !== "string") {
+      throw new DeniedError(400, "bad-request", "action must be a string");
+    }
+    if (since !== null && typeof since !== "string") {
+      throw new DeniedError(400, "bad-request", "since must be a string");
+    }
+    if (until !== null && typeof until !== "string") {
+      throw new DeniedError(400, "bad-request", "until must be a string");
+    }
+    if (limit !== null && limit !== undefined) {
+      if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1) {
+        throw new DeniedError(400, "bad-request", "limit must be a positive integer");
+      }
+    }
     const conditions = [];
     const params = [];
     if (jobId) {
@@ -375,7 +423,7 @@ export class Registry {
         at: row.at,
         actor: row.actor,
         action: row.action,
-        detail,
+        detail: sanitizeAuditDetail(detail),
       };
     });
   }

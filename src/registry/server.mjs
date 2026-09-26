@@ -188,6 +188,14 @@ function machineField(request, name) {
   return value;
 }
 
+function safeDecodeUri(str) {
+  try {
+    return decodeURIComponent(str);
+  } catch {
+    return null;
+  }
+}
+
 export function createHubServer({ registry, options = {} }) {
   const {
     gatewayAssertionSecret = null,
@@ -644,11 +652,16 @@ export function createHubServer({ registry, options = {} }) {
     }
   }
 
-  function validateSessionOnly(request) {
+  function validateSessionOnly(request, principal) {
     const sessionId = parseCookies(request).get(SESSION_COOKIE);
     const session = registry.validateSession(sessionId);
     if (!session) {
       throw new DeniedError(401, "no-session", "no valid management session");
+    }
+    if (operatorPrincipal && operatorPrincipal.mode === "inject") {
+      if (session.operatorPrincipal !== principal) {
+        throw new DeniedError(403, "principal-mismatch", "session does not belong to admitted operator principal");
+      }
     }
     return session;
   }
@@ -683,7 +696,7 @@ export function createHubServer({ registry, options = {} }) {
       return sendJson(response, 200, { principal, csrfToken: session.csrfToken, expiresAt: session.expiresAt });
     }
 
-    const session = validateSessionOnly(request);
+    const session = validateSessionOnly(request, principal);
 
     if (request.method === "GET" && (path === "/hub/session" || path === "/hub/session/")) {
       return sendJson(response, 200, { principal: session.operatorPrincipal, csrfToken: session.csrfToken, expiresAt: session.expiresAt });
@@ -748,7 +761,11 @@ export function createHubServer({ registry, options = {} }) {
       }
       const fleetJobMatch = path.match(/^\/hub\/fleet\/jobs\/([^/]+)\/?$/);
       if (fleetJobMatch) {
-        const jobId = decodeURIComponent(fleetJobMatch[1]);
+        const rawJobId = fleetJobMatch[1];
+        const jobId = safeDecodeUri(rawJobId);
+        if (jobId === null) {
+          return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+        }
         const job = fleetScheduler.getJob(jobId);
         if (!job) {
           return sendJson(response, 404, { error: { code: "not-found", message: "no such fleet job" } });
@@ -757,8 +774,16 @@ export function createHubServer({ registry, options = {} }) {
       }
       const fleetJobAuditMatch = path.match(/^\/hub\/fleet\/jobs\/([^/]+)\/audit\/?$/);
       if (fleetJobAuditMatch) {
-        const jobId = decodeURIComponent(fleetJobAuditMatch[1]);
+        const rawJobId = fleetJobAuditMatch[1];
+        const jobId = safeDecodeUri(rawJobId);
+        if (jobId === null) {
+          return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+        }
+        const job = fleetScheduler.getJob(jobId);
         const auditEntries = registry.queryAudit({ jobId });
+        if (!job && auditEntries.length === 0) {
+          return sendJson(response, 404, { error: { code: "not-found", message: "no such fleet job" } });
+        }
         return sendJson(response, 200, { jobId, audit: auditEntries });
       }
       if (path === "/hub/audit" || path === "/hub/audit/") {
@@ -777,6 +802,10 @@ export function createHubServer({ registry, options = {} }) {
         return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
       }
       const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "body must be an object" } });
+      }
+      const isReplay = typeof body.jobId === "string" && fleetScheduler.jobs.has(body.jobId);
       let job;
       try {
         job = fleetScheduler.submitJob({
@@ -790,14 +819,17 @@ export function createHubServer({ registry, options = {} }) {
       } catch (err) {
         return sendJson(response, 400, { error: { code: err.code || "invalid-fleet-job", message: err.message } });
       }
-      registry.recordAudit(session.operatorPrincipal, "fleet.job.create", {
-        jobId: job.jobId,
-        taskType: job.taskType,
-        targetSpec: job.targetSpec,
-        resolvedNodeCount: job.summary.totalTargets,
-        summary: job.summary,
-      });
-      return sendJson(response, 201, job);
+      if (!isReplay) {
+        registry.recordAudit(session.operatorPrincipal, "fleet.job.create", {
+          jobId: job.jobId,
+          taskType: job.taskType,
+          targetSpec: job.targetSpec,
+          resolvedNodeCount: job.summary.totalTargets,
+          summary: job.summary,
+        });
+        return sendJson(response, 201, job);
+      }
+      return sendJson(response, 200, job);
     }
 
     const cancelMatch = path.match(/^\/hub\/fleet\/jobs\/([^/]+)\/cancel\/?$/);
@@ -805,18 +837,30 @@ export function createHubServer({ registry, options = {} }) {
       if (request.method !== "POST") {
         return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
       }
-      const jobId = decodeURIComponent(cancelMatch[1]);
+      const rawJobId = cancelMatch[1];
+      const jobId = safeDecodeUri(rawJobId);
+      if (jobId === null) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+      }
       const job = fleetScheduler.getJob(jobId);
       if (!job) {
         return sendJson(response, 404, { error: { code: "not-found", message: "no such fleet job" } });
       }
       const cancelled = fleetScheduler.cancelJob(jobId);
-      if (cancelled) {
-        registry.recordAudit(session.operatorPrincipal, "fleet.job.abort", {
+      if (!cancelled) {
+        return sendJson(response, 409, {
+          error: {
+            code: "job-already-terminal",
+            message: `job ${jobId} is already in terminal state: ${job.status}`,
+          },
           jobId,
-          reason: "operator-cancelled",
+          status: job.status,
         });
       }
+      registry.recordAudit(session.operatorPrincipal, "fleet.job.abort", {
+        jobId,
+        reason: "operator-cancelled",
+      });
       return sendJson(response, 200, { ok: true, jobId, status: "failed" });
     }
 
@@ -825,7 +869,17 @@ export function createHubServer({ registry, options = {} }) {
         return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
       }
       const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
-      const auditEntries = registry.queryAudit(body);
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "query body must be an object" } });
+      }
+      let auditEntries;
+      try {
+        auditEntries = registry.queryAudit(body);
+      } catch (err) {
+        const code = err instanceof DeniedError ? err.code : "bad-request";
+        const status = err instanceof DeniedError ? err.status : 400;
+        return sendJson(response, status, { error: { code, message: err.message } });
+      }
       return sendJson(response, 200, { audit: auditEntries });
     }
 
