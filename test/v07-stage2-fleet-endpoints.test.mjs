@@ -377,8 +377,9 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
     fleetDispatchTransport: async () => ({
       status: "completed",
       exitCode: 0,
-      stdout: "starting\nDB_PASSWORD=pw123\nGITHUB_TOKEN=ghp_abc\nACCESS_TOKEN=xyz\nAPI_TOKEN=abc123def\nAuthorization: Basic dXNlcjpwdw==\nfinished",
-      stderr: "token=test-zzz999\nclient_secret=test-s3cr3t\ncurl -u user:mypassword https://api.example.com",
+      stdout:
+        "starting\nkey=SECRETKEYVAL\nKEY: secretval2\nauthorization=xyzsecret\nAuthorization: token test_ghp_tok\nAuthorization: ApiKey sk-test-key\nAuthorization: secret123\nDB_PASSWORD=pw123\nGITHUB_TOKEN=ghp_abc\nACCESS_TOKEN=xyz\nAPI_TOKEN=abc123def\nAuthorization: Basic dXNlcjpwdw==\nfinished\nbasic authentication failed for user johnsmith\nbypass=1\ncompass=1",
+      stderr: "token=test-zzz999\nclient_secret=test-s3cr3t\ncurl -u user:mypassword https://api.example.com\nKEY=anothersecret",
     }),
   });
   const baseUrl = server.baseUrl;
@@ -418,6 +419,22 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
         auth: "A",
         "x-api-key": "X",
         credential: "C",
+        keyLine: "key=SECRETKEYVAL",
+        keyColon: "key: SECRETKEYVAL",
+        keyLower: "key=val",
+        customAuthSetting: "authorization=xyzsecret",
+        customScheme1: "Authorization: token test_ghp_tok",
+        customScheme2: "Authorization: ApiKey sk-test-key",
+        customScheme3: "Authorization: secret123",
+        authEq: "authorization=xyzsecret",
+        sessionKey: "session_key_val",
+        sessionValue: "session_val",
+        sessionData: "session_dat",
+        sessionBlob: "session_blb",
+        sessionNonce: "session_nnc",
+        bypassField: "bypass=1",
+        compassField: "compass=1",
+        basicLog: "basic authentication failed for user johnsmith",
         monkey: "banana",
         keyId: "key_123456",
         author: "alice",
@@ -448,6 +465,22 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
   assert.equal(submitted.payload.auth, "[REDACTED]");
   assert.equal(submitted.payload["x-api-key"], "[REDACTED]");
   assert.equal(submitted.payload.credential, "[REDACTED]");
+  assert.equal(submitted.payload.keyLine, "key=[REDACTED]");
+  assert.equal(submitted.payload.keyColon, "key: [REDACTED]");
+  assert.equal(submitted.payload.keyLower, "key=[REDACTED]");
+  assert.equal(submitted.payload.customAuthSetting, "authorization=[REDACTED]");
+  assert.equal(submitted.payload.customScheme1, "Authorization: [REDACTED]");
+  assert.equal(submitted.payload.customScheme2, "Authorization: [REDACTED]");
+  assert.equal(submitted.payload.customScheme3, "Authorization: [REDACTED]");
+  assert.equal(submitted.payload.authEq, "[REDACTED]");
+  assert.equal(submitted.payload.sessionKey, "[REDACTED]");
+  assert.equal(submitted.payload.sessionValue, "[REDACTED]");
+  assert.equal(submitted.payload.sessionData, "[REDACTED]");
+  assert.equal(submitted.payload.sessionBlob, "[REDACTED]");
+  assert.equal(submitted.payload.sessionNonce, "[REDACTED]");
+  assert.equal(submitted.payload.bypassField, "bypass=1");
+  assert.equal(submitted.payload.compassField, "compass=1");
+  assert.equal(submitted.payload.basicLog, "basic authentication failed for user johnsmith");
   assert.equal(submitted.payload.monkey, "banana");
   assert.equal(submitted.payload.keyId, "key_123456");
   assert.equal(submitted.payload.author, "alice");
@@ -473,6 +506,22 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
   assert.equal(getBody.payload.password, "[REDACTED]");
   assert.equal(getBody.payload.envLine, "API_TOKEN=[REDACTED]");
   assert.equal(getBody.payload.dbLine, "DB_PASSWORD=[REDACTED]");
+  assert.equal(getBody.payload.keyLine, "key=[REDACTED]");
+  assert.equal(getBody.payload.keyColon, "key: [REDACTED]");
+  assert.equal(getBody.payload.keyLower, "key=[REDACTED]");
+  assert.equal(getBody.payload.customAuthSetting, "authorization=[REDACTED]");
+  assert.equal(getBody.payload.customScheme1, "Authorization: [REDACTED]");
+  assert.equal(getBody.payload.customScheme2, "Authorization: [REDACTED]");
+  assert.equal(getBody.payload.customScheme3, "Authorization: [REDACTED]");
+  assert.equal(getBody.payload.authEq, "[REDACTED]");
+  assert.equal(getBody.payload.sessionKey, "[REDACTED]");
+  assert.equal(getBody.payload.sessionValue, "[REDACTED]");
+  assert.equal(getBody.payload.sessionData, "[REDACTED]");
+  assert.equal(getBody.payload.sessionBlob, "[REDACTED]");
+  assert.equal(getBody.payload.sessionNonce, "[REDACTED]");
+  assert.equal(getBody.payload.bypassField, "bypass=1");
+  assert.equal(getBody.payload.compassField, "compass=1");
+  assert.equal(getBody.payload.basicLog, "basic authentication failed for user johnsmith");
   assert.equal(getBody.payload.monkey, "banana");
   assert.equal(getBody.payload.keyId, "key_123456");
   assert.equal(getBody.payload.author, "alice");
@@ -485,9 +534,17 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
   assert.ok(getBody.results[nodeA.nodeId].stdout.includes("ACCESS_TOKEN=[REDACTED]"));
   assert.ok(getBody.results[nodeA.nodeId].stdout.includes("API_TOKEN=[REDACTED]"));
   assert.ok(getBody.results[nodeA.nodeId].stdout.includes("Authorization: Basic [REDACTED_AUTH]"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("key=[REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("KEY: [REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("authorization=[REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("Authorization: [REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("basic authentication failed for user johnsmith"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("bypass=1"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("compass=1"));
   assert.ok(getBody.results[nodeA.nodeId].stderr.includes("token=[REDACTED]"));
   assert.ok(getBody.results[nodeA.nodeId].stderr.includes("client_secret=[REDACTED]"));
   assert.ok(getBody.results[nodeA.nodeId].stderr.includes("curl -u user:[REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stderr.includes("KEY=[REDACTED]"));
 });
 
 test("audit detail redacts arrays and non-fleet URLs reject malformed percent encoding with 400 (P3)", async (t) => {

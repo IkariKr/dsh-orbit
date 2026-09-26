@@ -73,9 +73,13 @@ export function isSensitiveKey(k) {
     lower === "monkey" ||
     lower === "hockey" ||
     lower === "author" ||
-    lower.includes("authority") ||
-    lower.includes("sessioncount") ||
-    lower.includes("sessionstate")
+    lower === "authority" ||
+    lower === "routeauthority" ||
+    lower === "route_authority" ||
+    lower === "sessioncount" ||
+    lower === "session_count" ||
+    lower === "sessionstate" ||
+    lower === "session_state"
   ) {
     return false;
   }
@@ -91,13 +95,12 @@ export function isSensitiveKey(k) {
     lower.includes("privatekey") ||
     lower.includes("private_key") ||
     lower.includes("private-key") ||
-    lower === "session" ||
-    lower.includes("sessionid") ||
-    lower.includes("session_id") ||
-    lower.includes("session-id") ||
+    lower.includes("session") ||
     lower.includes("cookie") ||
     lower.includes("csrf") ||
     lower === "key" ||
+    lower.endsWith("_key") ||
+    lower.endsWith("-key") ||
     lower === "auth" ||
     lower === "authorization" ||
     lower.startsWith("auth") ||
@@ -117,19 +120,21 @@ export function scrubString(str) {
   // URL passwords
   s = s.replace(/([a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/:]+:)([^/@]+)(@)/g, "$1[REDACTED]$3");
   // Bearer tokens
-  s = s.replace(/bearer\s+[a-zA-Z0-9._~+/-]+=*/gi, "Bearer [REDACTED_TOKEN]");
+  s = s.replace(/authorization:[ \t]*bearer[ \t]+[A-Za-z0-9._~+/-]+=*/gi, "Authorization: Bearer [REDACTED_TOKEN]");
+  s = s.replace(/\bbearer[ \t]+[a-zA-Z0-9._~+/-]+=*/gi, "Bearer [REDACTED_TOKEN]");
   // Basic auth
-  s = s.replace(/authorization:\s*basic\s+[A-Za-z0-9+/=]{4,}/gi, "Authorization: Basic [REDACTED_AUTH]");
-  s = s.replace(/basic\s+[a-zA-Z0-9+/=]{8,}/gi, "Basic [REDACTED_AUTH]");
+  s = s.replace(/authorization:[ \t]*basic[ \t]+[A-Za-z0-9+/=]{4,}/gi, "Authorization: Basic [REDACTED_AUTH]");
+  // Other Authorization header schemes/tokens (token, ApiKey, OAuth, secret, etc.)
+  s = s.replace(/authorization:[ \t]*(?!bearer|basic|\[redacted)[^\s,;\r\n]+(?:[ \t]+[^\s,;\r\n]+)?/gi, "Authorization: [REDACTED]");
   // curl -u user:pass
   s = s.replace(/((?:curl\s+.*?(?:-u|--user)\s+[\x27\x22]?[^:\s\x27\x22]+:))([^\s\x27\x22]+)/gi, "$1[REDACTED]");
   // Session cookies and tokens
   s = s.replace(/dsh-orbit-hub-session=[^;\s]+/gi, "dsh-orbit-hub-session=[REDACTED_SESSION]");
   s = s.replace(/\bsess_[0-9a-fA-F]{16,}\b/g, "[REDACTED_SESSION]");
   // Prefixed and bare key=value / key: value assignments
-  // Matches DB_PASSWORD=pw123, GITHUB_TOKEN="ghp_abc", ACCESS_TOKEN=xyz, client_secret=s3cr3t, etc.
+  // Matches DB_PASSWORD=pw123, GITHUB_TOKEN="ghp_abc", ACCESS_TOKEN=xyz, client_secret=s3cr3t, key=abc, KEY: abc, authorization=xyz, auth=secret, etc.
   s = s.replace(
-    /(\b[A-Za-z0-9_]*(?:token|secret|password|passwd|pass|api[_-]?key|credential|session[_-]?id|[_-]key)\b\s*[:=]\s*)(?:[\x27\x22][^\x27\x22\r\n]*[\x27\x22]|[^\s,;]+)/gim,
+    /(\b(?:[A-Za-z0-9_]*(?:token|secret|password|passwd|credential|session[_-]?id)|[A-Za-z0-9_]*[_-]key|api[_-]?key|key|auth)\b\s*[:=]\s*|\bauthorization\b\s*=\s*)(?:[\x27\x22][^\x27\x22\r\n]*[\x27\x22]|[^\s,;]+)/gim,
     "$1[REDACTED]",
   );
   return s;
