@@ -31,6 +31,7 @@ import {
   assertValidTargetScope,
   validateScopedAction,
 } from "./flow-tracker.mjs";
+import { FleetJobScheduler } from "./fleet-scheduler.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -742,6 +743,27 @@ export function createHubServer({ registry, options = {} }) {
         }
         return sendJson(response, 200, managementNodeDetail(nodeId));
       }
+      if (path === "/hub/fleet/jobs" || path === "/hub/fleet/jobs/") {
+        return sendJson(response, 200, { jobs: fleetScheduler.listJobs() });
+      }
+      const fleetJobMatch = path.match(/^\/hub\/fleet\/jobs\/([^/]+)\/?$/);
+      if (fleetJobMatch) {
+        const jobId = decodeURIComponent(fleetJobMatch[1]);
+        const job = fleetScheduler.getJob(jobId);
+        if (!job) {
+          return sendJson(response, 404, { error: { code: "not-found", message: "no such fleet job" } });
+        }
+        return sendJson(response, 200, job);
+      }
+      const fleetJobAuditMatch = path.match(/^\/hub\/fleet\/jobs\/([^/]+)\/audit\/?$/);
+      if (fleetJobAuditMatch) {
+        const jobId = decodeURIComponent(fleetJobAuditMatch[1]);
+        const auditEntries = registry.queryAudit({ jobId });
+        return sendJson(response, 200, { jobId, audit: auditEntries });
+      }
+      if (path === "/hub/audit" || path === "/hub/audit/") {
+        return sendJson(response, 200, { audit: registry.queryAudit() });
+      }
       if (path === "/hub/tokens" || path === "/hub/tokens/") {
         return sendJson(response, 200, { tokens: registry.listTokens() });
       }
@@ -749,6 +771,63 @@ export function createHubServer({ registry, options = {} }) {
     }
 
     requireCsrf(request, session);
+
+    if (path === "/hub/fleet/jobs" || path === "/hub/fleet/jobs/") {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+      let job;
+      try {
+        job = fleetScheduler.submitJob({
+          jobId: body.jobId,
+          taskType: body.taskType,
+          payload: body.payload,
+          targetSpec: body.targetSpec,
+          requiredCapabilities: body.requiredCapabilities,
+          operatorPrincipal: session.operatorPrincipal,
+        });
+      } catch (err) {
+        return sendJson(response, 400, { error: { code: err.code || "invalid-fleet-job", message: err.message } });
+      }
+      registry.recordAudit(session.operatorPrincipal, "fleet.job.create", {
+        jobId: job.jobId,
+        taskType: job.taskType,
+        targetSpec: job.targetSpec,
+        resolvedNodeCount: job.summary.totalTargets,
+        summary: job.summary,
+      });
+      return sendJson(response, 201, job);
+    }
+
+    const cancelMatch = path.match(/^\/hub\/fleet\/jobs\/([^/]+)\/cancel\/?$/);
+    if (cancelMatch) {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      const jobId = decodeURIComponent(cancelMatch[1]);
+      const job = fleetScheduler.getJob(jobId);
+      if (!job) {
+        return sendJson(response, 404, { error: { code: "not-found", message: "no such fleet job" } });
+      }
+      const cancelled = fleetScheduler.cancelJob(jobId);
+      if (cancelled) {
+        registry.recordAudit(session.operatorPrincipal, "fleet.job.abort", {
+          jobId,
+          reason: "operator-cancelled",
+        });
+      }
+      return sendJson(response, 200, { ok: true, jobId, status: "failed" });
+    }
+
+    if (path === "/hub/audit/query" || path === "/hub/audit/query/") {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+      const auditEntries = registry.queryAudit(body);
+      return sendJson(response, 200, { audit: auditEntries });
+    }
 
     if (
       path === "/hub/actions/node" ||
@@ -931,6 +1010,28 @@ export function createHubServer({ registry, options = {} }) {
       reverseChannels.closeChannelsForSession(session.reverseSessionId, reason);
     },
   });
+
+  const fleetScheduler = options.fleetScheduler instanceof FleetJobScheduler
+    ? options.fleetScheduler
+    : new FleetJobScheduler({
+        registry,
+        reverseChannels,
+        dispatchTransport: options.fleetDispatchTransport ?? null,
+        onJobCompleted: (completedJob) => {
+          try {
+            registry.recordAudit(completedJob.operatorPrincipal, "fleet.job.complete", {
+              jobId: completedJob.jobId,
+              taskType: completedJob.taskType,
+              status: completedJob.status,
+              summary: completedJob.summary,
+              durationMs: completedJob.finishedAt && completedJob.startedAt
+                ? Math.max(0, new Date(completedJob.finishedAt).getTime() - new Date(completedJob.startedAt).getTime())
+                : 0,
+            });
+          } catch {}
+        },
+        now: () => registry.now(),
+      });
 
   function managementNodeSummary(node) {
     const summary = node;
@@ -1232,5 +1333,6 @@ export function createHubServer({ registry, options = {} }) {
   });
 
   server.flowTracker = flowTracker;
-  return { server, wsTracker, reverseSessions, reverseChannels, flowTracker };
+  server.fleetScheduler = fleetScheduler;
+  return { server, wsTracker, reverseSessions, reverseChannels, flowTracker, fleetScheduler };
 }

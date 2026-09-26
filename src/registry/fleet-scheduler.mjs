@@ -155,6 +155,7 @@ export class FleetJobScheduler {
     maxConcurrentDispatches = 8,
     defaultTimeoutMs = 30000,
     dispatchTransport = null,
+    onJobCompleted = null,
     now = () => new Date(),
   } = {}) {
     this.registry = registry;
@@ -162,6 +163,7 @@ export class FleetJobScheduler {
     this.maxConcurrentDispatches = Math.max(1, Math.min(128, maxConcurrentDispatches));
     this.defaultTimeoutMs = Math.max(100, defaultTimeoutMs);
     this.dispatchTransport = dispatchTransport;
+    this.onJobCompleted = typeof onJobCompleted === "function" ? onJobCompleted : null;
     this.now = now;
     this.jobs = new Map();
   }
@@ -502,6 +504,10 @@ export class FleetJobScheduler {
       job.status = "failed";
       throw new Error("results completeness violation: results key count does not equal totalTargets");
     }
+
+    try {
+      this.onJobCompleted?.(this.getJob(jobId));
+    } catch {}
 
     return this.getJob(jobId);
   }

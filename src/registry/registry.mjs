@@ -336,6 +336,50 @@ export class Registry {
       .run(nowIso(this.now()), actor, action, JSON.stringify(detail ?? {}));
   }
 
+  queryAudit({ jobId, operator, actor, action, since, until, limit = 100 } = {}) {
+    const conditions = [];
+    const params = [];
+    if (jobId) {
+      conditions.push("(json_extract(detail_json, '$.jobId') = ? OR json_extract(detail_json, '$.job_id') = ?)");
+      params.push(jobId, jobId);
+    }
+    const targetActor = operator || actor;
+    if (targetActor) {
+      conditions.push("actor = ?");
+      params.push(targetActor);
+    }
+    if (action) {
+      conditions.push("action = ?");
+      params.push(action);
+    }
+    if (since) {
+      conditions.push("at >= ?");
+      params.push(since);
+    }
+    if (until) {
+      conditions.push("at <= ?");
+      params.push(until);
+    }
+    const safeLimit = Math.max(1, Math.min(1000, Number(limit) || 100));
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const sql = `SELECT id, at, actor, action, detail_json FROM audit ${whereClause} ORDER BY at DESC, id DESC LIMIT ?`;
+    params.push(safeLimit);
+    const rows = this.db.prepare(sql).all(...params);
+    return rows.map((row) => {
+      let detail = {};
+      try {
+        detail = JSON.parse(row.detail_json || "{}");
+      } catch {}
+      return {
+        id: row.id,
+        at: row.at,
+        actor: row.actor,
+        action: row.action,
+        detail,
+      };
+    });
+  }
+
   // ------------------------------------------------------------------
   // Enrollment (RFC-0005 D2): one-time, purpose-checked, idempotent.
 

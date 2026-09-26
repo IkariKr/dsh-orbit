@@ -29,6 +29,7 @@ export async function createTestServer(registry, options = {}) {
     reverseChannels: hub.reverseChannels,
     wsTracker: hub.wsTracker,
     flowTracker: hub.flowTracker,
+    fleetScheduler: hub.fleetScheduler,
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections?.();
