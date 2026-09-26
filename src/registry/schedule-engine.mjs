@@ -75,7 +75,7 @@ export class ScheduledWorkflowEngine {
         job_id TEXT,
         triggered_at TEXT NOT NULL,
         trigger_type TEXT NOT NULL CHECK (trigger_type IN ('scheduled', 'manual', 'catch-up')),
-        status TEXT NOT NULL CHECK (status IN ('dispatched', 'completed', 'failed', 'skipped')),
+        status TEXT NOT NULL CHECK (status IN ('dispatched', 'completed', 'failed', 'partial', 'skipped', 'cancelled')),
         summary_json TEXT,
         duration_ms INTEGER,
         error_code TEXT,
@@ -118,10 +118,16 @@ export class ScheduledWorkflowEngine {
         this.dispatchScheduleRun(schedule, "catch-up").catch(() => {});
       } else {
         // "skip": calculate next future occurrence
-        const nextRunAt = calculateNextRunAt(schedule, this.now());
-        this.db
-          .prepare("UPDATE fleet_schedules SET next_run_at = ?, updated_at = ? WHERE schedule_id = ?")
-          .run(nextRunAt, currentIso, schedule.scheduleId);
+        try {
+          const nextRunAt = calculateNextRunAt(schedule, this.now());
+          this.db
+            .prepare("UPDATE fleet_schedules SET next_run_at = ?, updated_at = ? WHERE schedule_id = ?")
+            .run(nextRunAt, currentIso, schedule.scheduleId);
+        } catch (err) {
+          this.db
+            .prepare("UPDATE fleet_schedules SET status = 'error', next_run_at = NULL, updated_at = ? WHERE schedule_id = ?")
+            .run(currentIso, schedule.scheduleId);
+        }
       }
     }
   }
@@ -156,10 +162,12 @@ export class ScheduledWorkflowEngine {
 
     // Check concurrency policy: 'forbid' skips if any active job for this schedule is still running
     if (schedule.concurrencyPolicy === "forbid") {
-      const runningJobs = this.fleetScheduler.listJobs().filter(
-        (j) => j.payload?._fleetScheduleId === schedule.scheduleId && (j.status === "pending" || j.status === "running")
-      );
-      if (runningJobs.length > 0) {
+      const hasActive = typeof this.fleetScheduler.hasActiveJobForSchedule === "function"
+        ? this.fleetScheduler.hasActiveJobForSchedule(schedule.scheduleId)
+        : this.fleetScheduler.listJobs().some(
+            (j) => j.payload?._fleetScheduleId === schedule.scheduleId && (j.status === "pending" || j.status === "running")
+          );
+      if (hasActive) {
         // Record skipped run due to concurrency lock
         const runId = randomRunId();
         this.db.prepare(`
@@ -169,9 +177,16 @@ export class ScheduledWorkflowEngine {
         `).run(runId, schedule.scheduleId, currentIso, triggerType);
 
         // Advance nextRunAt so it doesn't get stuck
-        const nextRunAt = calculateNextRunAt(schedule, this.now());
-        this.db.prepare("UPDATE fleet_schedules SET next_run_at = ?, updated_at = ? WHERE schedule_id = ?")
-          .run(nextRunAt, currentIso, schedule.scheduleId);
+        let nextRunAt = null;
+        let updateStatus = schedule.status;
+        try {
+          nextRunAt = calculateNextRunAt(schedule, this.now());
+        } catch {
+          updateStatus = "error";
+          nextRunAt = null;
+        }
+        this.db.prepare("UPDATE fleet_schedules SET status = ?, next_run_at = ?, updated_at = ? WHERE schedule_id = ?")
+          .run(updateStatus, nextRunAt, currentIso, schedule.scheduleId);
         return { runId, status: "skipped", reason: "concurrency-forbid" };
       }
     }
@@ -200,17 +215,29 @@ export class ScheduledWorkflowEngine {
       jobId = job.jobId;
 
       // Link job completion to run outcome update
-      job._executionPromise?.then((finishedJob) => {
+      const internalJob = this.fleetScheduler.jobs?.get(jobId);
+      const executionPromise = internalJob?._executionPromise || job._executionPromise;
+      executionPromise?.then((finishedJob) => {
         try {
-          const duration = finishedJob.finishedAt && finishedJob.startedAt
-            ? Math.max(0, new Date(finishedJob.finishedAt) - new Date(finishedJob.startedAt))
+          const finished = finishedJob || this.fleetScheduler.getJob(jobId);
+          if (!finished) return;
+          const duration = finished.finishedAt && finished.startedAt
+            ? Math.max(0, new Date(finished.finishedAt) - new Date(finished.startedAt))
             : null;
           this.db.prepare(`
             UPDATE fleet_schedule_runs SET
               status = ?, summary_json = ?, duration_ms = ?
             WHERE run_id = ?
-          `).run(finishedJob.status, JSON.stringify(finishedJob.summary), duration, runId);
-        } catch {}
+          `).run(finished.status, JSON.stringify(finished.summary), duration, runId);
+        } catch (updateErr) {
+          try {
+            this.db.prepare(`
+              UPDATE fleet_schedule_runs SET
+                status = 'failed', error_code = 'run-update-error', error_message = ?
+              WHERE run_id = ?
+            `).run(updateErr.message, runId);
+          } catch {}
+        }
       });
     } catch (err) {
       dispatchStatus = "failed";

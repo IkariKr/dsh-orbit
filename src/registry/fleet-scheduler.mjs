@@ -431,6 +431,24 @@ export class FleetJobScheduler {
   }
 
   /**
+   * Checks whether there is an active (pending or running) job for a specific schedule ID.
+   *
+   * @param {string} scheduleId
+   * @returns {boolean}
+   */
+  hasActiveJobForSchedule(scheduleId) {
+    for (const job of this.jobs.values()) {
+      if (
+        job.payload?._fleetScheduleId === scheduleId &&
+        (job.status === "pending" || job.status === "running")
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Lists all fleet jobs sorted by createdAt descending.
    *
    * @returns {Array<object>}

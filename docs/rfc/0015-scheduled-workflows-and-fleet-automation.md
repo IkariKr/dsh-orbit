@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS fleet_schedule_runs (
   job_id TEXT, -- references in-memory/audit fleet job
   triggered_at TEXT NOT NULL,
   trigger_type TEXT NOT NULL, -- 'scheduled' | 'manual' | 'catch-up'
-  status TEXT NOT NULL, -- 'dispatched' | 'completed' | 'failed' | 'skipped'
+  status TEXT NOT NULL, -- 'dispatched' | 'completed' | 'failed' | 'partial' | 'skipped' | 'cancelled'
   summary_json TEXT,
   duration_ms INTEGER,
   error_code TEXT,
