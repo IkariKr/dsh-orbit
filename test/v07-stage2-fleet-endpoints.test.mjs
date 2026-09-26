@@ -377,8 +377,8 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
     fleetDispatchTransport: async () => ({
       status: "completed",
       exitCode: 0,
-      stdout: "starting\nAPI_TOKEN=abc123def\nfinished",
-      stderr: "token=zzz999",
+      stdout: "starting\nDB_PASSWORD=pw123\nGITHUB_TOKEN=ghp_abc\nACCESS_TOKEN=xyz\nAPI_TOKEN=abc123def\nAuthorization: Basic dXNlcjpwdw==\nfinished",
+      stderr: "token=test-zzz999\nclient_secret=test-s3cr3t\ncurl -u user:mypassword https://api.example.com",
     }),
   });
   const baseUrl = server.baseUrl;
@@ -404,6 +404,13 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
         secretConfig: "confidential",
         regularField: "hello-world",
         envLine: "API_TOKEN=abc123def",
+        dbLine: "DB_PASSWORD=pw123",
+        ghLine: "GITHUB_TOKEN=\"ghp_abc\"",
+        awsLine: "AWS_SECRET_ACCESS_KEY='secret_key_abc'",
+        clientLine: "client_secret=s3cr3t",
+        authHeader: "Bearer eyJhbGciOi...",
+        rawHeader: "Authorization: Basic dXNlcjpwdw==",
+        curlCmd: "curl -u admin:mypassword https://internal",
         note: "password=hunter2",
         url: "postgres://user:pw@host/db",
         sessionId: "sess_abcdef0123456789abcdef0123456789",
@@ -413,6 +420,9 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
         credential: "C",
         monkey: "banana",
         keyId: "key_123456",
+        author: "alice",
+        routeAuthority: "n-nodeA.example",
+        sessionCount: 2,
       },
       targetSpec: { mode: "explicit", nodeIds: [nodeA.nodeId] },
     }),
@@ -424,6 +434,13 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
   assert.equal(submitted.payload.secretConfig, "[REDACTED]");
   assert.equal(submitted.payload.regularField, "hello-world");
   assert.equal(submitted.payload.envLine, "API_TOKEN=[REDACTED]");
+  assert.equal(submitted.payload.dbLine, "DB_PASSWORD=[REDACTED]");
+  assert.equal(submitted.payload.ghLine, "GITHUB_TOKEN=[REDACTED]");
+  assert.equal(submitted.payload.awsLine, "AWS_SECRET_ACCESS_KEY=[REDACTED]");
+  assert.equal(submitted.payload.clientLine, "client_secret=[REDACTED]");
+  assert.equal(submitted.payload.authHeader, "[REDACTED]");
+  assert.equal(submitted.payload.rawHeader, "Authorization: Basic [REDACTED_AUTH]");
+  assert.equal(submitted.payload.curlCmd, "curl -u admin:[REDACTED] https://internal");
   assert.equal(submitted.payload.note, "password=[REDACTED]");
   assert.equal(submitted.payload.url, "postgres://user:[REDACTED]@host/db");
   assert.equal(submitted.payload.sessionId, "[REDACTED]");
@@ -433,6 +450,9 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
   assert.equal(submitted.payload.credential, "[REDACTED]");
   assert.equal(submitted.payload.monkey, "banana");
   assert.equal(submitted.payload.keyId, "key_123456");
+  assert.equal(submitted.payload.author, "alice");
+  assert.equal(submitted.payload.routeAuthority, "n-nodeA.example");
+  assert.equal(submitted.payload.sessionCount, 2);
 
   // Wait for settlement
   await server.fleetScheduler.jobs.get(submitted.jobId)._executionPromise;
@@ -452,12 +472,22 @@ test("fleet job payload and node output credential scrubbing (P1)", async (t) =>
   assert.equal(getBody.payload.apiKey, "[REDACTED]");
   assert.equal(getBody.payload.password, "[REDACTED]");
   assert.equal(getBody.payload.envLine, "API_TOKEN=[REDACTED]");
+  assert.equal(getBody.payload.dbLine, "DB_PASSWORD=[REDACTED]");
   assert.equal(getBody.payload.monkey, "banana");
   assert.equal(getBody.payload.keyId, "key_123456");
+  assert.equal(getBody.payload.author, "alice");
+  assert.equal(getBody.payload.routeAuthority, "n-nodeA.example");
+  assert.equal(getBody.payload.sessionCount, 2);
 
   // Output logs (stdout/stderr) scrubbing verification
-  assert.equal(getBody.results[nodeA.nodeId].stdout, "starting\nAPI_TOKEN=[REDACTED]\nfinished");
-  assert.equal(getBody.results[nodeA.nodeId].stderr, "token=[REDACTED]");
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("DB_PASSWORD=[REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("GITHUB_TOKEN=[REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("ACCESS_TOKEN=[REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("API_TOKEN=[REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stdout.includes("Authorization: Basic [REDACTED_AUTH]"));
+  assert.ok(getBody.results[nodeA.nodeId].stderr.includes("token=[REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stderr.includes("client_secret=[REDACTED]"));
+  assert.ok(getBody.results[nodeA.nodeId].stderr.includes("curl -u user:[REDACTED]"));
 });
 
 test("audit detail redacts arrays and non-fleet URLs reject malformed percent encoding with 400 (P3)", async (t) => {
@@ -469,7 +499,7 @@ test("audit detail redacts arrays and non-fleet URLs reject malformed percent en
   registry.recordAudit("operator-alice", "custom.action", {
     items: [{ token: "LEAK-TOKEN" }, { secret: "LEAK-SECRET" }],
     nested: { arr: [{ password: "LEAK-PW" }] },
-    benign: { monkey: "hockey", keyId: "kid123" },
+    benign: { monkey: "hockey", keyId: "kid123", author: "alice", routeAuthority: "n-node.orbit.internal", sessionCount: 3 },
   });
 
   const auditRes = await fetch(`${baseUrl}/hub/audit`, {
@@ -488,19 +518,37 @@ test("audit detail redacts arrays and non-fleet URLs reject malformed percent en
   assert.equal(customEntry.detail.nested.arr[0].password, "[REDACTED]");
   assert.equal(customEntry.detail.benign.monkey, "hockey");
   assert.equal(customEntry.detail.benign.keyId, "kid123");
+  assert.equal(customEntry.detail.benign.author, "alice");
+  assert.equal(customEntry.detail.benign.routeAuthority, "n-node.orbit.internal");
+  assert.equal(customEntry.detail.benign.sessionCount, 3);
 
   // Non-fleet routes with %ZZ malformed percent encoding return 400 bad-request, never 500
-  const malformedNodeRes = await fetch(`${baseUrl}/hub/nodes/%ZZ`, {
-    headers: {
-      ...gatewayHeaders("operator-alice"),
-      cookie: session.cookie,
-      origin: baseUrl,
-      "sec-fetch-site": "same-origin",
-    },
-  });
-  assert.equal(malformedNodeRes.status, 400);
-  const malformedBody = await malformedNodeRes.json();
-  assert.equal(malformedBody.error.code, "bad-request");
+  const malformedRoutes = [
+    { method: "GET", path: "/hub/nodes/%ZZ" },
+    { method: "GET", path: "/hub/nodes/%ZZ/route-target" },
+    { method: "PUT", path: "/hub/nodes/%ZZ/route-mode", body: { routeMode: "direct" } },
+    { method: "PUT", path: "/hub/nodes/%ZZ/route-target", body: { routeTarget: "http://127.0.0.1:8080" } },
+    { method: "POST", path: "/hub/nodes/%ZZ/delete", body: { requestId: "req123" } },
+    { method: "POST", path: "/hub/nodes/%ZZ/reenroll", body: {} },
+  ];
+
+  for (const r of malformedRoutes) {
+    const res = await fetch(`${baseUrl}${r.path}`, {
+      method: r.method,
+      headers: {
+        ...gatewayHeaders("operator-alice"),
+        cookie: session.cookie,
+        [CSRF_HEADER]: session.csrfToken,
+        origin: baseUrl,
+        "sec-fetch-site": "same-origin",
+        ...(r.body ? { "content-type": "application/json" } : {}),
+      },
+      ...(r.body ? { body: JSON.stringify(r.body) } : {}),
+    });
+    assert.equal(res.status, 400, `expected 400 on ${r.method} ${r.path}, got ${res.status}`);
+    const body = await res.json();
+    assert.equal(body.error.code, "bad-request");
+  }
 });
 
 test("malformed audit query returns 400 bad-request, never 500 (P2)", async (t) => {

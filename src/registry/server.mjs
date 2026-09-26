@@ -730,7 +730,10 @@ export function createHubServer({ registry, options = {} }) {
       }
       const routeTargetGetMatch = path.match(/^\/hub\/nodes\/([^/]+)\/route-target\/?$/);
       if (routeTargetGetMatch) {
-        const rawNodeId = decodeURIComponent(routeTargetGetMatch[1]);
+        const rawNodeId = safeDecodeUri(routeTargetGetMatch[1]);
+        if (rawNodeId === null) {
+          return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+        }
         const targetScope = validateTargetScope(rawNodeId);
         if (!targetScope.valid) {
           return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });
@@ -1008,7 +1011,10 @@ export function createHubServer({ registry, options = {} }) {
       if (request.method !== "POST") {
         return sendJson(response, 405, { error: { code: "method-not-allowed", message: "delete/reenroll accept POST only" } });
       }
-      const rawNodeId = decodeURIComponent(nodeMatch[1]);
+      const rawNodeId = safeDecodeUri(nodeMatch[1]);
+      if (rawNodeId === null) {
+        return sendJson(response, 400, { error: { code: "bad-request", message: "malformed URL encoding" } });
+      }
       const targetScope = validateTargetScope(rawNodeId);
       if (!targetScope.valid) {
         return sendJson(response, 400, { error: { code: targetScope.code, message: targetScope.message } });

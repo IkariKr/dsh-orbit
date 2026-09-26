@@ -69,7 +69,16 @@ function isSensitiveKey(k) {
   ) {
     return false;
   }
-  if (lower === "monkey" || lower === "hockey") return false;
+  if (
+    lower === "monkey" ||
+    lower === "hockey" ||
+    lower === "author" ||
+    lower.includes("authority") ||
+    lower.includes("sessioncount") ||
+    lower.includes("sessionstate")
+  ) {
+    return false;
+  }
   return (
     lower.includes("secret") ||
     lower.includes("password") ||
@@ -82,11 +91,17 @@ function isSensitiveKey(k) {
     lower.includes("privatekey") ||
     lower.includes("private_key") ||
     lower.includes("private-key") ||
-    lower.includes("session") ||
-    lower.includes("auth") ||
+    lower === "session" ||
+    lower.includes("sessionid") ||
+    lower.includes("session_id") ||
+    lower.includes("session-id") ||
     lower.includes("cookie") ||
     lower.includes("csrf") ||
-    lower === "key"
+    lower === "key" ||
+    lower === "auth" ||
+    lower === "authorization" ||
+    lower.startsWith("auth") ||
+    lower.endsWith("auth")
   );
 }
 
