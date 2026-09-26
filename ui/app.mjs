@@ -24,6 +24,8 @@ import {
   mapFleetJobRow,
   mapFleetJobList,
   mapFleetJobDetail,
+  mapScheduleRow,
+  mapScheduleList,
 } from "./view-model.mjs";
 
 const SESSION_ERRORS = new Set(["gateway-denied", "no-principal", "no-session"]);
@@ -733,6 +735,114 @@ export function createRegistryUi({ document, fetchImpl }) {
     }
   }
 
+  function renderScheduleRow(sched) {
+    const isPaused = sched.status === "paused";
+    const pauseResumeBtn = isPaused
+      ? `<button class="primary" data-resume-schedule-id="${escapeHtml(sched.scheduleId)}">resume</button>`
+      : `<button class="secondary" data-pause-schedule-id="${escapeHtml(sched.scheduleId)}">pause</button>`;
+
+    return `
+      <div class="panel fleet-job-card">
+        <div class="job-header">
+          <span class="job-id" style="font-weight:bold;">${escapeHtml(sched.name)}</span>
+          <span class="${badgeClass("status", sched.status)}">${escapeHtml(sched.status)}</span>
+        </div>
+        <div class="node-meta">
+          <strong>Rule:</strong> ${escapeHtml(sched.triggerRule)} &bull;
+          <strong>Task:</strong> ${escapeHtml(sched.taskType)} &bull;
+          <strong>Total Runs:</strong> ${sched.totalRuns}
+        </div>
+        <div class="node-meta" style="margin-top:4px;">
+          <strong>Next Run:</strong> ${escapeHtml(sched.nextRunAt)} &bull;
+          <strong>Last Run:</strong> ${escapeHtml(sched.lastRunAt)}
+        </div>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+          ${pauseResumeBtn}
+          <button class="primary" data-trigger-schedule-id="${escapeHtml(sched.scheduleId)}">trigger now</button>
+          <button class="danger" data-delete-schedule-id="${escapeHtml(sched.scheduleId)}">delete</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderSchedules(view) {
+    const list = $("schedules-list");
+    if (!list) return;
+    if (view.kind !== "fleet-schedules" || view.rows.length === 0) {
+      list.innerHTML = `<div class="panel"><div class="banner empty">no scheduled workflows configured</div></div>`;
+      return;
+    }
+    list.innerHTML = view.rows.map(renderScheduleRow).join("");
+  }
+
+  async function loadSchedules() {
+    showBanner(LOADING_STATE);
+    try {
+      const body = await api("/hub/fleet/schedules");
+      const mapped = mapScheduleList(body?.schedules);
+      renderSchedules(mapped);
+      showBanner({});
+    } catch (error) {
+      showBanner({ message: `failed to load schedules: ${error.message}` });
+    }
+  }
+
+  function openCreateScheduleDialog() {
+    const dialog = $("schedule-dialog");
+    const err = $("schedule-error");
+    if (err) {
+      err.style.display = "none";
+      err.textContent = "";
+    }
+    if (dialog && typeof dialog.showModal === "function") {
+      dialog.showModal();
+    }
+  }
+
+  async function submitSchedule() {
+    const name = $("schedule-name")?.value;
+    const scheduleType = $("schedule-type")?.value || "cron";
+    const cronExpression = $("schedule-cron")?.value;
+    const intervalMs = $("schedule-interval")?.value ? Number($("schedule-interval").value) : null;
+    const taskType = $("schedule-task-type")?.value;
+    const targetMode = $("schedule-target-mode")?.value || "explicit";
+    const concurrencyPolicy = $("schedule-concurrency")?.value || "forbid";
+    const err = $("schedule-error");
+
+    let targetSpec;
+    if (targetMode === "explicit") {
+      const rawNodes = $("schedule-target-nodes")?.value || "";
+      const nodeIds = rawNodes.split(",").map((s) => s.trim()).filter(Boolean);
+      targetSpec = { mode: "explicit", nodeIds };
+    } else {
+      const cap = $("schedule-target-capability")?.value || "";
+      targetSpec = { mode: "capability", capability: cap };
+    }
+
+    const body = {
+      name,
+      scheduleType,
+      cronExpression,
+      intervalMs,
+      taskType,
+      targetSpec,
+      concurrencyPolicy,
+    };
+
+    try {
+      await api("/hub/fleet/schedules", { method: "POST", body });
+      const dialog = $("schedule-dialog");
+      if (dialog && typeof dialog.close === "function") dialog.close();
+      await loadSchedules();
+      showBanner({ message: `schedule created successfully` });
+    } catch (error) {
+      if (err) {
+        err.textContent = `create failed: ${error.message}`;
+        err.style.display = "block";
+      }
+    }
+  }
+
   function wireActions() {
     $("nav-nodes")?.addEventListener("click", async () => {
       $("nav-nodes")?.classList.add("active");
@@ -740,6 +850,7 @@ export function createRegistryUi({ document, fetchImpl }) {
       $("nav-fleet")?.classList.remove("active");
       if ($("tokens-view")) $("tokens-view").hidden = true;
       if ($("fleet-view")) $("fleet-view").hidden = true;
+      if ($("schedules-view")) $("schedules-view").hidden = true;
       if ($("nodes-view")) $("nodes-view").hidden = false;
       await loadNodes();
     });
@@ -747,8 +858,10 @@ export function createRegistryUi({ document, fetchImpl }) {
       $("nav-tokens")?.classList.add("active");
       $("nav-nodes")?.classList.remove("active");
       $("nav-fleet")?.classList.remove("active");
+      $("nav-schedules")?.classList.remove("active");
       if ($("nodes-view")) $("nodes-view").hidden = true;
       if ($("fleet-view")) $("fleet-view").hidden = true;
+      if ($("schedules-view")) $("schedules-view").hidden = true;
       if ($("tokens-view")) $("tokens-view").hidden = false;
       await loadTokens();
     });
@@ -756,12 +869,65 @@ export function createRegistryUi({ document, fetchImpl }) {
       $("nav-fleet")?.classList.add("active");
       $("nav-nodes")?.classList.remove("active");
       $("nav-tokens")?.classList.remove("active");
+      $("nav-schedules")?.classList.remove("active");
       if ($("nodes-view")) $("nodes-view").hidden = true;
       if ($("tokens-view")) $("tokens-view").hidden = true;
+      if ($("schedules-view")) $("schedules-view").hidden = true;
       if ($("fleet-view")) $("fleet-view").hidden = false;
       if ($("fleet-jobs-list")) $("fleet-jobs-list").hidden = false;
       if ($("fleet-job-detail-view")) $("fleet-job-detail-view").hidden = true;
       await loadFleetJobs();
+    });
+    $("nav-schedules")?.addEventListener("click", async () => {
+      $("nav-schedules")?.classList.add("active");
+      $("nav-nodes")?.classList.remove("active");
+      $("nav-tokens")?.classList.remove("active");
+      $("nav-fleet")?.classList.remove("active");
+      if ($("nodes-view")) $("nodes-view").hidden = true;
+      if ($("tokens-view")) $("tokens-view").hidden = true;
+      if ($("fleet-view")) $("fleet-view").hidden = true;
+      if ($("schedules-view")) $("schedules-view").hidden = false;
+      await loadSchedules();
+    });
+    $("create-schedule-btn")?.addEventListener("click", openCreateScheduleDialog);
+    $("refresh-schedules-btn")?.addEventListener("click", loadSchedules);
+    $("schedule-type")?.addEventListener("change", (e) => {
+      const type = e.target?.value;
+      if ($("schedule-cron-group")) $("schedule-cron-group").style.display = type === "cron" ? "block" : "none";
+      if ($("schedule-interval-group")) $("schedule-interval-group").style.display = type === "interval" ? "block" : "none";
+    });
+    $("schedule-target-mode")?.addEventListener("change", (e) => {
+      const mode = e.target?.value;
+      if ($("schedule-explicit-group")) $("schedule-explicit-group").style.display = mode === "explicit" ? "block" : "none";
+      if ($("schedule-capability-group")) $("schedule-capability-group").style.display = mode === "capability" ? "block" : "none";
+    });
+    $("schedule-cancel")?.addEventListener("click", () => {
+      const dialog = $("schedule-dialog");
+      if (dialog && typeof dialog.close === "function") dialog.close();
+    });
+    $("schedule-submit")?.addEventListener("click", submitSchedule);
+    $("schedules-list")?.addEventListener("click", async (event) => {
+      const target = event.target;
+      if (target.dataset?.pauseScheduleId) {
+        await api(`/hub/fleet/schedules/${target.dataset.pauseScheduleId}/pause`, { method: "POST" });
+        await loadSchedules();
+        return;
+      }
+      if (target.dataset?.resumeScheduleId) {
+        await api(`/hub/fleet/schedules/${target.dataset.resumeScheduleId}/resume`, { method: "POST" });
+        await loadSchedules();
+        return;
+      }
+      if (target.dataset?.triggerScheduleId) {
+        await api(`/hub/fleet/schedules/${target.dataset.triggerScheduleId}/trigger`, { method: "POST" });
+        showBanner({ message: `schedule triggered manually` });
+        return;
+      }
+      if (target.dataset?.deleteScheduleId) {
+        await api(`/hub/fleet/schedules/${target.dataset.deleteScheduleId}`, { method: "DELETE" });
+        await loadSchedules();
+        return;
+      }
     });
     $("trigger-fleet-job-btn")?.addEventListener("click", openTriggerFleetJobDialog);
     $("refresh-fleet-jobs-btn")?.addEventListener("click", loadFleetJobs);

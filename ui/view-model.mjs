@@ -202,9 +202,10 @@ export function mapDeleteResult(result) {
   };
 }
 
+const toNonNegativeInt = (v) => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
+
 export function mapFleetJobRow(job) {
   const summary = job?.summary ?? {};
-  const toNonNegativeInt = (v) => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
   const total = toNonNegativeInt(summary.totalTargets);
   const completed = toNonNegativeInt(summary.completed);
   const failed = toNonNegativeInt(summary.failed);
@@ -283,5 +284,62 @@ export function mapFleetJobDetail(job) {
     payload: job?.payload ?? null,
     timeoutMs,
     nodeResults,
+  };
+}
+
+export const EMPTY_SCHEDULES_STATE = Object.freeze({
+  kind: "fleet-schedules",
+  rows: Object.freeze([]),
+  totalSchedules: 0,
+});
+
+export function mapScheduleRow(schedule) {
+  const scheduleId = typeof schedule?.scheduleId === "string" ? schedule.scheduleId : "";
+  const name = typeof schedule?.name === "string" ? schedule.name : "Unnamed Schedule";
+  const description = typeof schedule?.description === "string" ? schedule.description : "";
+  const scheduleType = typeof schedule?.scheduleType === "string" ? schedule.scheduleType : "cron";
+  const triggerRule =
+    scheduleType === "cron"
+      ? (typeof schedule?.cronExpression === "string" ? schedule.cronExpression : "* * * * *")
+      : scheduleType === "interval"
+        ? (Number.isFinite(schedule?.intervalMs) ? `every ${schedule.intervalMs}ms` : "interval")
+        : "once";
+  const taskType = typeof schedule?.taskType === "string" ? schedule.taskType : "diagnostic";
+  const status = typeof schedule?.status === "string" ? schedule.status : "active";
+  const concurrencyPolicy = typeof schedule?.concurrencyPolicy === "string" ? schedule.concurrencyPolicy : "forbid";
+  const missedRunPolicy = typeof schedule?.missedRunPolicy === "string" ? schedule.missedRunPolicy : "skip";
+  const nextRunAt = typeof schedule?.nextRunAt === "string" ? schedule.nextRunAt : "-";
+  const lastRunAt = typeof schedule?.lastRunAt === "string" ? schedule.lastRunAt : "-";
+  const totalRuns = toNonNegativeInt(schedule?.totalRuns);
+  const maxRuns = Number.isFinite(schedule?.maxRuns) ? Math.floor(schedule.maxRuns) : null;
+  const createdAt = typeof schedule?.createdAt === "string" ? schedule.createdAt : "";
+  const createdBy = typeof schedule?.createdBy === "string" ? schedule.createdBy : "operator";
+
+  return {
+    scheduleId,
+    name,
+    description,
+    scheduleType,
+    triggerRule,
+    taskType,
+    status,
+    concurrencyPolicy,
+    missedRunPolicy,
+    nextRunAt,
+    lastRunAt,
+    totalRuns,
+    maxRuns,
+    createdAt,
+    createdBy,
+    targetSpec: schedule?.targetSpec ?? null,
+  };
+}
+
+export function mapScheduleList(schedules) {
+  if (!Array.isArray(schedules) || schedules.length === 0) return EMPTY_SCHEDULES_STATE;
+  return {
+    kind: "fleet-schedules",
+    rows: schedules.map(mapScheduleRow),
+    totalSchedules: schedules.length,
   };
 }

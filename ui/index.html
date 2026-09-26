@@ -16,6 +16,7 @@
     <button id="nav-nodes" class="nav-button active" type="button">Nodes</button>
     <button id="nav-tokens" class="nav-button" type="button">Tokens</button>
     <button id="nav-fleet" class="nav-button" type="button">Fleet Workflows</button>
+    <button id="nav-schedules" class="nav-button" type="button">Scheduled Workflows</button>
     <button id="nav-logout" class="nav-button" type="button">Logout</button>
   </nav>
 
@@ -48,7 +49,70 @@
       <div id="fleet-jobs-list"></div>
       <div id="fleet-job-detail-view" hidden></div>
     </section>
+    <section id="schedules-view" hidden>
+      <div class="panel fleet-actions-panel">
+        <button id="create-schedule-btn" class="primary" type="button">Create Schedule</button>
+        <button id="refresh-schedules-btn" class="secondary" type="button">Refresh Schedules</button>
+      </div>
+      <div id="schedules-list"></div>
+      <div id="schedule-detail-view" hidden></div>
+    </section>
   </main>
+
+  <dialog id="schedule-dialog">
+    <h3>Create Scheduled Workflow</h3>
+    <div style="display:flex; flex-direction:column; gap:12px; min-width:320px;">
+      <label>Schedule Name
+        <input id="schedule-name" type="text" placeholder="Nightly Diagnostic" required>
+      </label>
+      <label>Schedule Type
+        <select id="schedule-type">
+          <option value="cron">Cron Expression</option>
+          <option value="interval">Interval (ms)</option>
+        </select>
+      </label>
+      <div id="schedule-cron-group">
+        <label>Cron Expression (5-field UTC)
+          <input id="schedule-cron" type="text" value="0 2 * * *">
+        </label>
+      </div>
+      <div id="schedule-interval-group" style="display:none;">
+        <label>Interval (ms)
+          <input id="schedule-interval" type="number" value="60000" min="1000">
+        </label>
+      </div>
+      <label>Task Type
+        <input id="schedule-task-type" type="text" value="diagnostic" required>
+      </label>
+      <label>Target Mode
+        <select id="schedule-target-mode">
+          <option value="explicit">Explicit Node IDs</option>
+          <option value="capability">Capability Matching</option>
+        </select>
+      </label>
+      <div id="schedule-explicit-group">
+        <label>Node IDs (comma-separated 32-hex)
+          <input id="schedule-target-nodes" type="text" placeholder="node_..., node_...">
+        </label>
+      </div>
+      <div id="schedule-capability-group" style="display:none;">
+        <label>Required Capability
+          <input id="schedule-target-capability" type="text" placeholder="web.routes">
+        </label>
+      </div>
+      <label>Concurrency Policy
+        <select id="schedule-concurrency">
+          <option value="forbid">Forbid Overlap</option>
+          <option value="allow">Allow Overlap</option>
+        </select>
+      </label>
+      <div id="schedule-error" class="banner error" style="display:none;"></div>
+      <div class="dialog-actions">
+        <button id="schedule-cancel" type="button">Cancel</button>
+        <button id="schedule-submit" class="primary" type="button">Save Schedule</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog id="fleet-job-dialog">
     <h3>Trigger Fleet Job</h3>
