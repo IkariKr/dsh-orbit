@@ -45,7 +45,7 @@ function parseCronField(fieldStr, min, max, allowSunday7 = false) {
 
     if (rangePart !== "*") {
       const bounds = rangePart.split("-");
-      if (bounds.length > 2) {
+      if (bounds.length > 2 || bounds.some((b) => b.trim() === "")) {
         throw new ScheduleParseError("invalid-cron-range", `invalid range expression: ${rangePart}`);
       }
       if (bounds.length === 2) {
