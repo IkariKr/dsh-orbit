@@ -279,6 +279,13 @@ export class ScheduledWorkflowEngine {
     maxRuns = null,
     createdBy = "operator",
   }) {
+    if (scheduleId !== null && scheduleId !== undefined) {
+      if (typeof scheduleId !== "string" || !SCHEDULE_ID_PATTERN.test(scheduleId)) {
+        const err = new Error(`invalid scheduleId: ${scheduleId}; must match ${SCHEDULE_ID_PATTERN}`);
+        err.code = "invalid-schedule-id";
+        throw err;
+      }
+    }
     if (typeof name !== "string" || name.trim() === "") {
       const err = new Error("name is required and must be non-empty string");
       err.code = "invalid-schedule-name";
