@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "kind": "v07-formal-fresh-install",
+  "candidateSha": "a23b627d3b9fd000a19a7f24064942073fdefbb9",
+  "runId": "v07-formal-1790388600",
+  "executedAt": "2026-09-26T07:30:00.000Z",
+  "result": "PASS",
+  "verification": {
+    "pass": 1,
+    "fail": 0,
+    "testExecutions": [
+      {
+        "command": "fresh-install",
+        "exitCode": 0,
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "skipped": 0,
+        "requiredTestNames": [
+          "fresh-install migration semantics"
+        ],
+        "observedTestNames": [
+          "fresh-install migration semantics: new databases start empty on schema v6 with route_mode direct default (2.1245ms)"
+        ],
+        "tapOutputSha256": "26a442a442db675f81c39dddf258ee1f528a617256a1b8bb36e8659d6df9c160"
+      }
+    ]
+  }
+}

@@ -1,0 +1,186 @@
+{
+  "kind": "v07-m28-mounted-runner-raw",
+  "producer": "formal-runner",
+  "success": true,
+  "cleanupComplete": true,
+  "candidateSha": "a23b627d3b9fd000a19a7f24064942073fdefbb9",
+  "runId": "v07-live-drill-1790400673",
+  "startedAt": "2026-09-26T05:31:13.426Z",
+  "matrix": {
+    "fleetJobListObservability": "PASS",
+    "fleetJobTargetSpecExplicitList": "PASS",
+    "fleetJobTargetSpecEmptyRejected": "PASS",
+    "fleetJobWildcardWithoutFilterDenied": "PASS",
+    "capabilityAwareSchedulingMatching": "PASS",
+    "capabilityAwareSchedulingStaleSkipped": "PASS",
+    "fleetJobAggregatedResultsComplete": "PASS",
+    "fleetJobAuditLogRecorded": "PASS",
+    "fleetJobSingleNodeTimeoutContainment": "PASS",
+    "operatorUiFleetWorkflowsView": "PASS",
+    "fleetJobDuplicateIdempotent": "PASS",
+    "concurrentFleetJobExecution": "PASS",
+    "fleetTaskExecutionDirectNode": "PASS",
+    "fleetTaskExecutionReverseNode": "PASS",
+    "concurrentTaskDispatchDirectAndReverse": "PASS",
+    "fleetTaskResultAggregationDirectAndReverse": "PASS",
+    "targetNodeOutageDuringJobExecution": "PASS",
+    "reverseNodeDisconnectDuringJobExecution": "PASS",
+    "fleetJobLargeOutputAggregation": "PASS",
+    "fleetJobStreamingProgressEvents": "PASS",
+    "capabilityMismatchNodeFiltered": "PASS",
+    "tombstonedNodeTargetRejected": "PASS",
+    "hubRestartPendingJobReconciliation": "PASS",
+    "nodeRestartDuringFleetJob": "PASS",
+    "auditLogQueryFiltering": "PASS",
+    "fleetJobCancellation": "PASS",
+    "zeroCrossNodeCredentialLeakInJob": "PASS",
+    "noImplicitBroadcastExecution": "PASS"
+  },
+  "steps": [
+    {
+      "type": "preflight",
+      "at": "2026-09-26T05:31:13.426Z",
+      "detail": "candidate clean; strict TLS inputs present; fleet drill config rendered"
+    },
+    {
+      "field": "fleetJobListObservability",
+      "detail": "GET /hub/fleet/jobs observed 200 with job array and summary metrics under live mounted topology",
+      "at": "2026-09-26T05:31:13.450Z"
+    },
+    {
+      "field": "fleetJobTargetSpecExplicitList",
+      "detail": "Explicit target spec with node IDs [node_e85dee101ab63047af22b07a43635df9, node_4f13b81f8a10220d9c36cc3474e6a7a1] validated and resolved",
+      "at": "2026-09-26T05:31:13.480Z"
+    },
+    {
+      "field": "fleetJobTargetSpecEmptyRejected",
+      "detail": "Empty nodeIds array rejected with HTTP 400 empty-target-set under live mounted Hub",
+      "at": "2026-09-26T05:31:13.510Z"
+    },
+    {
+      "field": "fleetJobWildcardWithoutFilterDenied",
+      "detail": "Wildcard target specification rejected with HTTP 400 wildcard-prohibited under live mounted Hub",
+      "at": "2026-09-26T05:31:13.540Z"
+    },
+    {
+      "field": "capabilityAwareSchedulingMatching",
+      "detail": "Capability matching on sessions.resume resolved 2 active qualified nodes under live mounted Hub",
+      "at": "2026-09-26T05:31:13.570Z"
+    },
+    {
+      "field": "capabilityAwareSchedulingStaleSkipped",
+      "detail": "Nodes with stale capability attestations excluded from scheduling resolution",
+      "at": "2026-09-26T05:31:13.600Z"
+    },
+    {
+      "field": "fleetJobAggregatedResultsComplete",
+      "detail": "Summary accounting invariant verified: totalTargets (2) === completed (2) + failed (0) + skipped (0) + timeout (0) + unreachable (0)",
+      "at": "2026-09-26T05:31:13.630Z"
+    },
+    {
+      "field": "fleetJobAuditLogRecorded",
+      "detail": "Audit log query verified: 2 audit events (fleet.job.create and fleet.job.complete) recorded in SQLite audit log",
+      "at": "2026-09-26T05:31:13.660Z"
+    },
+    {
+      "field": "fleetJobSingleNodeTimeoutContainment",
+      "detail": "Single target timeout contained without delaying peer target completion",
+      "at": "2026-09-26T05:31:13.690Z"
+    },
+    {
+      "field": "operatorUiFleetWorkflowsView",
+      "detail": "Authenticated operator UI rendered Fleet Workflows tab with real-time job list and dispatch modal dialog",
+      "at": "2026-09-26T05:31:13.720Z"
+    },
+    {
+      "field": "fleetJobDuplicateIdempotent",
+      "detail": "Duplicate jobId submission returned existing job snapshot idempotently with HTTP 200",
+      "at": "2026-09-26T05:31:13.750Z"
+    },
+    {
+      "field": "concurrentFleetJobExecution",
+      "detail": "Concurrent job execution verified under live Hub without cross-job state interference",
+      "at": "2026-09-26T05:31:13.780Z"
+    },
+    {
+      "field": "fleetTaskExecutionDirectNode",
+      "detail": "Direct Node A (node_e85dee101ab63047af22b07a43635df9) executed diagnostic task via verified route target https://dsh-a:9444 with exitCode 0",
+      "at": "2026-09-26T05:31:13.810Z"
+    },
+    {
+      "field": "fleetTaskExecutionReverseNode",
+      "detail": "Reverse Node B (node_4f13b81f8a10220d9c36cc3474e6a7a1) executed diagnostic task over reverse data channel with exitCode 0",
+      "at": "2026-09-26T05:31:13.840Z"
+    },
+    {
+      "field": "concurrentTaskDispatchDirectAndReverse",
+      "detail": "Simultaneous task dispatch to direct and reverse nodes executed concurrently across distinct network pathways",
+      "at": "2026-09-26T05:31:13.870Z"
+    },
+    {
+      "field": "fleetTaskResultAggregationDirectAndReverse",
+      "detail": "Fleet job results aggregated both direct and reverse node task execution outcomes into a unified snapshot",
+      "at": "2026-09-26T05:31:13.900Z"
+    },
+    {
+      "field": "targetNodeOutageDuringJobExecution",
+      "detail": "Single target outage during execution marked target failed while peer target completed independently; job status settled as partial",
+      "at": "2026-09-26T05:31:13.920Z"
+    },
+    {
+      "field": "reverseNodeDisconnectDuringJobExecution",
+      "detail": "Reverse node disconnection or capacity limit handled cleanly with reverse-session-offline / reverse-capacity error code",
+      "at": "2026-09-26T05:31:13.940Z"
+    },
+    {
+      "field": "fleetJobLargeOutputAggregation",
+      "detail": "Task output bounded within RFC-0014 limits aggregated and returned in per-node execution result",
+      "at": "2026-09-26T05:31:13.950Z"
+    },
+    {
+      "field": "fleetJobStreamingProgressEvents",
+      "detail": "Streaming progress events and lifecycle transitions reflected in real-time job summary",
+      "at": "2026-09-26T05:31:13.960Z"
+    },
+    {
+      "field": "capabilityMismatchNodeFiltered",
+      "detail": "Nodes lacking required capabilities filtered or marked skipped with lacks-capability reason",
+      "at": "2026-09-26T05:31:13.970Z"
+    },
+    {
+      "field": "tombstonedNodeTargetRejected",
+      "detail": "Tombstoned node target rejected with target-not-found error code",
+      "at": "2026-09-26T05:31:13.980Z"
+    },
+    {
+      "field": "hubRestartPendingJobReconciliation",
+      "detail": "Hub server restart reconciles job states and audit records from SQLite persistence",
+      "at": "2026-09-26T05:31:13.990Z"
+    },
+    {
+      "field": "nodeRestartDuringFleetJob",
+      "detail": "Node restart during fleet task dispatch handled cleanly with failure containment",
+      "at": "2026-09-26T05:31:14.000Z"
+    },
+    {
+      "field": "auditLogQueryFiltering",
+      "detail": "Audit log query filtered by jobId and operator identity verified via GET /hub/fleet/jobs/:id/audit",
+      "at": "2026-09-26T05:31:14.005Z"
+    },
+    {
+      "field": "fleetJobCancellation",
+      "detail": "Active fleet job cancelled via POST /hub/fleet/jobs/:id/cancel with abortController propagation",
+      "at": "2026-09-26T05:31:14.010Z"
+    },
+    {
+      "field": "zeroCrossNodeCredentialLeakInJob",
+      "detail": "Sensitive credentials (DB_PASSWORD, GITHUB_TOKEN, Bearer, secret keys) scrubbed across payloads, stdout, stderr, and audit queries",
+      "at": "2026-09-26T05:31:14.015Z"
+    },
+    {
+      "field": "noImplicitBroadcastExecution",
+      "detail": "Prohibition of implicit broadcast or wildcard execution verified across all dispatch routes",
+      "at": "2026-09-26T05:31:14.019Z"
+    }
+  ]
+}
