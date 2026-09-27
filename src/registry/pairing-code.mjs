@@ -26,6 +26,7 @@ export class PairingCodeEngine extends EventEmitter {
     now = () => Date.now(),
   } = {}) {
     super();
+    this.setMaxListeners(100);
     this.ttlMs = Math.max(10_000, Math.min(600_000, ttlMs));
     this.maxFailedAttempts = Math.max(1, maxFailedAttempts);
     this.lockDurationMs = Math.max(10_000, lockDurationMs);
@@ -33,7 +34,7 @@ export class PairingCodeEngine extends EventEmitter {
 
     this.codes = new Map(); // code -> record
     this.tokens = new Map(); // pairingToken -> record
-    this.ipAttempts = new Map(); // ip -> { failedAttempts, lockedUntil }
+    this.ipAttempts = new Map(); // ip -> { failedAttempts, lockedUntil, lastAttemptAt }
   }
 
   /**
@@ -60,6 +61,10 @@ export class PairingCodeEngine extends EventEmitter {
       targetUrl.searchParams.set("token", code);
     } catch {
       throw new PairingCodeError("invalid-hub-url", `malformed hubBaseUrl: ${hubBaseUrl}`);
+    }
+
+    if (targetUrl.protocol !== "https:") {
+      throw new PairingCodeError("insecure-scheme", "pairing URLs must use verified TLS (https://)");
     }
 
     const record = {
@@ -104,7 +109,7 @@ export class PairingCodeEngine extends EventEmitter {
       return { locked: true, remainingSeconds };
     }
 
-    if (stat.lockedUntil && stat.lockedUntil <= nowMs) {
+    if (nowMs - stat.lastAttemptAt > this.lockDurationMs || (stat.lockedUntil && stat.lockedUntil <= nowMs)) {
       this.ipAttempts.delete(ip);
     }
 
@@ -172,8 +177,24 @@ export class PairingCodeEngine extends EventEmitter {
   recordFailure(ip) {
     if (!ip) return;
     const nowMs = this.now();
-    const stat = this.ipAttempts.get(ip) || { failedAttempts: 0, lockedUntil: 0 };
+
+    // Clean up stale IP records if map size exceeds 500
+    if (this.ipAttempts.size > 500) {
+      for (const [k, v] of this.ipAttempts.entries()) {
+        if (nowMs - v.lastAttemptAt > this.lockDurationMs) {
+          this.ipAttempts.delete(k);
+        }
+      }
+    }
+
+    const stat = this.ipAttempts.get(ip) || { failedAttempts: 0, lockedUntil: 0, lastAttemptAt: nowMs };
+    // If last attempt was beyond lockDurationMs window and not locked, reset attempt count
+    if (nowMs - stat.lastAttemptAt > this.lockDurationMs && !stat.lockedUntil) {
+      stat.failedAttempts = 0;
+    }
+
     stat.failedAttempts += 1;
+    stat.lastAttemptAt = nowMs;
 
     if (stat.failedAttempts >= this.maxFailedAttempts) {
       stat.lockedUntil = nowMs + this.lockDurationMs;

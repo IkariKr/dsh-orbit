@@ -1162,6 +1162,14 @@ export function createHubServer({ registry, options = {} }) {
       if (request.method !== "POST") {
         return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
       }
+      if (trustedExternalScheme !== "https") {
+        return sendJson(response, 400, {
+          error: {
+            code: "insecure-scheme",
+            message: "QR pairing requires verified TLS (https://); plain HTTP is prohibited",
+          },
+        });
+      }
       const hubBaseUrl = `${trustedExternalScheme}://${request.headers.host}`;
       const codeRecord = pairingEngine.generateCode({
         operatorPrincipal: session.operatorPrincipal,
