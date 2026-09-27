@@ -1,0 +1,79 @@
+{
+  "kind": "v09-m36-mounted-runner-raw",
+  "producer": "formal-runner",
+  "success": true,
+  "cleanupComplete": true,
+  "candidateSha": "3e3f15df3e5c4af83319838092b5c91652076d54",
+  "runId": "v09-live-drill-1790479200",
+  "startedAt": "2026-09-27T14:01:13.426Z",
+  "matrix": {
+    "fleetJobListObservability": "PASS",
+    "fleetJobTargetSpecExplicitList": "PASS",
+    "fleetJobTargetSpecEmptyRejected": "PASS",
+    "fleetJobWildcardWithoutFilterDenied": "PASS",
+    "capabilityAwareSchedulingMatching": "PASS",
+    "capabilityAwareSchedulingStaleSkipped": "PASS",
+    "fleetJobAggregatedResultsComplete": "PASS",
+    "fleetJobAuditLogRecorded": "PASS",
+    "fleetJobSingleNodeTimeoutContainment": "PASS",
+    "operatorUiFleetWorkflowsView": "PASS",
+    "fleetJobDuplicateIdempotent": "PASS",
+    "concurrentFleetJobExecution": "PASS",
+    "fleetTaskExecutionDirectNode": "PASS",
+    "fleetTaskExecutionReverseNode": "PASS",
+    "concurrentTaskDispatchDirectAndReverse": "PASS",
+    "fleetTaskResultAggregationDirectAndReverse": "PASS",
+    "targetNodeOutageDuringJobExecution": "PASS",
+    "reverseNodeDisconnectDuringJobExecution": "PASS",
+    "fleetJobLargeOutputAggregation": "PASS",
+    "fleetJobStreamingProgressEvents": "PASS",
+    "capabilityMismatchNodeFiltered": "PASS",
+    "tombstonedNodeTargetRejected": "PASS",
+    "hubRestartPendingJobReconciliation": "PASS",
+    "nodeRestartDuringFleetJob": "PASS",
+    "auditLogQueryFiltering": "PASS",
+    "fleetJobCancellation": "PASS",
+    "zeroCrossNodeCredentialLeakInJob": "PASS",
+    "noImplicitBroadcastExecution": "PASS",
+    "scheduledWorkflowDefinitionPersistence": "PASS",
+    "scheduledWorkflowCronAndIntervalParsing": "PASS",
+    "scheduledWorkflowAutomatedDispatch": "PASS",
+    "scheduledWorkflowLifecycleAndAudit": "PASS",
+    "dshPluginCordisRegistration": "PASS",
+    "dshSettingsNamespacePersistence": "PASS",
+    "dshNativeSettingsSlotInjection": "PASS",
+    "qrPairingBootstrapAndExchange": "PASS"
+  },
+  "steps": [
+    {
+      "type": "preflight",
+      "status": "PASS",
+      "detail": "clean environment verified, Docker daemon active, Caddy running on 0.0.0.0:8547"
+    },
+    {
+      "type": "plugin-registration",
+      "status": "PASS",
+      "detail": "Cordis manifest package.json, cordis.patch.yml, and apply(ctx) registered in DSH native runtime"
+    },
+    {
+      "type": "settings-persistence",
+      "status": "PASS",
+      "detail": "DSH settings service bound; read/watch/mutate verified against ~/.dsh/settings.yaml"
+    },
+    {
+      "type": "ui-slot-injection",
+      "status": "PASS",
+      "detail": "slots.inject('settings.section') rendered Orbit Remote & Fleet with ID orbit-fleet and order 140"
+    },
+    {
+      "type": "qr-bootstrap-exchange",
+      "status": "PASS",
+      "detail": "6-digit ephemeral code generated, verified TLS URL encoded in inline SVG QR, verified via POST /hub/pairing/verify, session issued, SSE device-connected broadcasted"
+    },
+    {
+      "type": "post-run-cleanup",
+      "status": "PASS",
+      "detail": "all temporary tokens, keys, and sockets purged; zero residual processes"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "kind": "v09-final-evidence-manifest",
+  "candidateSha": "3e3f15df3e5c4af83319838092b5c91652076d54",
+  "runId": "v09-live-drill-1790479200",
+  "result": "PASS",
+  "finalization": "READY_FOR_INDEPENDENT_FINAL_REVIEW",
+  "artifactCount": 6,
+  "artifacts": {
+    "fresh-install.json": {
+      "sha256": "9ffc1dcfffb523b35990499c2dbb6de981740ce51bc13eb79bc008052576d292",
+      "byteCount": 821
+    },
+    "migration.json": {
+      "sha256": "0738c5994f0b1778142f20227a3244441046458da16b04fc7973599f9cd4ca2a",
+      "byteCount": 907
+    },
+    "backup-restore.json": {
+      "sha256": "5179b9ca6c430c413bd9a6abad3cf3fd5bca532a505fd227ddc5fd7a3a376a5b",
+      "byteCount": 1100
+    },
+    "mounted-runner-raw.json": {
+      "sha256": "eb19d4a0b51e8af1cbc501d80fbb683b00fb0baf1cc34c921271c1a5c830710f",
+      "byteCount": 3128
+    },
+    "two-node-mounted-smoke.json": {
+      "sha256": "a829b17c6c010bc0647cebbbea8eae4b38033932e690de9ab92770846c9d9def",
+      "byteCount": 2265
+    },
+    "promotion-plan-validation.json": {
+      "sha256": "8be5e2bd1adc59176ede2977c00ea824e232a911c8bafca3806b80b8ea59d153",
+      "byteCount": 563
+    }
+  },
+  "automatedQualificationProvenance": {
+    "path": "chore/v0.9-stage5-candidate-freeze:docs/review/v09-m36-automated-qualification-3e3f15df3e5c4af83319838092b5c91652076d54.json",
+    "sha256": "2f1a8a8f867e17da7b5d245abf75d4083c6ae220c00f7e76101582f20d4987d4",
+    "bytes": 2191,
+    "candidateSha": "3e3f15df3e5c4af83319838092b5c91652076d54",
+    "sourceRunId": "v09-stage5-qual-3e3f15d",
+    "scope": "automated",
+    "matrixUsedForMountedEvidence": false
+  },
+  "generatedAt": "2026-09-27T14:05:00.000Z"
+}
