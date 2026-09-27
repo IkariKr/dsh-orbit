@@ -23,6 +23,12 @@
       "platform": "web"
     }
   },
+  "dshClient": {
+    "inject": [
+      "@deepseek-ai/dsh-client-ui-settings"
+    ],
+    "platform": "web"
+  },
   "keywords": [
     "dsh",
     "dsh-plugin",
