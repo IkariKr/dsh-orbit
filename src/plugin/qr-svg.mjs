@@ -329,7 +329,7 @@ export function generateQrSvg(text, options = {}) {
   // Error correction blocks
   const blocks = ecSpec.blocks;
   const dataPerBlock = Math.floor(codewords.length / blocks);
-  const ecPerBlock = Math.floor(ecSpec.ec / blocks);
+  const ecPerBlock = ecSpec.ec;
 
   const blockData = [];
   const blockEc = [];

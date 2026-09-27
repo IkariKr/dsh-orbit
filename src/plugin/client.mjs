@@ -173,18 +173,24 @@ export class OrbitSettingsController {
       this.eventSource.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-          if (payload.event === "device-connected") {
+          if (payload.type === "device-connected" || payload.event === "device-connected") {
             // A mobile client successfully verified the pairing code!
             // Clear current code and refresh status
             if (this.timer) {
               clearInterval(this.timer);
               this.timer = null;
             }
+            const connectedDevice = {
+              operatorPrincipal: payload.operatorPrincipal || "operator",
+              clientIp: payload.clientIp || "unknown",
+              connectedAt: payload.timestamp || new Date(this.now()).toISOString(),
+            };
             this.updateState({
               code: null,
               url: null,
               qrSvg: null,
               remainingSeconds: 0,
+              devices: [...this.state.devices, connectedDevice],
             });
             this.fetchStatus();
           }
@@ -201,7 +207,16 @@ export class OrbitSettingsController {
    * Renders HTML markup for the Settings Section card.
    */
   renderHtml() {
-    const { loading, error, code, remainingSeconds, qrSvg, activeCodes, activeSessions } = this.state;
+    const {
+      loading,
+      error,
+      code,
+      remainingSeconds,
+      qrSvg,
+      activeCodes,
+      activeSessions,
+      devices = [],
+    } = this.state;
 
     return `
 <div class="orbit-settings-section" id="orbit-settings-container">
@@ -245,6 +260,24 @@ export class OrbitSettingsController {
       </button>
     </div>
   </div>
+
+  ${
+    devices && devices.length > 0
+      ? `
+  <div class="orbit-devices-card">
+    <h4>Connected Devices</h4>
+    <ul class="orbit-devices-list">
+      ${devices
+        .map(
+          (d) =>
+            `<li><span>${escapeHtml(d.operatorPrincipal)}</span> <small>(${escapeHtml(d.clientIp)})</small></li>`,
+        )
+        .join("")}
+    </ul>
+  </div>
+  `
+      : ""
+  }
 </div>
 `.trim();
   }

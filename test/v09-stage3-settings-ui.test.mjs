@@ -209,3 +209,127 @@ test("client controller: rejects code generation if Hub returns unencrypted HTTP
     controller.destroy();
   }
 });
+
+test("qr-svg: correctly handles multi-block versions (Version 4, 5, 6 for URLs > 41 bytes)", () => {
+  // Version 4 (data capacity 64 bytes Level M)
+  const urlV4 = "https://orbit.corp.internal.example.com/auth?token=123456";
+  const resV4 = generateQrSvg(urlV4, { ecLevel: "M" });
+  assert.equal(resV4.matrix.length, 33);
+  assert.equal(resV4.size, 41); // 33 + 2*4 margin
+  assert.ok(resV4.svg.includes('viewBox="0 0 41 41"'));
+
+  // Version 5 (data capacity 86 bytes Level M)
+  const urlV5 = "https://subdomain.cluster.internal.corp.example.com/auth?token=123456";
+  const resV5 = generateQrSvg(urlV5, { ecLevel: "M" });
+  assert.equal(resV5.matrix.length, 37);
+  assert.equal(resV5.size, 45); // 37 + 2*4 margin
+  assert.ok(resV5.svg.includes('viewBox="0 0 45 45"'));
+
+  // Version 6 (data capacity 108 bytes Level M)
+  const urlV6 = "https://reverse-node-ingress-gateway.subdomain.internal.corp.example.com/auth?token=999888";
+  const resV6 = generateQrSvg(urlV6, { ecLevel: "M" });
+  assert.equal(resV6.matrix.length, 41);
+  assert.equal(resV6.size, 49); // 41 + 2*4 margin
+  assert.ok(resV6.svg.includes('viewBox="0 0 49 49"'));
+});
+
+test("client controller: real-time SSE device-connected event clears code and updates device list", async () => {
+  let messageHandler = null;
+  class MockEventSource {
+    constructor(url) {
+      this.url = url;
+      setTimeout(() => this.onopen?.(), 0);
+    }
+    set onmessage(fn) {
+      messageHandler = fn;
+    }
+    close() {}
+  }
+
+  globalThis.EventSource = MockEventSource;
+  const controller = new OrbitSettingsController({
+    hubBaseUrl: "https://hub.orbit.test",
+    csrfToken: "mock-csrf",
+  });
+
+  try {
+    controller.updateState({
+      code: "123456",
+      url: "https://hub.orbit.test/auth?token=123456",
+      qrSvg: "<svg></svg>",
+      remainingSeconds: 280,
+    });
+
+    controller.subscribeEvents();
+    assert.ok(messageHandler);
+
+    // Broadcast device-connected event with payload.type
+    messageHandler({
+      data: JSON.stringify({
+        type: "device-connected",
+        operatorPrincipal: "mobile-operator",
+        clientIp: "192.0.2.55",
+        timestamp: "2026-09-27T12:00:00Z",
+      }),
+    });
+
+    assert.equal(controller.state.code, null);
+    assert.equal(controller.state.url, null);
+    assert.equal(controller.state.qrSvg, null);
+    assert.equal(controller.state.remainingSeconds, 0);
+    assert.equal(controller.state.devices.length, 1);
+    assert.equal(controller.state.devices[0].operatorPrincipal, "mobile-operator");
+
+    const html = controller.renderHtml();
+    assert.ok(html.includes("Connected Devices"));
+    assert.ok(html.includes("mobile-operator"));
+    assert.ok(html.includes("192.0.2.55"));
+  } finally {
+    delete globalThis.EventSource;
+    controller.destroy();
+  }
+});
+
+test("OrbitSettingsSection: container rendering and button click interaction", async () => {
+  let generateCalled = false;
+  const mockBtn = {
+    onclick: null,
+    click() {
+      if (typeof this.onclick === "function") this.onclick();
+    },
+  };
+
+  const mockContainer = {
+    _html: "",
+    set innerHTML(val) {
+      this._html = val;
+    },
+    get innerHTML() {
+      return this._html;
+    },
+    querySelector: (selector) => {
+      if (selector === "#orbit-btn-generate") {
+        return mockBtn;
+      }
+      return null;
+    },
+  };
+
+  const controller = OrbitSettingsSection.render(mockContainer, {
+    hubBaseUrl: "https://hub.orbit.test",
+    csrfToken: "mock-csrf",
+  });
+
+  // Mock generateCode on controller to verify click wiring
+  controller.generateCode = async () => {
+    generateCalled = true;
+  };
+
+  const btn = mockContainer.querySelector("#orbit-btn-generate");
+  assert.ok(btn);
+  btn.click();
+  assert.equal(generateCalled, true);
+
+  controller.destroy();
+});
+
