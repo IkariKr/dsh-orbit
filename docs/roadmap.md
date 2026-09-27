@@ -128,6 +128,28 @@ Frozen scope for 0.8 construction:
 - **SHOULD**: first-class Scheduled Workflows panel in the operator UI with cron schedule inspector, next-run timers, and trigger controls; real-time schedule trigger status updates; schedule execution history inspection modal.
 - **OUT OF SCOPE**: a new route authority system beyond RFC-0010; a new selector system beyond RFC-0011; a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy; distributed external cron daemons; unrelated UI refactor; unrelated runtime refactor; tag or release creation/mutation without separate authorization; production promotion; DNS cutover.
 
+## 0.9: DSH native plugin integration and QR pairing bootstrap
+
+Construction is authorized by `V09-CONSTRUCTION-20260927-A1`
+(`docs/release-attestations/v0.9-construction-authorization-2026-09-27.md`),
+built on the accepted v0.8 closure `c15ca5865f1519fccbb277f2a440c3b1496e1bb9`.
+The construction design package is RFC-0016
+and the v0.9 multistage SOP.
+RFC-0016 must receive Stage 0 / Gate A Architecture Review GO before v0.9 product runtime construction begins.
+
+- DSH native Cordis plugin packaging and entry lifecycle (`apply(ctx)`);
+- bidirectional configuration binding via DSH Settings service (`~/.dsh/settings.yaml` namespace `dsh-orbit`);
+- ephemeral 6-digit QR pairing bootstrap and single-use verification protocol;
+- DSH desktop Settings UI slot injection (`slots.inject('settings.section')`) with inline SVG QR rendering;
+- real-time device connection and pairing events via Server-Sent Events (SSE);
+- brute-force defense, IP rate limiting, and zero credential leakage in QR payloads.
+
+Frozen scope for 0.9 construction:
+
+- **MUST**: an RFC-first design record for DSH native plugin integration and QR pairing bootstrap (RFC-0016) before product construction; standard Cordis plugin packaging (`package.json`, `cordis.patch.yml`); DSH settings service binding (`~/.dsh/settings.yaml`); ephemeral 6-digit pairing codes with <= 300s TTL and single-use destruction on first verification; inline vector SVG QR code generation without external network requests or third-party APIs; verified TLS enforcement for all remote pairing exchanges and QR links; IP rate-limiting and 429 lockout defense; candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.9 release candidate; operator SOP and reference documentation.
+- **SHOULD**: first-class Orbit Remote & Fleet section in the DSH desktop settings UI via `slots.inject('settings.section')`; real-time device connection and pairing events via Server-Sent Events (SSE); clear device and node session visibility with one-click revocation.
+- **OUT OF SCOPE**: virtual loopback manipulation or rewriting external request Host/Origin/remoteAddress to 127.0.0.1; long-lived 365-day static bearer tokens or unrevocable URL credentials; unencrypted HTTP across public or untrusted networks; monkey-patching DSH core services (`connection`, `browserAuth`, etc.); a new route authority system beyond RFC-0010; a new selector system beyond RFC-0011; a new DSH compatibility profile without a designed RFC and compliance with the DSH baseline promotion policy; unrelated UI refactor; unrelated runtime refactor; tag or release creation/mutation without separate authorization; production promotion; DNS cutover.
+
 ## Design constraints
 
 The Hub should remain a control plane. DSH remains the execution runtime on each node.
