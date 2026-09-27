@@ -45,7 +45,13 @@ export function apply(ctx, config = {}) {
   }
 
   // Record store on context for testing and inspection
-  ctx[name] = { store };
+  if (typeof ctx.provide === "function") {
+    ctx.provide(name, { store });
+  } else {
+    try {
+      ctx[name] = { store };
+    } catch {}
+  }
 
   ctx.logger?.info?.(`[dsh-orbit] DSH native plugin initialized (namespace: ${ORBIT_SETTINGS_NAMESPACE})`);
 }
