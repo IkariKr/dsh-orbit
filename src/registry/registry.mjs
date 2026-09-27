@@ -1635,6 +1635,14 @@ export class Registry {
     return { ok: true };
   }
 
+  countActiveSessions() {
+    const at = nowIso(this.now());
+    const row = this.db
+      .prepare("SELECT count(*) as count FROM browser_sessions WHERE revoked_at IS NULL AND expires_at > ? AND idle_until > ?")
+      .get(at, at);
+    return row ? Number(row.count) : 0;
+  }
+
   // ------------------------------------------------------------------
   // Maintenance: time-based semantics that nothing else advances
   // (RFC-0009 aging, RFC-0006 nonce retention, RFC-0005 D2 replay

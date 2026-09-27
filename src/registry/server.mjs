@@ -33,6 +33,7 @@ import {
 } from "./flow-tracker.mjs";
 import { FleetJobScheduler } from "./fleet-scheduler.mjs";
 import { ScheduledWorkflowEngine } from "./schedule-engine.mjs";
+import { PairingCodeEngine } from "./pairing-code.mjs";
 
 const MACHINE_ROUTES = new Set([
   "/api/v1/enroll",
@@ -488,12 +489,59 @@ export function createHubServer({ registry, options = {} }) {
       handleMachineRequest(request, response, path).catch((error) => sendError(response, error));
       return;
     }
+    // Public unauthenticated QR pairing code verification
+    if (request.method === "POST" && (path === "/hub/pairing/verify" || path === "/hub/pairing/verify/")) {
+      handlePairingVerify(request, response).catch((error) => sendError(response, error));
+      return;
+    }
     if (path.startsWith("/hub")) {
       handleBrowserRequest(request, response, path).catch((error) => sendError(response, error));
       return;
     }
     sendJson(response, 404, { error: { code: "not-found", message: "no such route" } });
   });
+
+  async function handlePairingVerify(request, response) {
+    checkOriginAndFetchSite(request);
+    const clientIp = request.socket.remoteAddress ?? "";
+    const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+    const code = body?.code || body?.token || "";
+    const result = pairingEngine.verifyCode(code, clientIp);
+    if (!result.valid) {
+      const status = result.code === "rate-limited" ? 429 : 401;
+      return sendJson(response, status, { error: { code: result.code, message: result.message } });
+    }
+
+    // Successful verification bootstraps operator session
+    const operatorPrincipal = result.operatorPrincipal || "operator";
+    const session = registry.bootstrapSession({ principal: operatorPrincipal });
+    const cookie = [
+      `${SESSION_COOKIE}=${session.sessionId}`,
+      "HttpOnly",
+      "Secure",
+      "SameSite=Strict",
+      "Path=/hub",
+      `Max-Age=${Math.floor(12 * 60 * 60)}`,
+    ].join("; ");
+    response.setHeader("set-cookie", cookie);
+
+    // Record audit and broadcast SSE event
+    registry.recordAudit(operatorPrincipal, "pairing.verify.success", {
+      clientIp,
+      sessionId: session.sessionId,
+    });
+    pairingEngine.broadcastEvent("device-connected", {
+      operatorPrincipal,
+      clientIp,
+    });
+
+    return sendJson(response, 200, {
+      ok: true,
+      principal: operatorPrincipal,
+      csrfToken: session.csrfToken,
+      expiresAt: session.expiresAt,
+    });
+  }
 
   async function handleMachineRequest(request, response, path) {
     if (request.method !== "POST") {
@@ -837,6 +885,41 @@ export function createHubServer({ registry, options = {} }) {
       if (path === "/hub/tokens" || path === "/hub/tokens/") {
         return sendJson(response, 200, { tokens: registry.listTokens() });
       }
+      if (path === "/hub/pairing/status" || path === "/hub/pairing/status/") {
+        return sendJson(response, 200, {
+          activeCodes: pairingEngine.getActiveCodeCount(),
+          hubBaseUrl: `${trustedExternalScheme}://${request.headers.host}`,
+          activeSessions: typeof registry.countActiveSessions === "function" ? registry.countActiveSessions() : 0,
+        });
+      }
+      if (path === "/hub/pairing/events" || path === "/hub/pairing/events/") {
+        response.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+        });
+        response.write(": connected\n\n");
+        const onEvent = (event) => {
+          try {
+            response.write(`data: ${JSON.stringify(event)}\n\n`);
+          } catch {}
+        };
+        pairingEngine.on("event", onEvent);
+        const keepAlive = setInterval(() => {
+          try {
+            response.write(": ping\n\n");
+          } catch {}
+        }, 25_000);
+        keepAlive.unref?.();
+
+        const cleanup = () => {
+          clearInterval(keepAlive);
+          pairingEngine.removeListener("event", onEvent);
+        };
+        request.on("close", cleanup);
+        request.on("end", cleanup);
+        return;
+      }
       return sendJson(response, 404, { error: { code: "not-found", message: "no such management route" } });
     }
 
@@ -1075,6 +1158,27 @@ export function createHubServer({ registry, options = {} }) {
       return sendJson(response, 200, { ok: true, scheduleId, status: "deleted" });
     }
 
+    if (path === "/hub/pairing/generate-code" || path === "/hub/pairing/generate-code/") {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      const hubBaseUrl = `${trustedExternalScheme}://${request.headers.host}`;
+      const codeRecord = pairingEngine.generateCode({
+        operatorPrincipal: session.operatorPrincipal,
+        hubBaseUrl,
+      });
+      registry.recordAudit(session.operatorPrincipal, "pairing.code.generate", {
+        code: codeRecord.code,
+        expiresAt: codeRecord.expiresAt,
+      });
+      return sendJson(response, 201, {
+        ok: true,
+        code: codeRecord.code,
+        expiresAt: codeRecord.expiresAt,
+        url: codeRecord.url,
+      });
+    }
+
     if (
       path === "/hub/actions/node" ||
       path === "/hub/actions/node/" ||
@@ -1304,6 +1408,12 @@ export function createHubServer({ registry, options = {} }) {
           now: () => registry.now(),
         })
       : null;
+
+  const pairingEngine = options.pairingEngine instanceof PairingCodeEngine
+    ? options.pairingEngine
+    : new PairingCodeEngine({
+        now: () => registry.now().getTime(),
+      });
 
   function managementNodeSummary(node) {
     const summary = node;
@@ -1608,5 +1718,6 @@ export function createHubServer({ registry, options = {} }) {
   server.flowTracker = flowTracker;
   server.fleetScheduler = fleetScheduler;
   server.scheduleEngine = scheduleEngine;
-  return { server, wsTracker, reverseSessions, reverseChannels, flowTracker, fleetScheduler, scheduleEngine };
+  server.pairingEngine = pairingEngine;
+  return { server, wsTracker, reverseSessions, reverseChannels, flowTracker, fleetScheduler, scheduleEngine, pairingEngine };
 }
