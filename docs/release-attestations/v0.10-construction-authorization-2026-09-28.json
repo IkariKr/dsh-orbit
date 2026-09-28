@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "authorizationId": "V10-CONSTRUCTION-20260928-A1",
+  "status": "AUTHORIZED_FOR_V010_CONSTRUCTION",
+  "issuedDate": "2026-09-28",
+  "acceptedV09Closure": "145203b8219848796ef627b1f40c0c63233a1d31",
+  "acceptedV09ClosureTag": "v0.9.0-rc.1",
+  "governancePredecessor": "docs/release-attestations/v0.9.0-rc.1-tag-record-2026-09-28.md",
+  "constructionLineage": {
+    "root": "the pushed commit containing this authorization record",
+    "mustDescendFromAcceptedV09Closure": true,
+    "mustDescendFromGovernancePredecessor": true,
+    "forbiddenBases": [
+      "historical unaccepted closure attempts",
+      "pre-final-review candidates",
+      "experimental worktrees"
+    ]
+  },
+  "objective": "v0.10 hub-hosted QR pairing landing page per RFC-0017: serve GET /auth on the hub authorities that can mint pairing URLs, add a narrow fail-closed exception to the global query fence for exactly GET /auth?token=<6 digits>, add an explicit https-only QR mint base override so minted URLs resolve on the operator-designated phone-reachable origin, and ship a zero-dependency landing page that verifies the code via the existing POST /hub/pairing/verify and scrubs the token from the address bar; no new credentials and no change to pairing engine semantics",
+  "scopeFreeze": {
+    "must": [
+      "RFC-first design record (RFC-0017) before product construction",
+      "landing page served at GET /auth on the selector-apex authority and the management (unrelated-host) authority, backed by one shared self-contained asset set with zero external network requests",
+      "node-route authorities remain pure proxies: /auth is never intercepted there and no query-fence behavior changes on route authorities",
+      "query fence exception is exactly: GET, path /auth, a single query parameter named token whose value matches ^[0-9]{6}$; every other method/path/parameter combination keeps the existing fail-closed behavior",
+      "QR mint base override env DSH_ORBIT_HUB_QR_PAIRING_BASE_URL: https-only, no query, no userinfo, validated at boot; falls back to request-Host-derived base when unset; machine pairing env DSH_ORBIT_HUB_PAIRING_BASE_URL is not overloaded or repurposed",
+      "landing page POSTs the existing /hub/pairing/verify with same-origin fetch and maps existing failure codes (invalid-or-expired, rate-limited) to explicit UI states without inventing new endpoints",
+      "token hygiene: token scrubbed from the address bar via history.replaceState after read, never rendered back into the DOM as the code value, never written to server logs or audit records, Cache-Control: no-store and Referrer-Policy: no-referrer on every /auth response",
+      "post-success navigation targets only first-party constant paths on the same origin; no parameter-derived redirect targets",
+      "verification success reuses the existing operator-session bootstrap and its exact cookie attributes; no new credential types",
+      "mechanical test coverage for fence narrowness, mint base override, state mapping, and token-leak absence (audit store and response body scans)",
+      "candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.10 release candidate",
+      "operator SOP and reference documentation"
+    ],
+    "should": [
+      "landing page visual language consistent with the RFC-0011 selector UI",
+      "lockout and attempt messaging surfaced from the existing pairing engine state (attempts remaining, retry-after)",
+      "single-file landing page asset (inline CSS/JS) to keep the new public asset surface minimal"
+    ],
+    "outOfScope": [
+      "wildcard node-route subdomains, public DNS records, Cloudflare certificate purchases, or any DNS cutover work (operator infrastructure decision, deferred)",
+      "changes to the pairing engine's crypto, TTL, single-use destruction, or lockout semantics (proven in v0.9)",
+      "changes to the node-side plugin QR fallback path",
+      "a new route authority system beyond RFC-0010",
+      "a new selector system beyond RFC-0011",
+      "weakening or removing the global query fence beyond the narrow /auth exception",
+      "exposing /hub/pairing/generate-code on the selector-apex authority (minting stays session-gated on the management surface)",
+      "virtual loopback manipulation or rewriting external request Host/Origin/remoteAddress to 127.0.0.1",
+      "unrelated UI refactor",
+      "unrelated runtime refactor",
+      "tag or release creation/mutation without separate authorization",
+      "production promotion without separate authorization",
+      "DNS cutover without separate authorization"
+    ]
+  },
+  "allowedPathRules": [
+    "docs/**",
+    "src/**",
+    "bin/**",
+    "ui/**",
+    "test/**",
+    "scripts/**",
+    "docker-registry/**",
+    "CHANGELOG.md",
+    "README.md",
+    "package.json: dependency changes require recorded justification",
+    "package-lock.json: only mechanically resulting changes"
+  ],
+  "forbiddenActions": [
+    "reopening or rewriting the accepted v0.9 closure lineage or its attestation",
+    "product construction before RFC-0017 and Stage 0 Gate A approval is recorded",
+    "overloading the machine pairing env DSH_ORBIT_HUB_PAIRING_BASE_URL for QR minting",
+    "changing the DSH baseline outside the DSH baseline promotion policy",
+    "tag or release creation/mutation without separate authorization",
+    "production promotion without separate authorization",
+    "DNS cutover without separate authorization"
+  ],
+  "evidenceRequirements": {
+    "candidateMustBeFrozenBeforeEvidence": true,
+    "candidateFreezeRule": "exactly one frozen candidate per evidence round; once frozen, later phases produce only qualification/evidence; a real problem means a new candidate and fresh candidate-bound evidence",
+    "landingMatrixRequired": "a dedicated acceptance matrix defined in RFC-0017 must be mechanically enforced before the v0.10 mounted evidence run",
+    "closureRule": "one evidence-only closure, direct child of the frozen candidate, attestation must not reference its own closure SHA",
+    "finalReviewRequired": true
+  },
+  "separationOfPowers": {
+    "tagReleaseAuthorizationSeparate": true,
+    "productionPromotionAuthorizationSeparate": true,
+    "dnsCutoverAuthorizationSeparate": true,
+    "v010NotGatedOnProductionPromotionOrDnsCutover": true
+  }
+}
