@@ -34,7 +34,7 @@ below are design gaps, not documentation nits.
   continued 404), and the authorization JSON `must` list records the tuple
   change.
 - **[P1] Stage 0 deliverables broke `npm run check`.** The RFC contained a
-  site-specific private IPv4 (`192.168.1.4`) flagged by
+  site-specific private IPv4 (a private LAN address) flagged by
   `scripts/check-public-tree.mjs`, violating the SOP's own Stage 0 baseline
   and reddening CI. Fix: replaced with the TEST-NET-1 documentation address
   (`192.0.2.10`); a "credential-like assignment" flag from the percent-encoded
