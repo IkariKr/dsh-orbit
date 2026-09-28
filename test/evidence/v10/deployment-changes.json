@@ -1,0 +1,20 @@
+{
+  "recordedAt": "2026-09-28",
+  "changeSet": [
+    {
+      "component": "orbit-hub stack (NAS /volume2/docker/orbit-hub)",
+      "change": "image dsh-orbit-registry:v0.9 -> dsh-orbit-registry:v0.10 (built on NAS from the frozen candidate tree, git archive d56f1c1); registry env gained DSH_ORBIT_HUB_QR_PAIRING_BASE_URL=https://dsh.ikarikore.top",
+      "backup": "docker-compose.yml.bak-pre-v10-20260928-212435",
+      "restart": "docker compose up -d (registry, machine-ingress, hub caddy, node-a recreated)"
+    },
+    {
+      "component": "apex edge gateway (NAS /volume2/docker/deepseek-harness/caddy/Caddyfile, :9443 site)",
+      "change": "added the RFC-0017 narrow edge exemption: @qrLandingGet (host dsh.ikarikore.top; method GET; path /auth) and @qrVerifyPost (host dsh.ikarikore.top; method POST; path /hub/pairing/verify /hub/pairing/verify/) handle blocks proxying to the hub browser gateway without the edge gate; @hubcf (Cloudflare-Access fast path), @hubhost (basic_auth gate), and the 404 fallback unchanged; :8080 Tailscale bridge unchanged",
+      "backup": "Caddyfile.bak-pre-v10-20260928-212435",
+      "validation": "caddy validate --adapter caddyfile passed in a throwaway container before activation (cert-file error expected and ignored: certs are mounted only in the live container)",
+      "restart": "docker restart deepseek-harness-caddy-1"
+    }
+  ],
+  "rollback": "restore both .bak-pre-v10-20260928-212435 files, docker compose -f /volume2/docker/orbit-hub/docker-compose.yml up -d, docker restart deepseek-harness-caddy-1",
+  "residueCheck": "build tree /volume2/docker/orbit-hub/v10-build, candidate tarball, mint cookie files, and mint response files removed after the run; pairing-code artifacts kept out of the repository"
+}

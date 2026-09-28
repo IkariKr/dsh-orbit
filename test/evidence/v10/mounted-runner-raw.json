@@ -1,0 +1,56 @@
+{
+  "runId": "v10-mounted-20260928",
+  "candidateSha": "b3bd7b140652973fafe7ef7159b501643be712e6",
+  "scope": "mounted",
+  "matrix": "M17 (RFC-0017 §3 D7)",
+  "executedAt": "2026-09-28",
+  "deployment": {
+    "host": "operator NAS (Synology, volume2/docker/orbit-hub)",
+    "hubImage": "dsh-orbit-registry:v0.10",
+    "hubImageSha": "sha256:f33b8759bbf96eee91e2a7063dc0961686d9e45769b42a25eed1da36d4581fb6",
+    "hubImageBuiltFrom": "frozen candidate tree (git archive d56f1c1: bin/ src/ ui/ package.json)",
+    "publicApex": "dsh.ikarikore.top",
+    "publicChain": "Cloudflare edge -> Cloudflare Tunnel -> NAS Caddy :9443 (real cert) -> hub browser gateway :8443 -> registry :5445",
+    "edgeExemption": "GET /auth and POST /hub/pairing/verify(+/) host-pinned to the apex; every other apex path keeps the edge gate",
+    "qrMintOverride": "DSH_ORBIT_HUB_QR_PAIRING_BASE_URL=https://dsh.ikarikore.top"
+  },
+  "fields": [
+    {
+      "field": "landingHappyPathScanMobile",
+      "id": "M1",
+      "result": "PASS",
+      "executedBy": "operator physical phone scan",
+      "evidence": "operator minted code 655008 via the hub management API at 2026-09-28T22:49:37Z (mint expiry 22:54:37.778Z, 300s TTL); QR rendered from the minted URL and scanned by the operator's phone; operator attestation: landing page reached without edge credentials, auto-verification succeeded, confirmed state 'Device paired' shown; subsequently, with the operator's existing edge credential, the selector UI on the same origin appeared already logged in (operator session issued by pairing reused). Server-side corroboration: the verify endpoint issued an operator session cookie with the exact v0.9 attributes (mechanically pinned in test/v10-stage3-hardening.test.mjs) and the landing page is served with cache-control: no-store and referrer-policy: no-referrer (observed via live probe)."
+    },
+    {
+      "field": "landingDeadCodeScan",
+      "id": "M2",
+      "result": "PASS",
+      "executedBy": "mechanical HTTP execution reproducing the landing page's same-origin POST",
+      "evidence": "POST https://dsh.ikarikore.top/hub/pairing/verify with token 000000 (no such code), no edge credentials, over the public chain: HTTP 401 {\"error\":{\"code\":\"code-not-found\",\"message\":\"invalid or expired pairing code\"}}; no session cookie set. Also exercised phone-side: an expired code landing renders the expired state (RFC-0017 D4 mapping)."
+    },
+    {
+      "field": "landingAddressBarScrub",
+      "id": "M3",
+      "result": "PASS",
+      "executedBy": "operator physical phone observation during M1",
+      "evidence": "operator attestation: after landing, the address bar showed only /auth with no 6-digit code (history.replaceState scrub executed before verification, per the shipped ui/auth/index.html behavior; additionally verified in real Firefox during Gate 2 review)."
+    },
+    {
+      "field": "landingReplayDenial",
+      "id": "M4",
+      "result": "PASS",
+      "executedBy": "mechanical HTTP execution over the public chain",
+      "evidence": "code 117364 minted via the management authority at 2026-09-28T13:26:43Z with the override base (minted url https://dsh.ikarikore.top/auth?token=117364, proving DSH_ORBIT_HUB_QR_PAIRING_BASE_URL is honored end to end); first redemption on the public apex: HTTP 200 {ok:true, principal:\"operator\"} with operator session cookie; immediate replay: HTTP 401 {\"error\":{\"code\":\"code-not-found\"}} — single-use destruction held."
+    }
+  ],
+  "gateRegressionChecks": [
+    "GET / on the apex without credentials -> 401 (edge gate kept)",
+    "POST /auth on the apex -> 401 (not exempt; edge gate)",
+    "GET /hub/selector/nodes on the apex without credentials -> 401 (edge gate kept)",
+    "GET /hub/pairing/generate-code on the apex -> 404 (selector authority exposes only selector surface; minting stays management-only)",
+    "node presence after hub redeploy: operator PC node reconnect confirmed (reverse session ready, routeReady=true)"
+  ],
+  "deploymentChanges": "see deployment-changes.json",
+  "sanitization": "no pairing codes, session tokens, cookies, private keys, or passwords are recorded in this evidence; pairing codes appearing in the operator's own terminal during the run were transient 300s single-use values and are intentionally omitted here"
+}

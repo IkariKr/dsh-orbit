@@ -1,0 +1,22 @@
+{
+  "manifestVersion": 1,
+  "candidateSha": "b3bd7b140652973fafe7ef7159b501643be712e6",
+  "runId": "v10-mounted-20260928",
+  "generatedAt": "2026-09-28T23:00:56.557Z",
+  "artifacts": [
+    {
+      "file": "test/evidence/v10/mounted-runner-raw.json",
+      "sha256": "e1c2ffb5d588adfac15d0ae4ecf66745d622b9f604ecef9bfa5f6586020990e9",
+      "bytes": 4324
+    },
+    {
+      "file": "test/evidence/v10/deployment-changes.json",
+      "sha256": "8cb639f9c836844afad1bbeb48d5bd4c7b442f565a2769a1f7ea9b7858db88e5",
+      "bytes": 1765
+    }
+  ],
+  "qualificationReport": {
+    "path": "docs/review/v10-m17-automated-qualification-b3bd7b140652973fafe7ef7159b501643be712e6.json",
+    "note": "direct child of the freeze commit; 13/13 automated PASS, 4 mounted NOT_EXECUTED at generation time; the full suite run (649/643/0/6) is the real pass evidence"
+  }
+}
