@@ -7,7 +7,7 @@
   "type": "module",
   "exports": {
     ".": "./src/plugin/index.mjs",
-    "./client": "./src/plugin/client.mjs",
+    "./client": "./src/plugin/client.cjs",
     "./qr-svg": "./src/plugin/qr-svg.mjs",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
