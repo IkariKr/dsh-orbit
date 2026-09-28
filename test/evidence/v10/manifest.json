@@ -2,12 +2,12 @@
   "manifestVersion": 1,
   "candidateSha": "b3bd7b140652973fafe7ef7159b501643be712e6",
   "runId": "v10-mounted-20260928",
-  "generatedAt": "2026-09-28T23:00:56.557Z",
+  "generatedAt": "2026-09-28T23:14:28.993Z",
   "artifacts": [
     {
       "file": "test/evidence/v10/mounted-runner-raw.json",
-      "sha256": "e1c2ffb5d588adfac15d0ae4ecf66745d622b9f604ecef9bfa5f6586020990e9",
-      "bytes": 4324
+      "sha256": "9fbe9de19eee3c63dd709def3a31bb3554c210d7b110c1c511c24dc0b7567722",
+      "bytes": 4466
     },
     {
       "file": "test/evidence/v10/deployment-changes.json",

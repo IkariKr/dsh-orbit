@@ -20,7 +20,7 @@
       "id": "M1",
       "result": "PASS",
       "executedBy": "operator physical phone scan",
-      "evidence": "operator minted code 655008 via the hub management API at 2026-09-28T22:49:37Z (mint expiry 22:54:37.778Z, 300s TTL); QR rendered from the minted URL and scanned by the operator's phone; operator attestation: landing page reached without edge credentials, auto-verification succeeded, confirmed state 'Device paired' shown; subsequently, with the operator's existing edge credential, the selector UI on the same origin appeared already logged in (operator session issued by pairing reused). Server-side corroboration: the verify endpoint issued an operator session cookie with the exact v0.9 attributes (mechanically pinned in test/v10-stage3-hardening.test.mjs) and the landing page is served with cache-control: no-store and referrer-policy: no-referrer (observed via live probe)."
+      "evidence": "operator minted code 65••••08 via the hub management API at 2026-09-28T22:49:37Z (mint expiry 22:54:37.778Z, 300s TTL); QR rendered from the minted URL and scanned by the operator's phone; operator attestation: landing page reached without edge credentials, auto-verification succeeded, confirmed state 'Device paired' shown; subsequently, with the operator's existing edge credential, the selector UI on the same origin appeared already logged in (operator session issued by pairing reused). Server-side corroboration: the verify endpoint issued an operator session cookie with the exact v0.9 attributes (mechanically pinned in test/v10-stage3-hardening.test.mjs) and the landing page is served with cache-control: no-store and referrer-policy: no-referrer (observed via live probe)."
     },
     {
       "field": "landingDeadCodeScan",
@@ -41,7 +41,7 @@
       "id": "M4",
       "result": "PASS",
       "executedBy": "mechanical HTTP execution over the public chain",
-      "evidence": "code 117364 minted via the management authority at 2026-09-28T13:26:43Z with the override base (minted url https://dsh.ikarikore.top/auth?token=117364, proving DSH_ORBIT_HUB_QR_PAIRING_BASE_URL is honored end to end); first redemption on the public apex: HTTP 200 {ok:true, principal:\"operator\"} with operator session cookie; immediate replay: HTTP 401 {\"error\":{\"code\":\"code-not-found\"}} — single-use destruction held."
+      "evidence": "code 11••••64 minted via the management authority at 2026-09-28T13:26:43Z with the override base (minted url https://dsh.ikarikore.top/auth?token=11••••64, proving DSH_ORBIT_HUB_QR_PAIRING_BASE_URL is honored end to end); first redemption on the public apex: HTTP 200 {ok:true, principal:\"operator\"} with operator session cookie; immediate replay: HTTP 401 {\"error\":{\"code\":\"code-not-found\"}} — single-use destruction held."
     }
   ],
   "gateRegressionChecks": [
@@ -52,5 +52,5 @@
     "node presence after hub redeploy: operator PC node reconnect confirmed (reverse session ready, routeReady=true)"
   ],
   "deploymentChanges": "see deployment-changes.json",
-  "sanitization": "no pairing codes, session tokens, cookies, private keys, or passwords are recorded in this evidence; pairing codes appearing in the operator's own terminal during the run were transient 300s single-use values and are intentionally omitted here"
+  "sanitization": "no session tokens, cookies, private keys, or passwords are recorded in this evidence. Pairing code values are masked (65••••08, 11••••64): both were transient 300s single-use values, already consumed or expired at record time, and are masked per the SOP sanitized-bindings requirement rather than omitted, to preserve the evidentiary chain"
 }
