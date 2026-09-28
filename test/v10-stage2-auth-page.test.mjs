@@ -13,9 +13,16 @@ const SCRIPT_BODY = /<script>([\s\S]*)<\/script>/.exec(PAGE_HTML)?.[1];
 assert.ok(SCRIPT_BODY, "landing page must contain its inline script");
 
 function loadPage({ search = "", fetchImpl = null } = {}) {
-  const calls = { fetch: [], scrubbed: [], navigated: [], rendered: [], clicks: [] };
+  const calls = { fetch: [], scrubbed: [], navigated: [], rendered: [], clicks: [], order: [] };
+  let currentHtml = "";
   const container = {
-    innerHTML: "",
+    get innerHTML() {
+      return currentHtml;
+    },
+    set innerHTML(value) {
+      currentHtml = value;
+      calls.rendered.push(value);
+    },
     addEventListener(type, handler) {
       if (type === "click") calls.clicks.push(handler);
     },
@@ -29,11 +36,16 @@ function loadPage({ search = "", fetchImpl = null } = {}) {
       },
     },
     history: {
+      // Mirrors the real side effect: scrubbing rewrites the URL, so a
+      // re-read of the address bar yields nothing afterwards.
       replaceState(...args) {
         calls.scrubbed.push(args);
+        calls.order.push("scrub");
+        if (args[2] === "/auth") windowStub.location.search = "";
       },
     },
     fetch(url, options) {
+      calls.order.push("fetch");
       calls.fetch.push({ url, options });
       return fetchImpl(url, options);
     },
@@ -43,9 +55,23 @@ function loadPage({ search = "", fetchImpl = null } = {}) {
   return {
     calls,
     container,
+    windowStub,
     controller: windowStub.__OrbitAuth ?? sandbox.globalThis.__OrbitAuth,
     flushTimers: (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms)),
   };
+}
+
+// Every rendered fragment must be one of the shipped fixed templates — no
+// server-controlled or code-derived content may enter the DOM.
+const TEMPLATE_STATES = ["verifying", "confirmed", "expired", "locked", "error", "missing"];
+function assertOnlyTemplates(rendered) {
+  for (const html of rendered) {
+    assert.match(
+      html,
+      /^<p class="state-line" data-state="(verifying|confirmed|expired|locked|error|missing)"/,
+      `rendered fragment is not a fixed template: ${html.slice(0, 80)}`,
+    );
+  }
 }
 
 const jsonResponse = (status, body = {}) =>
@@ -64,19 +90,25 @@ test("page asset invariants: zero external requests, no-referrer meta, fixed tem
 });
 
 test("happy path: scrub before verify, never render the code, confirm then navigate to /", async () => {
-  let verifyCalls = 0;
+  let releaseFetch;
+  const pending = new Promise((resolve) => {
+    releaseFetch = resolve;
+  });
   const page = loadPage({
     search: "?token=654321",
-    fetchImpl: () => {
-      verifyCalls += 1;
-      return jsonResponse(200, { ok: true, principal: "operator" });
-    },
+    fetchImpl: () => pending,
   });
+  // While the verify request is in flight, the in-flight state is rendered.
   await page.flushTimers();
+  assert.match(page.container.innerHTML, /data-state="verifying"/);
 
-  // Scrub happened, with the constant clean target, before anything else.
+  // Scrub happened FIRST — before the fetch left the page — with the
+  // constant clean target, and it actually cleared the address bar.
+  assert.equal(page.calls.order[0], "scrub");
+  assert.equal(page.calls.order.indexOf("scrub"), 0);
+  assert.ok(page.calls.order.indexOf("fetch") > 0);
   assert.deepEqual(page.calls.scrubbed, [[null, "", "/auth"]]);
-  assert.deepEqual(page.calls.scrubbed[0], [null, "", "/auth"]);
+  assert.equal(page.windowStub.location.search, "");
 
   // The verify POST went to the existing endpoint with the token from the URL.
   assert.equal(page.calls.fetch.length, 1);
@@ -85,9 +117,12 @@ test("happy path: scrub before verify, never render the code, confirm then navig
   assert.equal(page.calls.fetch[0].options.credentials, "same-origin");
   assert.equal(page.calls.fetch[0].options.body, JSON.stringify({ token: "654321" }));
 
+  releaseFetch(jsonResponse(200, { ok: true, principal: "operator" }));
+  await page.flushTimers();
   // Confirmed state rendered; the code value never appeared in the DOM.
   assert.match(page.container.innerHTML, /data-state="confirmed"/);
   assert.ok(!page.container.innerHTML.includes("654321"));
+  assertOnlyTemplates(page.calls.rendered);
 
   // First-party constant navigation target after the confirm delay.
   await page.flushTimers(1400);
@@ -133,11 +168,15 @@ test("retry keeps the in-memory token and re-verifies without a page reload", as
   assert.match(page.container.innerHTML, /data-state="error"/);
   assert.equal(page.calls.fetch.length, 1);
 
+  // The scrub cleared the address bar, so the retry verifiction can only be
+  // using the in-memory value — a re-read of the URL would yield nothing.
+  assert.equal(page.windowStub.location.search, "");
   page.calls.clicks.forEach((handler) => handler({ target: { id: "retry-btn" } }));
   await page.flushTimers();
   assert.equal(page.calls.fetch.length, 2);
   assert.equal(page.calls.fetch[1].options.body, JSON.stringify({ token: "333333" }));
   assert.match(page.container.innerHTML, /data-state="confirmed"/);
+  assertOnlyTemplates(page.calls.rendered);
 });
 
 test("missing or malformed codes render the missing state and never call verify", async () => {

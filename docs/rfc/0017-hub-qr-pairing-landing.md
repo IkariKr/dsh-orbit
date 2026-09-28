@@ -147,6 +147,9 @@ trust. v0.10 adds:
    address bar, history entries, and session restore never retain the code.
 3. States (all rendered from a fixed template; the code value is never
    interpolated into the DOM):
+   - `missing` — no code or a grammar-violating query: the page scrubs and
+     shows guidance without calling verify (this is the A1 no-query landing
+     case).
    - `verifying` — spinner text while the POST is in flight.
    - `confirmed` — verify returned 200; show success and a first-party link
      (and auto-redirect after a short delay) to `/` on the same origin.
