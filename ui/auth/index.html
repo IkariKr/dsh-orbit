@@ -6,9 +6,9 @@
   <meta name="referrer" content="no-referrer">
   <title>DSH Orbit Device Pairing</title>
   <style>
-    /* RFC-0017 Stage 1 stub: static structure only. The verification state
-       machine and address-bar scrub land in Stage 2. Inline styles only —
-       this page makes zero external requests. */
+    /* RFC-0017 Stage 2: the pairing landing page. Zero external requests —
+       inline styles and script only. The pairing code is never rendered into
+       the DOM and is scrubbed from the address bar before any verification. */
     :root { color-scheme: light dark; }
     * { box-sizing: border-box; }
     body {
@@ -41,15 +41,169 @@
       opacity: 0.65;
       margin-bottom: 10px;
     }
-    h1 { font-size: 19px; margin: 0 0 8px; }
-    p { font-size: 14px; line-height: 1.55; opacity: 0.8; margin: 0; }
+    h1 { font-size: 19px; margin: 0 0 12px; }
+    p { font-size: 14px; line-height: 1.55; opacity: 0.85; margin: 0 0 10px; }
+    a, button {
+      font-size: 14px;
+      color: #2456c8;
+      background: none;
+      border: 1px solid currentColor;
+      border-radius: 8px;
+      padding: 7px 18px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      vertical-align: -2px;
+      margin-right: 8px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: orbit-spin 0.8s linear infinite;
+      opacity: 0.7;
+    }
+    @keyframes orbit-spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <main class="card">
     <div class="brand">DSH Orbit</div>
     <h1>Device pairing</h1>
-    <p>Pairing verification lands here in a following stage. Ask your operator for a fresh code.</p>
+    <div id="auth-state" aria-live="polite"></div>
   </main>
+  <script>
+  (function () {
+    "use strict";
+    // RFC-0017 D4: the raw query must be exactly token= plus six digits — the
+    // same total grammar the server fence enforces. No URLSearchParams.
+    var TOKEN_QUERY_PATTERN = /^token=([0-9]{6})$/;
+    var VERIFY_ENDPOINT = "/hub/pairing/verify";
+    var SUCCESS_TARGET = "/";
+
+    // Fixed templates only — the pairing code value is never interpolated.
+    var TEMPLATES = {
+      verifying: '<p class="state-line" data-state="verifying"><span class="spinner"></span>Verifying pairing code\u2026</p>',
+      confirmed: '<p class="state-line" data-state="confirmed">Device paired. Opening your workspace\u2026</p><p><a href="/">Continue</a></p>',
+      expired: '<p class="state-line" data-state="expired">This code has expired or is not valid. Request a new code from your operator.</p>',
+      locked: '<p class="state-line" data-state="locked">Too many attempts. Try again later.</p>',
+      error: '<p class="state-line" data-state="error">Something went wrong while reaching the server.</p><button type="button" id="retry-btn">Retry</button>',
+      missing: '<p class="state-line" data-state="missing">No pairing code found. Scan the QR code shown by your operator.</p>'
+    };
+
+    function createController(deps) {
+      var fetchImpl = deps.fetchImpl;
+      var readRawQuery = deps.readRawQuery;
+      var scrubAddressBar = deps.scrubAddressBar;
+      var navigate = deps.navigate;
+      var render = deps.render;
+      var onRetryClick = deps.onRetryClick;
+      var schedule = deps.schedule || function (fn, ms) { setTimeout(fn, ms); };
+      var token = null;
+      var stateName = null;
+
+      function setState(name) {
+        stateName = name;
+        render(TEMPLATES[name]);
+      }
+
+      function extractToken() {
+        var raw = readRawQuery() || "";
+        var match = TOKEN_QUERY_PATTERN.exec(raw);
+        return match ? match[1] : null;
+      }
+
+      function verify() {
+        setState("verifying");
+        fetchImpl(VERIFY_ENDPOINT, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: token })
+        })
+          .then(function (res) {
+            if (res.status === 200) {
+              setState("confirmed");
+              schedule(function () { navigate(SUCCESS_TARGET); }, 1200);
+              return;
+            }
+            if (res.status === 429) {
+              // Fixed fallback copy: the verify handler emits no Retry-After.
+              setState("locked");
+              return;
+            }
+            if (res.status === 401) {
+              setState("expired");
+              return;
+            }
+            setState("error");
+          })
+          .catch(function () {
+            setState("error");
+          });
+      }
+
+      function start() {
+        token = extractToken();
+        // Scrub before anything else so the code never lingers in the
+        // address bar, history, or session restore.
+        scrubAddressBar();
+        if (!token) {
+          setState("missing");
+          return;
+        }
+        verify();
+        // Retry re-uses the in-memory token; a page reload intentionally
+        // starts over because the address bar no longer carries the code.
+        onRetryClick(function () {
+          if (token) verify();
+        });
+      }
+
+      return {
+        start: start,
+        verify: verify,
+        getStateName: function () { return stateName; },
+      };
+    }
+
+    if (typeof window !== "undefined" && window.document && window.document.getElementById) {
+      var container = window.document.getElementById("auth-state");
+      var controller = createController({
+        fetchImpl: function (url, options) { return window.fetch(url, options); },
+        readRawQuery: function () {
+          var search = window.location.search || "";
+          return search.charAt(0) === "?" ? search.slice(1) : search;
+        },
+        scrubAddressBar: function () {
+          try {
+            window.history.replaceState(null, "", "/auth");
+          } catch (error) {
+            /* address-bar scrub is best-effort */
+          }
+        },
+        navigate: function (target) {
+          window.location.replace(target);
+        },
+        render: function (html) {
+          container.innerHTML = html;
+        },
+        onRetryClick: function (handler) {
+          container.addEventListener("click", function (event) {
+            if (event.target && event.target.id === "retry-btn") handler();
+          });
+        },
+      });
+      controller.start();
+      // Exported for the Node harness; harmless in the browser.
+      window.__OrbitAuth = { createController: createController };
+    } else if (typeof globalThis !== "undefined") {
+      globalThis.__OrbitAuth = { createController: createController };
+    }
+  })();
+  </script>
 </body>
 </html>
