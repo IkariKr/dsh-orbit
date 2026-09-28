@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "authorizationId": "V11-CONSTRUCTION-20260929-A1",
+  "status": "AUTHORIZED_FOR_V011_CONSTRUCTION",
+  "issuedDate": "2026-09-29",
+  "acceptedV010Closure": "cc826b720124bd9249a334c6f1786e73bb44266b",
+  "acceptedV010ClosureTag": "v0.10.0-rc.1",
+  "governancePredecessor": "docs/review/2026-09-28-v10-stage4-final-review-73e655b.md",
+  "constructionLineage": {
+    "root": "the pushed commit containing this authorization record",
+    "mustDescendFromAcceptedV010Closure": true,
+    "mustDescendFromGovernancePredecessor": true,
+    "forbiddenBases": [
+      "historical unaccepted closure attempts",
+      "pre-final-review candidates",
+      "experimental worktrees"
+    ]
+  },
+  "objective": "v0.11 unified Devices and Nodes operator view per RFC-0018, delivering the roadmap 0.6 SHOULD line and the docs/ux/dsh-remote-mobile.md device-vs-node UX direction: browser-session visibility (an operator session list with lifecycle state and explicit revocation on the management surface), per-node session/connection indicators (active hub-routed flows and reverse presence surfaced in the selector read model), explicit target-scope display in the selector UI, and a mobile-friendly selector layout accepted on a real phone; no change to the selector-apex allowlist, the v0.10 edge adjudication, host-only cookie isolation, or route eligibility semantics",
+  "scopeFreeze": {
+    "must": [
+      "RFC-first design record (RFC-0018) before product construction",
+      "unified Devices and Nodes read model on the management surface: GET /hub/sessions (session-gated) lists operator sessions from the existing browser_sessions store with sessionId, sessionIdHint, operatorPrincipal, createdAt, expiresAt, idleUntil-derived last activity, and revokedAt; the response never includes csrf_token values of any session or any node-side credential material",
+      "explicit session revocation: POST /hub/sessions/revoke with the existing admission chain (admitBrowserRequest, checkOriginAndFetchSite, validateSessionOnly, requireCsrf), strict single-sessionId target validation rejecting wildcards/arrays/multi-targets as invalid-target-scope, a new audit event (session.revoke), and self-revocation behaving as logout; no new credential or session type is introduced",
+      "per-node session/connection indicator in the selector read model: buildSelectorNodeRow gains activeFlows from the existing MultiNodeFlowTracker (read-model enrichment only); the selector-apex allowlist is NOT extended because GET /hub/selector/nodes is already an allowed tuple; management /hub/nodes and /hub/overview shapes are unchanged (per-node activeFlows already present there)",
+      "indicator honesty: hub-side indicators represent hub-routed flows (HTTP/WebSocket in flight) and reverse-channel presence, never node-local DSH login state; the hub does not inspect DSH cookies or tokens (RFC-0011 D4) and the UI wording must not claim DSH session visibility",
+      "explicit target scope in the selector UI: every node card renders the deterministic target route authority (or the eligible openUrl target) before navigation, using canonical node IDs (displayName aliasing remains v0.7 fleet-inventory ownership); failure surfaces remain target-preserving per RFC-0011 D5 (renderUnavailableHtml behavior regression-asserted)",
+      "mobile-friendly selector: responsive CSS with defined breakpoints for ui/selector (narrow-viewport layout, touch-safe controls); real-phone acceptance is a mounted matrix requirement; no separate mobile backend and no third-party UI code",
+      "UI path discipline: evolve the existing ui/ (management) and ui/selector/ surfaces; no new asset root, no duplicated per-branch asset copies, no new authority, no new public page",
+      "the selector-apex strict (method, path) allowlist stays byte-identical (the four session/selector tuples plus (GET, /auth) and (POST, /hub/pairing/verify)); the v0.10 Gate C edge adjudication is untouched: no widening of the edge exemption, no new publicly reachable surface",
+      "host-only cookie isolation unchanged: session cookie attributes remain exactly HttpOnly; Secure; SameSite=Strict; Path=/hub with a 12h Max-Age; no cross-node cookie or session synchronization",
+      "mechanical test coverage for the session-list shape and secret hygiene, revocation semantics and isolation, apex allowlist regression, selector read-model sanitization regression, target-scope DOM indications, and responsive-breakpoint presence",
+      "candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.11 release candidate",
+      "operator SOP and reference documentation"
+    ],
+    "should": [
+      "Devices and Nodes presentation groups operator sessions and nodes in one coherent management section with the visual language of the existing RFC-0011 selector UI",
+      "periodic polling refresh with a manual refresh fallback on the devices/selector views (no new real-time event channel; the existing pairing SSE is untouched)",
+      "truncated node-ID and target formatting per RFC-0013 D2 (target: <truncated authority>), with full IDs available through the existing detail surfaces",
+      "management surface receives a minimal responsive pass so the devices view is inspectable from a phone with edge credentials (desktop-first acceptable)"
+    ],
+    "outOfScope": [
+      "a global active node or any mutable Hub-wide selection state (RFC-0011 non-goal)",
+      "cross-node session migration or cross-node cookie/session synchronization",
+      "implicit broadcast execution or any multi-node action surface (single-node target validation remains the only accepted shape)",
+      "automatic retargeting, silent failover, or cross-node fallback after node failure",
+      "widening the v0.10 edge exemption, changing the selector-apex allowlist or exposure, or moving the selector read surface outside the edge gate (the Gate C adjudication stands; such a widening remains a future, separately authorized security-posture decision)",
+      "capturing or storing new device-identifying data (User-Agent, IP) in browser_sessions, or adding a bootstrap-authority column (client IP is never a credential per RFC-0007)",
+      "any visibility into node-local DSH session state (DSH cookie names, values, launch tokens, and private RPC inventory remain opaque per RFC-0011)",
+      "a new real-time push/event channel beyond the existing pairing SSE",
+      "a new route authority system beyond RFC-0010",
+      "a new selector system beyond RFC-0011",
+      "displayName or alias management for nodes (v0.7 fleet inventory ownership)",
+      "fleet workflows and scheduled multi-node execution (roadmap 0.7 / 0.8)",
+      "unrelated UI refactor",
+      "unrelated runtime refactor",
+      "tag or release creation/mutation without separate authorization",
+      "production promotion without separate authorization",
+      "DNS cutover without separate authorization"
+    ]
+  },
+  "allowedPathRules": [
+    "docs/**",
+    "src/**",
+    "bin/**",
+    "ui/**",
+    "test/**",
+    "scripts/**",
+    "docker-registry/**",
+    "CHANGELOG.md",
+    "README.md",
+    "package.json: dependency changes require recorded justification",
+    "package-lock.json: only mechanically resulting changes"
+  ],
+  "forbiddenActions": [
+    "reopening or rewriting the accepted v0.10 closure lineage or its attestation",
+    "product construction before RFC-0018 and Stage 0 Gate A approval is recorded",
+    "extending the selector-apex allowlist, the public/unauthenticated surface, or the v0.10 edge exemption",
+    "introducing broadcast, wildcard, or multi-node target shapes into any endpoint",
+    "changing the DSH baseline outside the DSH baseline promotion policy",
+    "tag or release creation/mutation without separate authorization",
+    "production promotion without separate authorization",
+    "DNS cutover without separate authorization"
+  ],
+  "evidenceRequirements": {
+    "candidateMustBeFrozenBeforeEvidence": true,
+    "candidateFreezeRule": "exactly one frozen candidate per evidence round; once frozen, later phases produce only qualification/evidence; a real problem means a new candidate and fresh candidate-bound evidence",
+    "devicesNodesMatrixRequired": "a dedicated acceptance matrix defined in RFC-0018 (M22: 16 automated + 6 mounted fields) must be mechanically enforced via scripts/v11-devices-nodes-acceptance-matrix.mjs and a governance-contract test before the v0.11 mounted evidence run; the 6 mounted fields include real-phone acceptance (narrow-viewport selector usability and explicit session navigation)",
+    "mountedEvidenceSanitization": "mounted evidence must mask session IDs, operator principals, and any live values it records, and its sanitization statement must accurately describe what was masked (v0.10 Final Review precedent)",
+    "closureRule": "one evidence-only closure, direct child of the frozen candidate, attestation must not reference its own closure SHA",
+    "finalReviewRequired": true
+  },
+  "separationOfPowers": {
+    "tagReleaseAuthorizationSeparate": true,
+    "productionPromotionAuthorizationSeparate": true,
+    "dnsCutoverAuthorizationSeparate": true,
+    "v011NotGatedOnProductionPromotionOrDnsCutover": true
+  }
+}
