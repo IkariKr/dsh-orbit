@@ -178,8 +178,10 @@ test("Caddyfile.example carries the adjudicated edge-exemption shape", async () 
   // only — node-route and other wildcard hosts keep the gate.
   const landingMatcher = /@qrLandingGet \{[\s\S]*?\}/.exec(apexBlock)[0];
   const verifyMatcher = /@qrVerifyPost \{[\s\S]*?\}/.exec(apexBlock)[0];
-  assert.match(landingMatcher, /host dsh\.example\.local/);
-  assert.match(verifyMatcher, /host dsh\.example\.local/);
+  const matcherHosts = (matcher) =>
+    [...matcher.matchAll(/^\s*host\s+([^\n]+)$/gm)].flatMap((m) => m[1].trim().split(/\s+/));
+  assert.deepEqual(matcherHosts(landingMatcher), ["dsh.example.local"], "landing matcher host set must be exactly the apex");
+  assert.deepEqual(matcherHosts(verifyMatcher), ["dsh.example.local"], "verify matcher host set must be exactly the apex");
 
   // The gate lives inside a matcherless fallback handle WITHIN THE APEX
   // BLOCK — a site-level basic_auth would 401 the exempt paths regardless
@@ -188,9 +190,29 @@ test("Caddyfile.example carries the adjudicated edge-exemption shape", async () 
   // mentions of the word.
   const directiveCount = (apexBlock.match(/^[ \t]*basic_auth \{/gm) ?? []).length;
   assert.equal(directiveCount, 1, "apex block must carry exactly one basic_auth directive (inside the fallback handle)");
-  const fallbackIndex = apexBlock.indexOf("handle {");
-  const basicAuthIndex = apexBlock.search(/^[ \t]*basic_auth \{/m);
-  assert.ok(fallbackIndex > 0 && basicAuthIndex > fallbackIndex, "basic_auth must sit inside the matcherless fallback handle");
+  // Block-scoped parse: the single basic_auth must sit INSIDE the fallback
+  // handle block — a site-level basic_auth appended after the fallback would
+  // re-break the exemption while satisfying a positional check.
+  const fallbackHandleStart = apexBlock.indexOf("handle {");
+  assert.ok(fallbackHandleStart > 0, "matcherless fallback handle is required");
+  const innerFrom = apexBlock.indexOf("{", fallbackHandleStart);
+  let depth = 0;
+  let fallbackEnd = -1;
+  for (let i = innerFrom; i < apexBlock.length; i += 1) {
+    if (apexBlock[i] === "{") depth += 1;
+    if (apexBlock[i] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        fallbackEnd = i;
+        break;
+      }
+    }
+  }
+  assert.ok(fallbackEnd > fallbackHandleStart, "fallback handle block must close");
+  const fallbackBlock = apexBlock.slice(fallbackHandleStart, fallbackEnd);
+  assert.match(fallbackBlock, /^[ \t]*basic_auth \{/m, "the fallback handle must carry the basic_auth gate");
+  const beforeFallback = apexBlock.slice(0, fallbackHandleStart);
+  assert.doesNotMatch(beforeFallback, /^[ \t]*basic_auth \{/m, "no site-level basic_auth may precede the fallback handle");
 
   // The do-not-widen rationale is inline where an operator will read it.
   assert.match(apexBlock, /Do not widen this list/);
