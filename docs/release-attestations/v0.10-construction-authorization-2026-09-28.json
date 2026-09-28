@@ -36,7 +36,7 @@
     ],
     "should": [
       "landing page visual language consistent with the RFC-0011 selector UI",
-      "lockout and attempt messaging surfaced from the existing pairing engine state (attempts remaining, retry-after)",
+      "lockout and attempt messaging surfaced from the existing pairing engine state (attempts remaining, retry guidance (fixed copy))",
       "single-file landing page asset (inline CSS/JS) to keep the new public asset surface minimal"
     ],
     "outOfScope": [

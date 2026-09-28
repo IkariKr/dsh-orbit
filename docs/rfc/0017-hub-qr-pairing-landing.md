@@ -74,7 +74,7 @@ behavior after this RFC:
 
 | Host class | `GET /auth` behavior |
 | --- | --- |
-| `selector-apex` (e.g. `dsh.ikarikore.top`) | Served: the landing HTML. The selector strict allowlist grows by exactly two tuples: `(GET, /auth)` and `(POST, /hub/pairing/verify)` (each plus the existing trailing-slash variant). `POST /hub/pairing/verify` must route into the unchanged `handlePairingVerify` — live probing at Gate A confirmed it currently returns the selector-surface 404 on the apex. `POST /hub/pairing/generate-code` remains outside the allowlist (404). |
+| `selector-apex` (e.g. `dsh.ikarikore.top`) | Served: the landing HTML. The selector strict allowlist grows by exactly two tuples: `(GET, /auth)` and `(POST, /hub/pairing/verify)` (each plus the existing trailing-slash variant). `POST /hub/pairing/verify` must receive a **dedicated dispatch** to the unchanged `handlePairingVerify` — it MUST NOT be routed through the existing selector dispatch into `handleBrowserRequest`/`admitBrowserRequest`, whose product for an unauthenticated caller is `401 {"code":"gateway-denied"}` (live probing at Gate A confirmed both the current selector-surface 404 and this dispatch trap). `POST /hub/pairing/generate-code` remains outside the allowlist (404). |
 | `unrelated` / management (e.g. `192.0.2.10:28443`, tailscale hostnames) | Served: the same landing HTML (added to the management UI asset map). This is where minting happens today. |
 | `node-route` (`n-<32hex>.<routeDomain>`) | Not intercepted — proxied to the node DSH exactly as every other path (queries already pass through on route branches). Regression-asserted. |
 | machine routes (`/api/v1/*` on hub authority) | Unchanged; `/auth` is not a machine path. |
@@ -203,14 +203,14 @@ Automated qualification (candidate-bound, mechanically validated):
 | A3 | Fence narrowness — extra parameters | `GET /auth?token=123456&x=1` / `GET /auth?token=123456&` / `GET /auth?&token=123456` / `GET /auth?token=123456&&` ⇒ all 400 `query-not-allowed` |
 | A4 | Fence narrowness — shape and encoding | `GET /auth?token=12345` / `?token=1234567` / `?token=abcdef` / `?code=123456` / `?token=<percent-encoded digits>` ⇒ all 400 (raw-regex match only; no decoding) |
 | A5 | Fence unchanged elsewhere | `GET /styles.css?v=1` and `GET /?token=123456` ⇒ 400 (v0.9 behavior) |
-| A6 | Method discipline | `POST /auth` ⇒ 404; `POST /auth?token=123456` ⇒ 400 `query-not-allowed` (fence fires before method handling); `HEAD /auth?token=123456` and `OPTIONS /auth?token=123456` ⇒ 400 (exception is GET-only) |
+| A6 | Method discipline | `POST /auth` ⇒ 404; `POST /auth?token=123456` ⇒ 400 `query-not-allowed` (fence fires before method handling); `HEAD /auth?token=123456` and `OPTIONS /auth?token=123456` ⇒ 400 (exception is GET-only); `GET /auth/` ⇒ 404 (distinct rejected path) |
 | A7 | Apex serving | `GET /auth?token=123456` on `selector-apex` host ⇒ 200 with `selector-authority` meta; node list still gated by session |
 | A8 | Node-route passthrough | `GET /auth?token=123456` on `n-<hex>` host ⇒ proxied to node DSH (no registry interception), behavior identical with and without query |
 | A9 | Mint override set | env valid ⇒ minted `url` starts with override origin, `/auth?token=<6 digits>` shape, `code` 6 digits |
 | A10 | Mint override unset | minted `url` starts with `https://<request host>` (v0.9 byte-identical) |
 | A11 | Mint override invalid | non-https / with-query / userinfo ⇒ boot exits 1 with a clean collected-config error (no uncaught stack) |
 | A12 | Zero leakage | audit store + all captured responses/logs for a full verify round contain no `token=` value; session cookie attributes unchanged (regression) |
-| A13 | Apex verify routing | on the `selector-apex` host, `POST /hub/pairing/verify` and `POST /hub/pairing/verify/` reach the `handlePairingVerify` contract (e.g. 401 for an unknown code — not the selector-surface 404), while `POST /hub/pairing/generate-code` on the apex still ⇒ 404 selector-surface |
+| A13 | Apex verify routing | on the `selector-apex` host, `POST /hub/pairing/verify` and `POST /hub/pairing/verify/` reach the `handlePairingVerify` contract: an unknown code ⇒ **401 with `error.code === "code-not-found"`** — explicitly not the selector-surface 404 and not `401 {"code":"gateway-denied"}` (the existing selector dispatch's product); `POST /hub/pairing/generate-code` on the apex still ⇒ 404 selector-surface |
 
 Mounted qualification (live, two-node deployment):
 `scope: "mounted"` — 4 fields.
