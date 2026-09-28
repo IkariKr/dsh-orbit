@@ -125,6 +125,45 @@ function sendJson(response, status, body, extraHeaders = {}) {
   response.end(payload);
 }
 
+// RFC-0017: hub-hosted QR pairing landing page. One shared asset root backs
+// the /auth entry on both the selector-apex and management authorities. The
+// raw-query grammar below is the ENTIRE query-fence exception: the raw
+// request-target query must match byte-for-byte (no URL decoding, no
+// parameter parsing, no trailing separators) or the existing
+// query-not-allowed rejection applies unchanged.
+const AUTH_UI_ROOT = new URL("../../ui/auth/", import.meta.url);
+const AUTH_LANDING_QUERY_PATTERN = /^token=[0-9]{6}$/;
+
+function isAuthLandingQuery(method, rawTarget) {
+  if (method !== "GET" || typeof rawTarget !== "string") return false;
+  const queryIndex = rawTarget.indexOf("?");
+  if (queryIndex === -1) return false;
+  if (rawTarget.slice(0, queryIndex) !== "/auth") return false;
+  return AUTH_LANDING_QUERY_PATTERN.test(rawTarget.slice(queryIndex + 1));
+}
+
+function serveAuthLanding(response, { selectorAuthority = null } = {}) {
+  readFile(new URL("index.html", AUTH_UI_ROOT))
+    .then((content) => {
+      let body = content;
+      if (selectorAuthority) {
+        body = Buffer.from(
+          content
+            .toString("utf8")
+            .replace("</head>", `<meta name="selector-authority" content="${selectorAuthority}"></head>`),
+        );
+      }
+      response.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+        "content-length": body.length,
+      });
+      response.end(body);
+    })
+    .catch(() => sendJson(response, 404, { error: { code: "not-found", message: "auth landing asset missing" } }));
+}
+
 function sendError(response, error) {
   if (error instanceof DeniedError) {
     sendJson(response, error.status, { error: { code: error.code, message: error.message } });
@@ -203,6 +242,10 @@ export function createHubServer({ registry, options = {} }) {
     gatewayAssertionSecret = null,
     operatorPrincipal = null,
     lanBoundaryOnly = false,
+    // RFC-0017: operator-pinned public origin for minted QR pairing URLs.
+    // Validated at boot by validateHubConfig; guarded again here so a server
+    // constructed directly cannot mint plaintext or query-bearing QR URLs.
+    qrPairingBaseUrl = options.qrPairingBaseUrl ?? null,
     // RFC-0007 origin check compares scheme as well as host. The Hub
     // sits behind the deployment gateway; it cannot infer the external
     // scheme from the socket (plain http from the gateway) and must not
@@ -212,6 +255,17 @@ export function createHubServer({ registry, options = {} }) {
   } = options;
   if (trustedExternalScheme !== "http" && trustedExternalScheme !== "https") {
     throw new Error(`trustedExternalScheme must be http or https (got ${JSON.stringify(trustedExternalScheme)})`);
+  }
+  if (qrPairingBaseUrl !== null) {
+    let parsedQrBase = null;
+    try {
+      parsedQrBase = new URL(qrPairingBaseUrl);
+    } catch {
+      parsedQrBase = null;
+    }
+    if (!parsedQrBase || parsedQrBase.protocol !== "https:" || parsedQrBase.username || parsedQrBase.password || parsedQrBase.search || parsedQrBase.hash) {
+      throw new Error(`qrPairingBaseUrl must be an https URL without userinfo, query, or fragment (got ${JSON.stringify(qrPairingBaseUrl)})`);
+    }
   }
   const limiter = new SlidingWindowLimiter();
 
@@ -391,10 +445,17 @@ export function createHubServer({ registry, options = {} }) {
       } catch {
         return sendJson(response, 400, { error: { code: "bad-request", message: "malformed request URL" } });
       }
-      if (url.searchParams.size > 0) {
+      if (url.searchParams.size > 0 && !isAuthLandingQuery(request.method, request.url)) {
         return sendJson(response, 400, { error: { code: "query-not-allowed", message: "query strings are not part of the registry protocol" } });
       }
       const path = url.pathname;
+
+      // RFC-0017: the QR pairing landing page — one shared asset, served here
+      // with the selector-authority meta so the page can state its authority.
+      if (request.method === "GET" && path === "/auth") {
+        serveAuthLanding(response, { selectorAuthority: hostClass.authority });
+        return;
+      }
 
       // Selector-owned static assets
       if (request.method === "GET" && SELECTOR_UI_ASSETS.has(path)) {
@@ -410,6 +471,16 @@ export function createHubServer({ registry, options = {} }) {
             response.end(body);
           })
           .catch(() => sendJson(response, 404, { error: { code: "not-found", message: "selector asset missing" } }));
+        return;
+      }
+
+      // RFC-0017 A13: the pairing-verify handler is dispatched DIRECTLY on the
+      // apex — never through handleBrowserRequest/admitBrowserRequest, whose
+      // product for an unauthenticated caller is 401 gateway-denied. This is
+      // the only mutation surface admitted on selector authority, and it is
+      // the same public, engine-defended handler the management branch serves.
+      if (request.method === "POST" && (path === "/hub/pairing/verify" || path === "/hub/pairing/verify/")) {
+        handlePairingVerify(request, response).catch((error) => sendError(response, error));
         return;
       }
 
@@ -453,16 +524,24 @@ export function createHubServer({ registry, options = {} }) {
     }
 
     // Query strings are excluded from the v0.3 Hub/management protocol by construction.
+    // Sole exception (RFC-0017): GET /auth whose raw query matches ^token=[0-9]{6}$.
     let url;
     try {
       url = new URL(request.url ?? "/", "http://registry.local");
     } catch {
       return sendJson(response, 400, { error: { code: "bad-request", message: "malformed request URL" } });
     }
-    if (url.searchParams.size > 0) {
+    if (url.searchParams.size > 0 && !isAuthLandingQuery(request.method, request.url)) {
       return sendJson(response, 400, { error: { code: "query-not-allowed", message: "query strings are not part of the registry protocol" } });
     }
     const path = url.pathname;
+
+    // RFC-0017: the QR pairing landing page on the management authority
+    // (the surface that mints pairing codes).
+    if (request.method === "GET" && path === "/auth") {
+      serveAuthLanding(response);
+      return;
+    }
 
     if (request.method === "GET" && UI_ASSETS.has(path)) {
       const [fileName, contentType] = UI_ASSETS.get(path);
@@ -888,7 +967,7 @@ export function createHubServer({ registry, options = {} }) {
       if (path === "/hub/pairing/status" || path === "/hub/pairing/status/") {
         return sendJson(response, 200, {
           activeCodes: pairingEngine.getActiveCodeCount(),
-          hubBaseUrl: `${trustedExternalScheme}://${request.headers.host}`,
+          hubBaseUrl: qrPairingBaseUrl ?? `${trustedExternalScheme}://${request.headers.host}`,
           activeSessions: typeof registry.countActiveSessions === "function" ? registry.countActiveSessions() : 0,
         });
       }
@@ -1170,7 +1249,10 @@ export function createHubServer({ registry, options = {} }) {
           },
         });
       }
-      const hubBaseUrl = `${trustedExternalScheme}://${request.headers.host}`;
+      // RFC-0017 D3: the operator-pinned QR origin wins when configured;
+      // otherwise the mint base stays the request-Host-derived origin (v0.9
+      // behavior, byte-identical).
+      const hubBaseUrl = qrPairingBaseUrl ?? `${trustedExternalScheme}://${request.headers.host}`;
       const codeRecord = pairingEngine.generateCode({
         operatorPrincipal: session.operatorPrincipal,
         hubBaseUrl,

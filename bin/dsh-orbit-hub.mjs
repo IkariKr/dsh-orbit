@@ -44,6 +44,9 @@ const routeDomain = process.env.DSH_ORBIT_HUB_ROUTE_DOMAIN ?? "localhost";
 const probeCadenceSeconds = Number(process.env.DSH_ORBIT_HUB_ROUTE_PROBE_CADENCE_SECONDS ?? "60");
 const hubRouteOverlapDays = Number(process.env.DSH_ORBIT_HUB_ROUTE_ROTATION_OVERLAP_DAYS ?? "14");
 const pairingHubBaseUrl = process.env.DSH_ORBIT_HUB_PAIRING_BASE_URL ?? null;
+// RFC-0017: QR pairing mint base (operator-pinned public origin). Distinct
+// from the machine-pairing base URL above and intentionally stricter.
+const qrPairingBaseUrl = process.env.DSH_ORBIT_HUB_QR_PAIRING_BASE_URL ?? null;
 
 let caCertificates = null;
 if (process.env.DSH_ORBIT_HUB_CA_CERT) {
@@ -97,7 +100,7 @@ const drillContactNow = acceleratedAging
     }
   : null;
 
-const configErrors = validateHubConfig({ listen, trustedExternalScheme });
+const configErrors = validateHubConfig({ listen, trustedExternalScheme, qrPairingBaseUrl });
 if (configErrors.length > 0) {
   for (const error of configErrors) {
     console.error(`dsh-orbit-hub: ${error}`);
@@ -132,6 +135,7 @@ const registry = new Registry({
   ...(drillContactNow ? { registryContactNow: drillContactNow } : {}),
 });
 const options = { lanBoundaryOnly, trustedExternalScheme };
+if (qrPairingBaseUrl !== null) options.qrPairingBaseUrl = qrPairingBaseUrl;
 if (gatewaySecret !== null) options.gatewayAssertionSecret = gatewaySecret;
 if (singlePrincipal !== null) {
   options.operatorPrincipal = { mode: "single", principal: singlePrincipal };

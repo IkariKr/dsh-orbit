@@ -42,7 +42,7 @@ export function validateWebSocketConfig({ maxWsGlobal, maxWsPerNode, wsHandshake
 
 // Returns a list of human-readable configuration errors (empty when the
 // configuration is acceptable for startup).
-export function validateHubConfig({ listen, trustedExternalScheme, maxWsGlobal, maxWsPerNode, wsHandshakeTimeoutMs }) {
+export function validateHubConfig({ listen, trustedExternalScheme, qrPairingBaseUrl, maxWsGlobal, maxWsPerNode, wsHandshakeTimeoutMs }) {
   const errors = [];
   if (typeof listen !== "string" || listen === "") {
     errors.push("DSH_ORBIT_HUB_LISTEN must be a hostname or address");
@@ -53,6 +53,20 @@ export function validateHubConfig({ listen, trustedExternalScheme, maxWsGlobal, 
   }
   if (trustedExternalScheme !== "http" && trustedExternalScheme !== "https") {
     errors.push(`DSH_ORBIT_HUB_TRUSTED_SCHEME must be http or https (got ${JSON.stringify(trustedExternalScheme)})`);
+  }
+  // RFC-0017 D3: the QR pairing mint base is printed into a scannable URL,
+  // so it is held to a stricter shape than the machine-pairing base URL
+  // (which may be loopback http for trusted LAN node bootstrap).
+  if (qrPairingBaseUrl !== undefined && qrPairingBaseUrl !== null && qrPairingBaseUrl !== "") {
+    let parsedQrBase = null;
+    try {
+      parsedQrBase = new URL(qrPairingBaseUrl);
+    } catch {
+      parsedQrBase = null;
+    }
+    if (!parsedQrBase || parsedQrBase.protocol !== "https:" || parsedQrBase.username || parsedQrBase.password || parsedQrBase.search || parsedQrBase.hash) {
+      errors.push("DSH_ORBIT_HUB_QR_PAIRING_BASE_URL must be an https URL without userinfo, query, or fragment");
+    }
   }
   errors.push(...validateWebSocketConfig({ maxWsGlobal, maxWsPerNode, wsHandshakeTimeoutMs }));
   return errors;

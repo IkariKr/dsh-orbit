@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>DSH Orbit Device Pairing</title>
+  <style>
+    /* RFC-0017 Stage 1 stub: static structure only. The verification state
+       machine and address-bar scrub land in Stage 2. Inline styles only —
+       this page makes zero external requests. */
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: #f5f6f8;
+      color: #1c2430;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #12161d; color: #e8ecf2; }
+      .card { background: #1a2029 !important; border-color: #2a323d !important; }
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #e2e6ec;
+      border-radius: 12px;
+      padding: 32px 28px;
+      max-width: 380px;
+      width: calc(100vw - 40px);
+      text-align: center;
+    }
+    .brand {
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.65;
+      margin-bottom: 10px;
+    }
+    h1 { font-size: 19px; margin: 0 0 8px; }
+    p { font-size: 14px; line-height: 1.55; opacity: 0.8; margin: 0; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand">DSH Orbit</div>
+    <h1>Device pairing</h1>
+    <p>Pairing verification lands here in a following stage. Ask your operator for a fresh code.</p>
+  </main>
+</body>
+</html>
