@@ -46,7 +46,7 @@ const hubRouteOverlapDays = Number(process.env.DSH_ORBIT_HUB_ROUTE_ROTATION_OVER
 const pairingHubBaseUrl = process.env.DSH_ORBIT_HUB_PAIRING_BASE_URL ?? null;
 // RFC-0017: QR pairing mint base (operator-pinned public origin). Distinct
 // from the machine-pairing base URL above and intentionally stricter.
-const qrPairingBaseUrl = process.env.DSH_ORBIT_HUB_QR_PAIRING_BASE_URL ?? null;
+const qrPairingBaseUrl = process.env.DSH_ORBIT_HUB_QR_PAIRING_BASE_URL || null;
 
 let caCertificates = null;
 if (process.env.DSH_ORBIT_HUB_CA_CERT) {

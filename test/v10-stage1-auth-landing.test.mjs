@@ -196,6 +196,15 @@ test("A7/A13: on the selector apex the landing is served and verify is dispatche
       assert.equal(parsed.error.code, "code-not-found", `expected code-not-found for ${path}`);
     }
 
+    // A7 second clause: the node list stays session/gateway-gated on the apex.
+    const nodesGated = await rawRequest({
+      port,
+      path: "/hub/selector/nodes",
+      host: APEX_HOST,
+    });
+    assert.equal(nodesGated.status, 401);
+    assert.equal(JSON.parse(nodesGated.body).error.code, "gateway-denied");
+
     // Minting stays management-only: generate-code on the apex is still 404.
     const mint = await rawRequest({
       port,
@@ -331,19 +340,35 @@ test("A10: without the override the mint base is the request-Host-derived origin
 });
 
 test("A11: invalid mint override fails closed — collected config error and constructor throw", () => {
-  const invalid = ["http://pair.example.org", "https://user:pass@pair.example.org", "https://pair.example.org/?a=1", "https://pair.example.org/#frag", "not-a-url"];
+  const invalid = [
+    "http://pair.example.org",
+    "https://user:pass@pair.example.org",
+    "https://pair.example.org/?a=1",
+    "https://pair.example.org/#frag",
+    "https://pair.example.org/hub",
+    "not-a-url",
+  ];
   for (const value of invalid) {
     const errors = validateHubConfig({ listen: "127.0.0.1", trustedExternalScheme: "https", qrPairingBaseUrl: value });
     assert.equal(errors.length, 1, `expected exactly one config error for ${value}`);
     assert.match(errors[0], /DSH_ORBIT_HUB_QR_PAIRING_BASE_URL/);
   }
+  // Empty string means unset (repo-wide env convention) — clean config, no error.
+  assert.deepEqual(
+    validateHubConfig({ listen: "127.0.0.1", trustedExternalScheme: "https", qrPairingBaseUrl: "" }),
+    [],
+  );
   for (const value of ["https://pair.example.org", "https://pair.example.org:8443"]) {
     const errors = validateHubConfig({ listen: "127.0.0.1", trustedExternalScheme: "https", qrPairingBaseUrl: value });
     assert.deepEqual(errors, [], `expected no config error for ${value}`);
   }
   assert.throws(
     () => createManagementHub({ qrPairingBaseUrl: "http://pair.example.org" }),
-    /qrPairingBaseUrl must be an https URL/,
+    /qrPairingBaseUrl must be an origin-only https URL/,
+  );
+  assert.throws(
+    () => createManagementHub({ qrPairingBaseUrl: "https://pair.example.org/hub" }),
+    /qrPairingBaseUrl must be an origin-only https URL/,
   );
 });
 

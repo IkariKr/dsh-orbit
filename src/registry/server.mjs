@@ -263,8 +263,8 @@ export function createHubServer({ registry, options = {} }) {
     } catch {
       parsedQrBase = null;
     }
-    if (!parsedQrBase || parsedQrBase.protocol !== "https:" || parsedQrBase.username || parsedQrBase.password || parsedQrBase.search || parsedQrBase.hash) {
-      throw new Error(`qrPairingBaseUrl must be an https URL without userinfo, query, or fragment (got ${JSON.stringify(qrPairingBaseUrl)})`);
+    if (!parsedQrBase || parsedQrBase.protocol !== "https:" || parsedQrBase.username || parsedQrBase.password || parsedQrBase.search || parsedQrBase.hash || (parsedQrBase.pathname !== "/" && parsedQrBase.pathname !== "")) {
+      throw new Error(`qrPairingBaseUrl must be an origin-only https URL (got ${JSON.stringify(qrPairingBaseUrl)})`);
     }
   }
   const limiter = new SlidingWindowLimiter();
@@ -477,8 +477,9 @@ export function createHubServer({ registry, options = {} }) {
       // RFC-0017 A13: the pairing-verify handler is dispatched DIRECTLY on the
       // apex — never through handleBrowserRequest/admitBrowserRequest, whose
       // product for an unauthenticated caller is 401 gateway-denied. This is
-      // the only mutation surface admitted on selector authority, and it is
-      // the same public, engine-defended handler the management branch serves.
+      // the only UNAUTHENTICATED mutation surface admitted on selector
+      // authority (the session mutations stay gateway-gated), and it is the
+      // same public, engine-defended handler the management branch serves.
       if (request.method === "POST" && (path === "/hub/pairing/verify" || path === "/hub/pairing/verify/")) {
         handlePairingVerify(request, response).catch((error) => sendError(response, error));
         return;

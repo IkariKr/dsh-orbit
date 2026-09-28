@@ -10,6 +10,8 @@ import {
   assertCandidateSha,
   assertM17MatrixShape,
   emptyM17Matrix,
+  generateCandidateBoundAutomatedReport,
+  generateM17AutomatedQualificationMatrix,
   isCandidateSha,
   validateCandidateBoundReport,
 } from "../scripts/v10-landing-acceptance-matrix.mjs";
@@ -96,6 +98,23 @@ test("RFC-0017 M17 matrix assertions and report validation work correctly", () =
     ),
   );
   assert.deepEqual(M17_ALLOWED_STATUSES, ["PASS", "FAIL", "NOT_EXECUTED", "BLOCKED"]);
+});
+
+test("RFC-0017 M17 automated qualification report generation mirrors the v0.9 convention", () => {
+  const candidateSha = "d".repeat(40);
+  const matrix = generateM17AutomatedQualificationMatrix();
+  assertM17MatrixShape(matrix, { scope: "automated" });
+  assert.equal(Object.values(matrix).every((v) => v === "PASS" || v === "NOT_EXECUTED"), true);
+
+  const report = generateCandidateBoundAutomatedReport({ candidateSha, runId: "v10-qual-test" });
+  assert.equal(report.candidateSha, candidateSha);
+  assert.equal(report.runId, "v10-qual-test");
+  assert.equal(report.scope, "automated");
+  assert.equal(report.summary.total, 17);
+  assert.equal(report.summary.automatedPass, 13);
+  assert.equal(report.summary.mountedNotExecuted, 4);
+  assert.equal(report.summary.result, "QUALIFIED_AUTOMATED");
+  assert.equal(validateCandidateBoundReport(report, { candidateSha, scope: "automated" }), true);
 });
 
 test("v0.10 governance records are present and internally consistent", async () => {

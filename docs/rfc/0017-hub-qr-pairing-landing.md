@@ -74,7 +74,7 @@ behavior after this RFC:
 
 | Host class | `GET /auth` behavior |
 | --- | --- |
-| `selector-apex` (e.g. `dsh.ikarikore.top`) | Served: the landing HTML. The selector strict allowlist grows by exactly two tuples: `(GET, /auth)` and `(POST, /hub/pairing/verify)` (each plus the existing trailing-slash variant). `POST /hub/pairing/verify` must receive a **dedicated dispatch** to the unchanged `handlePairingVerify` — it MUST NOT be routed through the existing selector dispatch into `handleBrowserRequest`/`admitBrowserRequest`, whose product for an unauthenticated caller is `401 {"code":"gateway-denied"}` (live probing at Gate A confirmed both the current selector-surface 404 and this dispatch trap). `POST /hub/pairing/generate-code` remains outside the allowlist (404). |
+| `selector-apex` (e.g. `dsh.ikarikore.top`) | Served: the landing HTML. The selector strict allowlist grows by exactly two tuples: `(GET, /auth)` (no trailing-slash variant — `/auth/` is a rejected path) and `(POST, /hub/pairing/verify)` (plus the existing trailing-slash variant). `POST /hub/pairing/verify` must receive a **dedicated dispatch** to the unchanged `handlePairingVerify` — it MUST NOT be routed through the existing selector dispatch into `handleBrowserRequest`/`admitBrowserRequest`, whose product for an unauthenticated caller is `401 {"code":"gateway-denied"}` (live probing at Gate A confirmed both the current selector-surface 404 and this dispatch trap). `POST /hub/pairing/generate-code` remains outside the allowlist (404). |
 | `unrelated` / management (e.g. `192.0.2.10:28443`, tailscale hostnames) | Served: the same landing HTML (added to the management UI asset map). This is where minting happens today. |
 | `node-route` (`n-<32hex>.<routeDomain>`) | Not intercepted — proxied to the node DSH exactly as every other path (queries already pass through on route branches). Regression-asserted. |
 | machine routes (`/api/v1/*` on hub authority) | Unchanged; `/auth` is not a machine path. |
@@ -102,7 +102,10 @@ string**, deliberately not a parsed-parameter check:
 
 The exception is evaluated as one allowlist predicate before the existing
 fence check; the fence code itself is not weakened (its rejection path stays
-byte-identical). A `/auth` request that passes the grammar proceeds to asset
+byte-identical). Clarification carried over from v0.9, unchanged by this RFC:
+raw queries that parse to zero parameters (e.g. `?`, `?&`) never enter the
+fence at all on any path, so on `/auth` they serve the same landing HTML as
+no query — no token is present to protect. A `/auth` request that passes the grammar proceeds to asset
 serving **with the query string stripped from all server-side handling** —
 the token is never parsed, logged, or echoed by the server.
 

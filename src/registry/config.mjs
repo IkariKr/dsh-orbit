@@ -64,8 +64,8 @@ export function validateHubConfig({ listen, trustedExternalScheme, qrPairingBase
     } catch {
       parsedQrBase = null;
     }
-    if (!parsedQrBase || parsedQrBase.protocol !== "https:" || parsedQrBase.username || parsedQrBase.password || parsedQrBase.search || parsedQrBase.hash) {
-      errors.push("DSH_ORBIT_HUB_QR_PAIRING_BASE_URL must be an https URL without userinfo, query, or fragment");
+    if (!parsedQrBase || parsedQrBase.protocol !== "https:" || parsedQrBase.username || parsedQrBase.password || parsedQrBase.search || parsedQrBase.hash || (parsedQrBase.pathname !== "/" && parsedQrBase.pathname !== "")) {
+      errors.push("DSH_ORBIT_HUB_QR_PAIRING_BASE_URL must be an origin-only https URL (no userinfo, query, fragment, or path)");
     }
   }
   errors.push(...validateWebSocketConfig({ maxWsGlobal, maxWsPerNode, wsHandshakeTimeoutMs }));
