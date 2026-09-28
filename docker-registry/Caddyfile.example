@@ -134,6 +134,36 @@ dsh.example.local, *.dsh.example.local {
         respond 404
     }
 
+    # RFC-0017 edge exemption (adjudicated at Gate C): exactly two
+    # self-defending QR pairing paths bypass the edge basic-auth gate so a
+    # scanned phone can land and verify without sharing the edge password.
+    # EVERYTHING ELSE keeps the gate — including /, the selector assets,
+    # /hub/session, and /hub/selector/nodes. Do not widen this list without
+    # a separately authorized security-posture decision: the apex session
+    # bootstrap is gateway-open, so an edge-exempt selector surface would
+    # expose the node list and open session bootstrap to the public.
+    handle path /auth {
+        @landingGet method GET
+        handle @landingGet {
+            reverse_proxy 127.0.0.1:5445 {
+                header_up Host {host}
+                header_up -Authorization
+                header_up -X-Gateway-Auth
+            }
+        }
+    }
+
+    handle path /hub/pairing/verify /hub/pairing/verify/ {
+        @verifyPost method POST
+        handle @verifyPost {
+            reverse_proxy 127.0.0.1:5445 {
+                header_up Host {host}
+                header_up -Authorization
+                header_up -X-Gateway-Auth
+            }
+        }
+    }
+
     basic_auth {
         operator $2a$10$REPLACE_WITH_BCRYPT_HASH
     }

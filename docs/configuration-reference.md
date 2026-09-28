@@ -28,6 +28,8 @@ Registry semantics.
 | `DSH_ORBIT_HUB_WS_GLOBAL_LIMIT` | no | `200` | Global concurrent WebSocket connection limit on the Hub, integer 1–100000. Values outside range fail startup closed. |
 | `DSH_ORBIT_HUB_WS_PER_NODE_LIMIT` | no | `50` | Per-node concurrent WebSocket connection limit on the Hub, integer 1–10000 (must not exceed global limit). Values outside range fail startup closed. |
 | `DSH_ORBIT_HUB_WS_HANDSHAKE_TIMEOUT_MS` | no | `10000` | WebSocket upstream handshake timeout in milliseconds, integer 100–120000 ms (rejects 0, negative, NaN, Infinity). Established WebSocket connections do not have an idle timeout. |
+| `DSH_ORBIT_HUB_PAIRING_BASE_URL` | no | unset | Hub base URL handed to machine nodes in the pair bootstrap payload (`registry.pair`); used by node daemons for reverse connection. May be loopback http on trusted LAN transports. |
+| `DSH_ORBIT_HUB_QR_PAIRING_BASE_URL` | no | unset | Public origin used as the base for minted QR pairing URLs (`/auth?token=<code>`). Must be an origin-only https URL — no userinfo, query, fragment, or path — validated fail-closed at boot. Falls back to the request-Host-derived origin when unset. Distinct from `DSH_ORBIT_HUB_PAIRING_BASE_URL` and never replaces it. (RFC-0017, v0.10) |
 
 The Hub owns the machine and browser APIs. `/api/v1/*` is a private machine
 surface and must not be routed through the browser gateway. See

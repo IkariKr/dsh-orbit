@@ -61,7 +61,7 @@ disciplined path into the existing verification endpoint — nothing more.
 | Success behavior | Show a confirmed state and navigate to the first-party constant path `/` on the same origin (selector UI on the apex, management UI on management origins). Never a parameter-derived redirect. |
 | Failure behavior | Map existing engine/handler outcomes only: `401 invalid-or-expired`, `429 rate-limited`, network errors ⇒ retry state. No new error codes. The verify handler emits **no `Retry-After` header** today and v0.10 does not add one; the locked state uses fixed fallback copy (engine lock default: 5 failures ⇒ 15 minutes). |
 | Page asset | One file: `ui/auth/index.html` with inline CSS/JS, served to **both** authorities from a single dedicated root (`AUTH_UI_ROOT` → `ui/auth/`) — no per-branch copies (`SelectorUiAuthority`-style meta injection on the apex). |
-| Edge strategy | On the public apex, **exactly** `GET /auth` and `POST /hub/pairing/verify` are exempt from the operator's edge basic-auth gate (a deployment-config change on the operator's NAS gateway, recorded in the closure evidence); every other apex path keeps the gate; the Cloudflare-Access fast path is unchanged. Rationale: the pairing code is the designed admission credential for exactly this surface — an unexempted edge gate would make the scanned flow impossible without sharing the edge password, defeating the feature. |
+| Edge strategy — adjudicated (Gate C, pre-freeze) | On the public apex, **exactly** `GET /auth` and `POST /hub/pairing/verify` are exempt from the operator's edge basic-auth gate (a deployment-config change on the operator's NAS gateway, recorded in the closure evidence); **every other apex path keeps the gate — including `/`, the selector static assets, `GET /hub/session`, and `GET /hub/selector/nodes`** — and the Cloudflare-Access fast path is unchanged. This is the deliberate, narrowest-possible adjudication: it adds no publicly reachable surface beyond the two self-defending pairing paths, and selector UI access after pairing requires the operator's existing edge credential (a browser remembers it per session). Widening the exemption to the selector surface was considered and **rejected** at Gate C: the apex session bootstrap is gateway-open, so an edge-exempt selector surface would make the node list and open session bootstrap publicly reachable — a security-posture change that belongs to a future, separately authorized decision. |
 | Why the apex | The operator-designated phone-reachable origin is the public apex (`dsh.ikarikore.top`). The landing page is only useful if it is served where the QR actually points. |
 | Why not mint on the apex | `POST /hub/pairing/generate-code` stays session-gated on the management surface. The apex's open session bootstrap must never become a code-minting oracle. |
 
@@ -223,7 +223,7 @@ Mounted qualification (live, two-node deployment):
 
 | # | Field | Live assertion |
 | --- | --- | --- |
-| M1 | Happy path scan | operator mints code via management UI (override base = public apex); phone scans QR and lands on `/auth` **without edge credentials** (edge exemption per §2 Edge strategy); landing page verifies over verified TLS; selector UI reachable with operator session on the phone |
+| M1 | Happy path scan | operator mints code via management UI (override base = public apex); phone scans QR and lands on `/auth` **without edge credentials** (edge exemption per §2 Edge strategy); landing page verifies over verified TLS and reaches the confirmed state with the operator session cookie issued on the phone origin; subsequently, with the operator's existing edge credential, the selector UI on the same origin is reachable and resumes that operator session (`GET /hub/session` ⇒ 200) — demonstrating the pairing-issued session is the session the selector consumes. The navigation to `/` may present the edge gate first (adjudicated scope); no exemption beyond the two pairing paths is required or granted. |
 | M2 | Dead code scan | expired or already-verified code ⇒ explicit failure state; no session cookie set |
 | M3 | Address-bar scrub | after landing, the code is absent from the address bar and history |
 | M4 | Replay denial | second verification of the same (destroyed) code ⇒ failure state, no new session |
@@ -242,17 +242,24 @@ Mounted qualification (live, two-node deployment):
   a restatement of v0.9 semantics — and it is accepted because the code is
   the designed admission credential and the alternative (typing the code
   into a management UI) was never phone-reachable anyway.
-- **Edge strategy — decided.** On the public apex, exactly `GET /auth` and
-  `POST /hub/pairing/verify` are exempt from the operator's edge basic-auth
-  gate (deployment-config change on the operator's NAS gateway, recorded in
-  the closure evidence). Every other apex path keeps the edge gate; the
-  Cloudflare-Access fast path is unchanged. Without the exemption the
-  scanned flow would demand the edge password on the phone — sharing the
-  edge password would be strictly worse than exposing the two self-defending
-  pairing paths. Residual risk if the exemption is mis-scoped in deployment:
-  wider unauthenticated reach to the hub UI — mitigated by M1 asserting the
-  exemption is sufficient for landing and by the edge gate remaining on `/`
-  and all management paths.
+- **Edge strategy — adjudicated at Gate C (pre-freeze).** On the public
+  apex, exactly `GET /auth` and `POST /hub/pairing/verify` are exempt from
+  the operator's edge basic-auth gate (deployment-config change on the
+  operator's NAS gateway, recorded in the closure evidence). **Everything
+  else keeps the gate** — `/`, the selector static assets, `GET
+  /hub/session`, `GET /hub/selector/nodes`, and all management paths. The
+  exemption is the minimum that makes the scanned pairing flow possible
+  without sharing the edge password; the post-pairing selector step expects
+  the operator's existing edge credential, so v0.10 delivers credential-free
+  device pairing, not credential-free selector access. Widening the
+  exemption to the selector read surface was evaluated and rejected: the
+  apex session bootstrap is gateway-open, so that widening would expose the
+  node list and open session bootstrap to the public internet. Such a
+  widening is a future, separately authorized security-posture decision.
+  Residual risk if the exemption is mis-scoped in deployment: wider
+  unauthenticated reach to the hub UI — mitigated by the deployment
+  runbook's exact path list and by the edge gate remaining on `/` and all
+  management paths.
 - **Token leakage surfaces** addressed: browser history/address bar
   (replaceState scrub), Referer headers (no-referrer), intermediary caches
   (no-store), server logs/audit (never written), DOM (never rendered).
