@@ -164,7 +164,7 @@ test("Caddyfile.example carries the adjudicated edge-exemption shape", async () 
   const apexMarker = "dsh.example.local, *.dsh.example.local {";
   const apexStart = example.indexOf(apexMarker);
   assert.ok(apexStart > 0, "apex site block must exist");
-  const apexEnd = example.indexOf("\n}", apexStart);
+  const apexEnd = example.indexOf("\n }", apexStart);
   assert.ok(apexEnd > apexStart, "apex site block must be closed at top level");
   const apexBlock = example.slice(apexStart, apexEnd);
 
