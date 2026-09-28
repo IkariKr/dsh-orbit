@@ -20,15 +20,17 @@
   "scopeFreeze": {
     "must": [
       "RFC-first design record (RFC-0017) before product construction",
-      "landing page served at GET /auth on the selector-apex authority and the management (unrelated-host) authority, backed by one shared self-contained asset set with zero external network requests",
+      "landing page served at GET /auth on the selector-apex authority and the management (unrelated-host) authority, backed by one shared self-contained asset set with zero external network requests and a single dedicated asset root (no per-branch copies)",
+      "selector-apex allowlist grows by exactly two tuples: (GET, /auth) and (POST, /hub/pairing/verify) (plus existing trailing-slash variants), so the landing page reaches the unchanged verify handler; POST /hub/pairing/generate-code remains management-only and apex verify routing is pinned by matrix field A13",
       "node-route authorities remain pure proxies: /auth is never intercepted there and no query-fence behavior changes on route authorities",
-      "query fence exception is exactly: GET, path /auth, a single query parameter named token whose value matches ^[0-9]{6}$; every other method/path/parameter combination keeps the existing fail-closed behavior",
-      "QR mint base override env DSH_ORBIT_HUB_QR_PAIRING_BASE_URL: https-only, no query, no userinfo, validated at boot; falls back to request-Host-derived base when unset; machine pairing env DSH_ORBIT_HUB_PAIRING_BASE_URL is not overloaded or repurposed",
+      "query fence exception is one raw-query grammar: GET /auth whose raw query string matches ^token=[0-9]{6}$ byte-for-byte (no decoding, no parameter parsing); every other method/path/parameter combination keeps the existing fail-closed behavior, including HEAD/OPTIONS on /auth",
+      "QR mint base override env DSH_ORBIT_HUB_QR_PAIRING_BASE_URL: https-only, no query, no userinfo, validated in validateHubConfig with the collected-config clean-exit pattern; falls back to request-Host-derived base when unset; machine pairing env DSH_ORBIT_HUB_PAIRING_BASE_URL is not overloaded or repurposed",
       "landing page POSTs the existing /hub/pairing/verify with same-origin fetch and maps existing failure codes (invalid-or-expired, rate-limited) to explicit UI states without inventing new endpoints",
       "token hygiene: token scrubbed from the address bar via history.replaceState after read, never rendered back into the DOM as the code value, never written to server logs or audit records, Cache-Control: no-store and Referrer-Policy: no-referrer on every /auth response",
       "post-success navigation targets only first-party constant paths on the same origin; no parameter-derived redirect targets",
-      "verification success reuses the existing operator-session bootstrap and its exact cookie attributes; no new credential types",
-      "mechanical test coverage for fence narrowness, mint base override, state mapping, and token-leak absence (audit store and response body scans)",
+      "verification success reuses the existing operator-session bootstrap and its exact cookie attributes; no new credential types; no server-side changes to the verify handler including no new response headers (no Retry-After in v0.10)",
+      "deployment edge strategy recorded with the closure: on the public apex exactly GET /auth and POST /hub/pairing/verify are exempt from the operator's edge basic-auth gate; all other apex paths keep the gate; the exemption is a prerequisite of mounted field M1",
+      "mechanical test coverage for fence narrowness (parameter-boundary and encoding variants), mint base override, state mapping, and token-leak absence (audit store and response body scans)",
       "candidate-freeze rule compliance and fresh candidate-bound evidence for the v0.10 release candidate",
       "operator SOP and reference documentation"
     ],
@@ -45,6 +47,8 @@
       "a new selector system beyond RFC-0011",
       "weakening or removing the global query fence beyond the narrow /auth exception",
       "exposing /hub/pairing/generate-code on the selector-apex authority (minting stays session-gated on the management surface)",
+      "server-side changes to the verify handler, including new response headers (Retry-After is explicitly out of scope for v0.10)",
+      "serving the landing page from duplicated per-branch asset copies instead of one shared root",
       "virtual loopback manipulation or rewriting external request Host/Origin/remoteAddress to 127.0.0.1",
       "unrelated UI refactor",
       "unrelated runtime refactor",
@@ -78,7 +82,7 @@
   "evidenceRequirements": {
     "candidateMustBeFrozenBeforeEvidence": true,
     "candidateFreezeRule": "exactly one frozen candidate per evidence round; once frozen, later phases produce only qualification/evidence; a real problem means a new candidate and fresh candidate-bound evidence",
-    "landingMatrixRequired": "a dedicated acceptance matrix defined in RFC-0017 must be mechanically enforced before the v0.10 mounted evidence run",
+    "landingMatrixRequired": "a dedicated acceptance matrix defined in RFC-0017 (M17: 13 automated + 4 mounted fields) must be mechanically enforced via scripts/v10-landing-acceptance-matrix.mjs and a governance-contract test before the v0.10 mounted evidence run",
     "closureRule": "one evidence-only closure, direct child of the frozen candidate, attestation must not reference its own closure SHA",
     "finalReviewRequired": true
   },
