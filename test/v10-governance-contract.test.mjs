@@ -164,7 +164,7 @@ test("Caddyfile.example carries the adjudicated edge-exemption shape", async () 
   const apexMarker = "dsh.example.local, *.dsh.example.local {";
   const apexStart = example.indexOf(apexMarker);
   assert.ok(apexStart > 0, "apex site block must exist");
-  const apexEnd = example.indexOf("\n }", apexStart);
+  const apexEnd = example.indexOf("\n}", apexStart);
   assert.ok(apexEnd > apexStart, "apex site block must be closed at top level");
   const apexBlock = example.slice(apexStart, apexEnd);
 
@@ -184,10 +184,12 @@ test("Caddyfile.example carries the adjudicated edge-exemption shape", async () 
   // The gate lives inside a matcherless fallback handle WITHIN THE APEX
   // BLOCK — a site-level basic_auth would 401 the exempt paths regardless
   // of text order, and no fallback at all would remove the apex gate.
-  const basicAuthCount = (apexBlock.match(/basic_auth/g) ?? []).length;
-  assert.equal(basicAuthCount, 1, "apex block must carry exactly one basic_auth (inside the fallback handle)");
+  // Count directive lines only (line-start `basic_auth {`), never comment
+  // mentions of the word.
+  const directiveCount = (apexBlock.match(/^[ \t]*basic_auth \{/gm) ?? []).length;
+  assert.equal(directiveCount, 1, "apex block must carry exactly one basic_auth directive (inside the fallback handle)");
   const fallbackIndex = apexBlock.indexOf("handle {");
-  const basicAuthIndex = apexBlock.indexOf("basic_auth");
+  const basicAuthIndex = apexBlock.search(/^[ \t]*basic_auth \{/m);
   assert.ok(fallbackIndex > 0 && basicAuthIndex > fallbackIndex, "basic_auth must sit inside the matcherless fallback handle");
 
   // The do-not-widen rationale is inline where an operator will read it.
