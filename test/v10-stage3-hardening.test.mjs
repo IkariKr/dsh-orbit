@@ -68,6 +68,11 @@ async function mintCode(port, connectHost) {
     headers: { ...GATEWAY_HEADERS },
     body: {},
   });
+  // Session bootstrap cookie carries the exact v0.9 attributes including
+  // the 12h Max-Age (regression pin on the /hub/session branch).
+  const sessionSetCookie = sessionRes.headers["set-cookie"][0];
+  assert.match(sessionSetCookie, /Max-Age=43200(?:[^0-9]|$)/);
+  assert.match(sessionSetCookie, /SameSite=Strict/i);
   const cookie = sessionRes.headers["set-cookie"][0].split(";")[0];
   const { csrfToken } = JSON.parse(sessionRes.body);
   const genRes = await rawRequest({
@@ -93,12 +98,16 @@ test("A12 completion: a full round with failures and lockout leaks no token= int
   const connectHost = `127.0.0.1:${port}`;
 
   const logLines = [];
-  const originalError = console.error;
-  const originalWarn = console.warn;
-  const originalLog = console.log;
-  console.error = (...args) => logLines.push(args.join(" "));
-  console.warn = (...args) => logLines.push(args.join(" "));
-  console.log = (...args) => logLines.push(args.join(" "));
+  const capture = (...args) => logLines.push(args.map(String).join(" "));
+  const originals = {};
+  for (const channel of ["error", "warn", "log", "info", "debug", "trace", "dir"]) {
+    originals[channel] = console[channel];
+    console[channel] = capture;
+  }
+  // Raw process.stdout/stderr writes are NOT captured: in-process, the
+  // node:test runner owns those streams (its NDJSON events contain this
+  // test's own title), and src/ logs exclusively through the console
+  // channels above — all of which are captured.
 
   try {
     const { cookie, csrfToken, gen } = await mintCode(port, connectHost);
@@ -116,6 +125,8 @@ test("A12 completion: a full round with failures and lockout leaks no token= int
         body: { token: wrong },
       });
       assert.equal(failRes.status, 401);
+      // The failed-attempt body must not echo the submitted value (RFC D6).
+      assert.ok(!failRes.body.includes(wrong), `failure body echoed the submitted value for ${wrong}`);
     }
     const successRes = await rawRequest({
       port,
@@ -157,9 +168,9 @@ test("A12 completion: a full round with failures and lockout leaks no token= int
       assert.ok(!line.includes("token="), `log line leaked a token= form: ${line}`);
     }
   } finally {
-    console.error = originalError;
-    console.warn = originalWarn;
-    console.log = originalLog;
+    for (const [channel, original] of Object.entries(originals)) {
+      console[channel] = original;
+    }
     await closeHub(hub);
     db.close?.();
   }
@@ -201,7 +212,7 @@ test("lockout interplay: 5 failures from one IP lock the endpoint (429, no Retry
   }
 });
 
-test("apex verify defenses: origin mismatch, cross-site, and body limit all fail closed", async () => {
+test("pairing verify defenses: origin mismatch, malformed origin, cross-site, bad-json, and body limit all fail closed", async () => {
   const { db, hub } = createHub({ routeDomain: APEX_HOST });
   const port = await listen(hub);
   try {
@@ -218,6 +229,33 @@ test("apex verify defenses: origin mismatch, cross-site, and body limit all fail
     });
     assert.equal(crossOrigin.status, 403);
     assert.equal(JSON.parse(crossOrigin.body).error.code, "origin-denied");
+
+    const malformedOrigin = await rawRequest({
+      port,
+      method: "POST",
+      path: "/hub/pairing/verify",
+      host: APEX_HOST,
+      headers: {
+        "content-type": "application/json",
+        origin: "not-a-url",
+      },
+      body: { token: "123456" },
+    });
+    assert.equal(malformedOrigin.status, 403);
+    assert.equal(JSON.parse(malformedOrigin.body).error.code, "origin-denied");
+
+    const emptyBody = await rawRequest({
+      port,
+      method: "POST",
+      path: "/hub/pairing/verify",
+      host: APEX_HOST,
+      headers: {
+        "content-type": "application/json",
+        origin: `https://${APEX_HOST}`,
+      },
+    });
+    assert.equal(emptyBody.status, 400);
+    assert.equal(JSON.parse(emptyBody.body).error.code, "bad-json");
 
     const crossSite = await rawRequest({
       port,
@@ -270,13 +308,15 @@ test("cross-authority redemption: a code minted on management verifies on the ap
     });
     assert.equal(first.status, 200);
     assert.equal(JSON.parse(first.body).ok, true);
-    // The operator session issued on the apex carries the v0.9 attributes.
+    // The operator session issued on the apex carries the exact v0.9
+    // attributes, including the 12h lifetime.
     const setCookie = first.headers["set-cookie"][0];
     assert.match(setCookie, /^dsh-orbit-hub-session=/);
     assert.match(setCookie, /HttpOnly/i);
     assert.match(setCookie, /Secure/i);
     assert.match(setCookie, /SameSite=Strict/i);
     assert.match(setCookie, /Path=\/hub/i);
+    assert.match(setCookie, /Max-Age=43200(?:[^0-9]|$)/);
 
     const replay = await rawRequest({
       port,
