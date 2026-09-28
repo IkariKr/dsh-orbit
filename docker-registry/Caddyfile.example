@@ -137,8 +137,11 @@ dsh.example.local, *.dsh.example.local {
     # RFC-0017 edge exemption (adjudicated at Gate C): exactly two
     # self-defending QR pairing paths bypass the edge basic-auth gate so a
     # scanned phone can land and verify without sharing the edge password.
-    # EVERYTHING ELSE keeps the gate — including /, the selector assets,
-    # /hub/session, and /hub/selector/nodes. Do not widen this list without
+    # The matchers are host-pinned to the apex (dsh.example.local) — node
+    # route hosts (n-*.dsh.example.local) and every other wildcard host keep
+    # the gate. EVERYTHING ELSE keeps the gate — including /, the selector
+    # assets, /hub/session, and /hub/selector/nodes. Do not widen this list
+    # (paths or hosts) without
     # a separately authorized security-posture decision: the apex session
     # bootstrap is gateway-open, so an edge-exempt selector surface would
     # expose the node list and open session bootstrap to the public.
@@ -150,6 +153,7 @@ dsh.example.local, *.dsh.example.local {
     # site-level basic_auth would 401 the exempt paths regardless of the
     # text order in this file.
     @qrLandingGet {
+        host dsh.example.local
         method GET
         path /auth
     }
@@ -162,6 +166,7 @@ dsh.example.local, *.dsh.example.local {
     }
 
     @qrVerifyPost {
+        host dsh.example.local
         method POST
         path /hub/pairing/verify /hub/pairing/verify/
     }

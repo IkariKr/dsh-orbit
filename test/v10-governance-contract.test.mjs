@@ -158,17 +158,40 @@ test("v0.10 governance records are present and internally consistent", async () 
 
 test("Caddyfile.example carries the adjudicated edge-exemption shape", async () => {
   const example = await read("docker-registry/Caddyfile.example");
+  // Isolate the apex site block: from its site label to the next top-level
+  // closing brace, so assertions cannot be satisfied by another site's
+  // fallback handle (the registration site also carries one).
+  const apexMarker = "dsh.example.local, *.dsh.example.local {";
+  const apexStart = example.indexOf(apexMarker);
+  assert.ok(apexStart > 0, "apex site block must exist");
+  const apexEnd = example.indexOf("\n}", apexStart);
+  assert.ok(apexEnd > apexStart, "apex site block must be closed at top level");
+  const apexBlock = example.slice(apexStart, apexEnd);
+
   // Combined matchers + dedicated handle blocks (the house pattern), not
   // the invalid `handle path X` form a previous draft used.
-  assert.match(example, /@qrLandingGet \{[\s\S]*?method GET[\s\S]*?path \/auth/);
-  assert.match(example, /@qrVerifyPost \{[\s\S]*?method POST[\s\S]*?path \/hub\/pairing\/verify/);
-  assert.doesNotMatch(example, /handle path \/auth/);
-  // The gate lives inside a matcherless fallback handle — a site-level
-  // basic_auth would 401 the exempt paths regardless of text order.
-  const fallback = /handle \{[\s\S]*?basic_auth[\s\S]*?\}\n\}/.exec(example);
-  assert.ok(fallback, "matcherless fallback handle carrying basic_auth is required");
+  assert.match(apexBlock, /@qrLandingGet \{[\s\S]*?method GET[\s\S]*?path \/auth/);
+  assert.match(apexBlock, /@qrVerifyPost \{[\s\S]*?method POST[\s\S]*?path \/hub\/pairing\/verify/);
+  assert.doesNotMatch(apexBlock, /handle path \/auth/);
+
+  // Host pinning (Gate C round 3): the exemption applies to the apex host
+  // only — node-route and other wildcard hosts keep the gate.
+  const landingMatcher = /@qrLandingGet \{[\s\S]*?\}/.exec(apexBlock)[0];
+  const verifyMatcher = /@qrVerifyPost \{[\s\S]*?\}/.exec(apexBlock)[0];
+  assert.match(landingMatcher, /host dsh\.example\.local/);
+  assert.match(verifyMatcher, /host dsh\.example\.local/);
+
+  // The gate lives inside a matcherless fallback handle WITHIN THE APEX
+  // BLOCK — a site-level basic_auth would 401 the exempt paths regardless
+  // of text order, and no fallback at all would remove the apex gate.
+  const basicAuthCount = (apexBlock.match(/basic_auth/g) ?? []).length;
+  assert.equal(basicAuthCount, 1, "apex block must carry exactly one basic_auth (inside the fallback handle)");
+  const fallbackIndex = apexBlock.indexOf("handle {");
+  const basicAuthIndex = apexBlock.indexOf("basic_auth");
+  assert.ok(fallbackIndex > 0 && basicAuthIndex > fallbackIndex, "basic_auth must sit inside the matcherless fallback handle");
+
   // The do-not-widen rationale is inline where an operator will read it.
-  assert.match(example, /Do not widen this list/);
+  assert.match(apexBlock, /Do not widen this list/);
 });
 
 test("Caddyfile.example passes real `caddy validate` (docker-gated)", async (t) => {
