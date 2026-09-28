@@ -1,134 +1,149 @@
 # DSH Orbit
 
-DSH Orbit is a community-maintained self-hosting and fleet layer for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
+**DSH Orbit is a Hub-and-Node fleet layer and secure self-hosting layer for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).**
 
-The project focuses on secure remote access, upgrade compatibility, and multi-node operation while keeping DeepSeek Harness as the upstream runtime.
+One Hub keeps a registry of your DSH machines. Each node keeps running its own DSH runtime, dials *out* to the Hub over HTTPS/WSS, and gets its own deterministic public hostname. Your phone pairs by scanning a QR code inside DSH Settings. The Hub is a control plane — DSH stays the execution runtime on every node.
 
 > DSH Orbit is an independent community project. It is not affiliated with or endorsed by DeepSeek AI.
 
-## Status
+## Why
 
-DSH Orbit `0.4.0-rc.2` targets the accepted DeepSeek Harness compatibility
-baseline `0.1.1-rc.2`. This v0.4 release candidate is awaiting independent
-Stage 8 Final Review; it is not tagged, published, or promoted.
+Running DSH on more than one machine today means juggling:
 
-The v0.4 candidate provides the deployment and compatibility layer, the
-private Registry Hub/Node control plane, and the bounded Endpoint Selector
-routing closure for server-reachable nodes. The DSH configuration plane
-remains behind an authenticated reverse proxy and the Registry machine surface
-remains private. Reverse-connected nodes and NAT traversal remain v0.5 scope.
+- a separate URL and session per machine, copied by hand;
+- inbound ports, port forwarding, or a VPN appliance so remote clients can reach each machine;
+- long-lived URLs or tokens handed to a laptop or phone, valid until you remember to rotate them.
 
-Release documentation:
+DSH Orbit replaces that with a fleet model:
 
-- [Architecture](docs/architecture.md)
-- [Configuration reference](docs/configuration-reference.md)
-- [Operator SOP](docs/sop/v0.3-operator-sop.md)
-- [Node enrollment SOP](docs/sop/v0.3-node-enrollment-sop.md)
-- [Registry backup/restore SOP](docs/sop/v0.3-registry-backup-restore-sop.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [v0.3.0-rc.1 attestation](docs/release-attestations/v0.3.0-rc.1.md)
-- v0.4.0-rc.2 candidate: attestation is emitted only in the evidence-only closure after the mounted run and before independent Final Review.
+- **Nodes connect outbound only.** A node behind NAT (a NAS at home, a desktop behind CGNAT) registers with the Hub over an outbound HTTPS/WSS reverse connection — no inbound ports, no public IP per node, Ed25519 node identity ([RFC-0012](docs/rfc/0012-reverse-connected-nodes.md)).
+- **Every node has one public name.** Each node is reachable at a deterministic authority `n-<32hex>.<routeDomain>` with fail-closed routing — a failed node route never silently serves another node ([RFC-0010](docs/rfc/0010-node-endpoint-and-routing.md)).
+- **The phone pairs by scanning.** DSH Settings contains an "Orbit Remote & Fleet" panel that renders an inline-SVG QR with a 6-digit, 300-second, single-use pairing code. Scanning it opens the Hub landing page, verifies without credentials, and starts an operator session ([RFC-0016](docs/rfc/0016-dsh-plugin-integration-and-qr-pairing.md), [RFC-0017](docs/rfc/0017-hub-qr-pairing-landing.md)).
+- **Upgrades stay guarded.** A candidate upgrade runner builds, verifies, and reports — it never promotes production on its own.
 
-The first release provides the deployment and compatibility layer needed to expose the DSH configuration plane behind an authenticated reverse proxy without publishing the DSH service directly.
-
-Future releases are planned to add node discovery, endpoint selection, reverse-connected nodes, and fleet-level workflows. See [Roadmap](docs/roadmap.md).
-
-## Principles
-
-- **Upstream first.** Use official DSH capabilities when they exist. Compatibility patches are a fallback, not a permanent fork.
-- **Fail closed.** Unknown upstream layouts or patch mismatches stop the build or startup path instead of silently weakening security.
-- **No direct DSH exposure.** Remote administration is expected to sit behind an authenticated proxy or access layer.
-- **Versioned compatibility.** Each supported DSH version has an explicit compatibility contract and test coverage.
-- **Portable deployment.** Public examples use placeholders and environment-driven configuration. Site-specific secrets and addresses stay outside the repository.
-
-## Current architecture
+## How it fits together
 
 ```text
-Internet
-   |
-Identity-aware access layer
-   |
-Reverse proxy / authenticated gateway
-   |
-DSH Orbit compatibility layer
-   |
-DeepSeek Harness
+                         public DNS + TLS
+                                |
+                    authenticated gateway
+                                |
+   +----------------- Orbit Hub (control plane) ------------------+
+   |   node registry | selector | operator UI | pairing engine   |
+   +------^-------------------------------^-----------------------+
+          | outbound HTTPS/WSS            | HTTPS
+          | reverse connection             |
+   +------+------+                 +------+------+
+   |   Node A    |                 |   Node B    |
+   | (NAS)       |                 | (desktop)   |
+   | DSH runtime |                 | DSH runtime |
+   +-------------+                 +-------------+
+
+   Phone: DSH Settings -> "Orbit Remote & Fleet" -> QR
+          -> https://<hub>/auth?token=<6-digit code> -> operator session
 ```
 
-DSH Orbit does not replace DSH authentication or authorization semantics wholesale. The current compatibility layer narrows remote configuration access to requests that satisfy the configured host, HTTPS forwarding, same-origin checks, and a proxy-held shared secret.
+Core concepts:
 
-See [Security model](docs/security-model.md) for the trust boundary and deployment requirements.
+| Concept | What it is |
+| --- | --- |
+| **Hub** | The control plane: SQLite-backed node registry, routing, selector, operator UI, pairing engine. Binds to loopback; a TLS gateway fronts it. |
+| **Node** | A machine running DSH plus the Orbit node client. Holds an Ed25519 identity; reports heartbeat, health, and versions. |
+| **Selector** | One familiar entry point that lists nodes and routes you to `n-<32hex>.<routeDomain>`. Fail-closed: no silent fallback. |
+| **Pairing** | Two distinct flows: machine nodes pair with a one-time pair token via the node CLI; operator devices pair by scanning the 6-digit QR in DSH Settings. |
 
-## Quick start
+## Quickstart
 
-### 1. Configure the deployment
+All commands below are taken from the repository's own scripts and examples (`bin/`, `docker-registry/`). Placeholders (`orbit.example.com`, `nodes.example.com`) stand in for your public names.
 
-Copy the example environment file and set `DSH_PUBLIC_HOST`:
+Requirements: Node.js 22+, SQLite (via `node:sqlite`), and a public origin with TLS for the Hub.
+
+### 1. Start a Hub
+
+Run from a checkout of this repository:
 
 ```sh
-cp .env.example .env
+export DSH_ORBIT_HUB_GATEWAY_SECRET="$(openssl rand -hex 32)"  # gateway-held assertion; never sent to clients
+export DSH_ORBIT_HUB_ROUTE_DOMAIN="nodes.example.com"          # wildcard hostnames n-<32hex>.nodes.example.com
+export DSH_ORBIT_HUB_QR_PAIRING_BASE_URL="https://orbit.example.com"  # public origin minted into QR URLs
+node bin/dsh-orbit-hub.mjs
 ```
 
-Create the local runtime directories and secrets expected by the example Compose file:
+The Hub listens on `127.0.0.1:5445` by default and owns a SQLite registry. Pairing fails closed until the public base URLs are configured. For a containerized deployment, see `docker-registry/compose.example.yaml` (image tag via `DSH_ORBIT_REGISTRY_TAG`, Hub secret via environment) and [Registry deployment](docs/registry-deployment.md): the Hub binds loopback only, a gateway sharing its network namespace terminates TLS for the browser surface, and node traffic uses a private machine-ingress listener (`bin/dsh-orbit-machine-ingress.mjs`, port 5446) — machine routes are refused at the public gateway.
+
+### 2. Bring up nodes
+
+Mint a one-time token in the Hub operator surface (Tokens view), then on each node:
 
 ```sh
+# NAT-restricted node (reverse connection, RFC-0012):
+DSH_ORBIT_HUB_URL="https://orbit.example.com" \
+DSH_ORBIT_PAIR_TOKEN="<one-time pair token>" \
+node bin/dsh-orbit-node.mjs pair
+
+# Server-reachable node (direct enrollment, RFC-0005):
+DSH_ORBIT_HUB_URL="https://orbit.example.com" \
+DSH_ORBIT_ENROLL_TOKEN="<one-time enrollment token>" \
+node bin/dsh-orbit-node.mjs enroll
+
+# Then run the daemon (heartbeat/report loop + reverse connection):
+node bin/dsh-orbit-node.mjs
+```
+
+The node client persists its Ed25519 identity and Hub binding in `node-state.json` (mode-checked at startup) and forwards to the node-local DSH transport (default `http://127.0.0.1:3080`). `node bin/dsh-orbit-node.mjs status` and `doctor` report persisted and runtime state. See [Node registry client](docs/node-registry-client.md).
+
+### 3. Pair a phone by scanning
+
+1. Run DSH with the Orbit plugin. This repository's package is a DSH (Cordis) plugin — see `cordis.patch.yml`, the `dsh`/`dshClient` entries in `package.json`, and the [v0.9 plugin SOP](docs/sop/v0.9-dsh-plugin-and-qr-pairing-multistage-sop.md).
+2. Open DSH Settings -> **Orbit Remote & Fleet**. The panel mints a 6-digit pairing code (300-second TTL, single-use) and renders it as an inline SVG QR — zero external requests. Repeated failed verifications lock the source IP out.
+3. Scan the QR. It encodes `https://<hub>/auth?token=<code>`. The Hub landing page verifies the code, destroys it on first use, starts a short-lived `HttpOnly` operator session, and scrubs the token from the address bar. This is the only query-string shape exempted from the Hub's fail-closed fence; everything else stays gated.
+
+### 4. Route to a node
+
+Open the selector at the Hub, pick a node, and you are routed to its `n-<32hex>.<routeDomain>` authority — HTTP and WebSockets proxied without path rewriting, per-node cookie isolation, target scope always visible.
+
+## Documentation map
+
+| Area | Start here |
+| --- | --- |
+| Architecture and trust boundaries | [Architecture](docs/architecture.md), [Security model](docs/security-model.md) |
+| Hub deployment and operations | [Registry deployment](docs/registry-deployment.md), [Configuration reference](docs/configuration-reference.md) |
+| Node client and state | [Node registry client](docs/node-registry-client.md) |
+| Design records | [docs/rfc/](docs/rfc/) — RFC-0001 through RFC-0017 (identity, registry, routing, reverse connection, fleet, scheduling, plugin, QR landing), [docs/adr/](docs/adr/) |
+| Operating procedures | [docs/sop/](docs/sop/) — per-milestone multistage SOPs, operator and enrollment SOPs |
+| Evidence | [docs/release-attestations/](docs/release-attestations/) per release, [docs/review/](docs/review/) for independent stage-gate reviews |
+| Product direction | [Roadmap](docs/roadmap.md), [UX reference notes](docs/ux/) |
+| Alternatives | [Comparison](docs/comparison.md) — Orbit vs. bare DSH, VPN/port-forwarding, generic tunnels |
+
+## Status
+
+- Current tagged release: **`v0.10.0-rc.1`** (signed tag). Milestones v0.1–v0.10 are implemented and engineering acceptance is closed.
+- v0.10 closed with the M17 acceptance matrix at **17/17** (13 automated + 4 mounted on a real deployment, including a real phone scan). Every milestone went through staged independent review — Gate A, per-stage gates, Gate C, Final Review — recorded in `docs/review/`.
+- **This is a release candidate, not production-stable.** Tag, promotion, and DNS cutover were treated as separately authorized steps.
+- Deployment evidence comes from **one operator's two-node fleet** (a NAS and a desktop) running behind a reverse tunnel on a public apex. There is no third-party user base to point at, and none is claimed.
+- Compatibility with DSH versions is explicit and fail-closed; see [Compatibility](docs/compatibility.md).
+
+## Self-hosting layer (upgrades and compatibility)
+
+The original v0.1–v0.4 layer — authenticated reverse-proxy access to the DSH configuration plane, upgrade guards, and smoke tests — remains part of the project and runs inside each deployment.
+
+### Deploy the compatibility layer
+
+```sh
+cp .env.example .env                       # set DSH_PUBLIC_HOST and DSH_VERSION
 mkdir -p secrets certs data workspace
 openssl rand -hex 32 > secrets/dsh_proxy_auth
 printf '%s' 'admin' > secrets/local_user
 caddy hash-password --plaintext 'replace-this-password' > secrets/local_password_hash
-```
+# place origin certificate at certs/fullchain.pem and certs/privkey.pem
 
-Place the origin certificate and private key at `certs/fullchain.pem` and `certs/privkey.pem`. The certificate must be valid for `DSH_PUBLIC_HOST` if an upstream proxy verifies the Caddy origin.
-
-The files under `secrets/`, `certs/`, and `data/` are ignored by Git and must remain local.
-
-### 2. Build
-
-```sh
 docker compose -f docker/compose.example.yaml build
-```
-
-The image build installs the selected DSH version and runs the compatibility patch in `--build` mode. Unsupported source layouts fail the build.
-
-### 3. Start
-
-```sh
 docker compose -f docker/compose.example.yaml up -d
 ```
 
-At runtime, the profile-local DSH client package is checked and patched before the web process starts. This is necessary because DSH profiles can contain their own copy of `@deepseek-ai/dsh-client-connection`.
+Gateway examples: [Caddy](proxy/Caddyfile.example), [Nginx](proxy/nginx.example.conf). The build installs the pinned DSH version and runs the compatibility patch in `--build` mode; unsupported source layouts fail the build instead of silently weakening security.
 
-Optional downstream hooks in `hooks/` run before each DSH Web start. They are intended for deployment-specific compatibility work that does not belong in the shared project. A failed hook stops startup.
-
-### 4. Configure the reverse proxy
-
-Examples are provided for:
-
-- [Caddy](proxy/Caddyfile.example)
-- [Nginx](proxy/nginx.example.conf)
-
-The examples intentionally separate a trusted access-provider path from a local/basic-auth path. Do not accept an access-provider assertion header directly from arbitrary clients.
-
-For Cloudflare Access deployments, point the tunnel directly at the loopback Caddy origin. If a separate LAN proxy also reaches Caddy, strip `Cf-Access-Jwt-Assertion` on that path as shown in the Nginx example.
-
-### 5. Smoke-test settings
-
-After authentication and routing are configured, test a settings read and a no-op write:
-
-```sh
-DSH_SMOKE_URL=https://dsh.example.com \
-DSH_SMOKE_BASIC_USER=admin \
-DSH_SMOKE_BASIC_PASSWORD='<local-password>' \
-node scripts/smoke-settings.mjs
-```
-
-Use the authentication variables that match the path being tested. The script does not print credentials or settings secrets.
-
-When the gateway rewrites the `Host` header to a public authority that differs from the smoke endpoint URL (for example a non-default rehearsal port), set `DSH_SMOKE_ORIGIN=https://dsh.example.com` so the same-origin positive control matches what a real browser would send.
-
-### 6. Smoke-test authorization
-
-Test the live authorization boundary of a running deployment against privileged RPCs:
+### Smoke-test a deployment
 
 ```sh
 DSH_SMOKE_URL=https://dsh.example.com \
@@ -137,38 +152,11 @@ DSH_SMOKE_BASIC_PASSWORD='<local-password>' \
 npm run smoke:auth
 ```
 
-Both credential variables are required: the supported auth path for this suite is the gateway's local Basic Auth path. The suite proves six outcomes against `settings.describe`:
+The authorization suite proves six outcomes against `settings.describe` (authenticated/expected origin allowed; unauthenticated, invalid credentials, unexpected `Origin`, `Sec-Fetch-Site: cross-site`, and forged gateway assertion all denied). `npm run smoke:settings`, `smoke:session`, and `smoke:terminal` cover the other surfaces. The suites never print credentials or response bodies.
 
-| Case | Expected result |
-| --- | --- |
-| authenticated, expected origin | allowed |
-| unauthenticated | denied |
-| invalid credentials | denied |
-| unexpected `Origin` | denied |
-| `Sec-Fetch-Site: cross-site` | denied |
-| forged `Cf-Access-Jwt-Assertion` on the local path | denied |
+### Upgrade a DSH version safely
 
-The suite never needs the internal proxy secret — the gateway injects it after authenticating the user, and exposing that secret to a client would itself be a failure. It exits non-zero when any case mismatches, and normal and failure output never include credentials or response bodies.
-
-## Upgrade workflow
-
-Do not update a production DSH instance by changing the package version in place.
-
-The recommended flow is:
-
-1. select a candidate DSH version;
-2. build a candidate image;
-3. require the compatibility patch to match exactly;
-4. start the candidate with a copied data directory;
-5. run settings, negative-auth, and pre-upgrade session-resume smoke tests;
-6. snapshot production data;
-7. promote the candidate only after the tests pass.
-
-See [Upgrade guide](docs/upgrade.md), [Compatibility](docs/compatibility.md), and [Downstream production deployment](docs/downstream-production.md).
-
-## Candidate upgrade runner
-
-`npm run upgrade -- <command>` orchestrates the manual upgrade sequence as one explicit, fail-closed command. It never promotes production: the furthest it can go is `CANDIDATE PASSED - ELIGIBLE FOR MANUAL PROMOTION`, and promoting remains an operator action.
+Do not change the DSH version in place. The candidate runner orchestrates the manual sequence and never promotes production — the furthest it goes is `CANDIDATE PASSED - ELIGIBLE FOR MANUAL PROMOTION`:
 
 ```sh
 npm run upgrade -- preflight   # validate the configuration without touching anything
@@ -177,62 +165,46 @@ npm run upgrade -- verify      # verification sequence plus report against a run
 npm run upgrade -- report      # regenerate the report from the run directory
 ```
 
-Configuration comes from the environment. Candidate identity: `DSH_VERSION` (candidate DSH version), `DSH_CANDIDATE_ORBIT_REVISION` (the Orbit revision the candidate is built from), `DSH_CANDIDATE_IMAGE`, `DSH_CANDIDATE_DATA_ROOT`, `DSH_CANDIDATE_WORKSPACE_ROOT`, `DSH_UPGRADE_HOST_PORT` (the isolated loopback port). Baseline identity (the rollback target): `DSH_BASELINE_IMAGE`, `DSH_BASELINE_ORBIT_REVISION`, `DSH_BASELINE_DSH_VERSION`. Gateway and checks: `DSH_PUBLIC_HOST`, `DSH_SMOKE_URL` (the candidate endpoint), `DSH_SMOKE_BASIC_USER`/`DSH_SMOKE_BASIC_PASSWORD`, `DSH_SMOKE_SESSION_ID` (a pre-upgrade session), `DSH_SMOKE_ORIGIN` (when the gateway rewrites the Host), `DSH_DATA_ROOT` (production data), `DSH_SNAPSHOT_HOOK`. Optional: `DSH_ORBIT_VERSION`, `DSH_UPGRADE_PROJECT`, `DSH_UPGRADE_COMPOSE`, `DSH_UPGRADE_WORKDIR`, `DSH_SNAPSHOT_TIMEOUT_SECONDS`, `DSH_UPGRADE_GATEWAY_SERVICE` (default `caddy`), `DSH_UPGRADE_GATEWAY_CERT_TARGET` (default `/run/certs/fullchain.pem`, matching the public example compose), `DSH_UPGRADE_GATEWAY_KEY_TARGET` (default `/run/certs/privkey.pem`). Deployments whose gateway reads certificates elsewhere must set the two targets, and the base compose gateway must already mount a certificate at those targets.
+Configuration comes from the environment (candidate and baseline identity, endpoints, snapshot hooks); see [Upgrade guide](docs/upgrade.md), [Compatibility](docs/compatibility.md), and [Downstream production deployment](docs/downstream-production.md). An optional terminal fence (`DSH_ORBIT_PATCH_DSH_SSH=1` opt-in, ADR-0001 legacy debt) is documented in [Third-party debt](docs/third-party-debt.md).
 
-Optional terminal fence (legacy third-party compatibility debt, ADR-0001 — freeze-only, no new features, removed once DSH provides a generic trusted-client/authenticated-proxy capability; see `docs/third-party-debt.md`): set `DSH_ORBIT_PATCH_DSH_SSH=1` (also passed into the candidate container) to patch the `@linxin666/dsh-ssh` loopback-only fence so the authenticated Orbit proxy path can open remote PTY terminals. The patch is version-pinned (default `0.3.2`, override with `DSH_SSH_PLUGIN_VERSION`), uses exact source matching, and keeps loopback access plus all other denials intact; `DSH_SSH_PLUGIN_ROOT` overrides the plugin location. With the fence enabled, the candidate verification sequence runs the terminal authorization smoke (`npm run smoke:terminal`) — 6 cases against the live endpoint — and a failed terminal gate blocks promotion eligibility.
+## Principles
 
-The runner:
-
-1. runs the production snapshot hook and denies promotion readiness when it fails; the failure is recorded in the run evidence, so regenerating a report cannot restore eligibility;
-2. generates a compose override from the candidate specification (image, copied data and workspace roots, isolated loopback port) and verifies the *resolved* `docker compose config` against it — image, `/data` and `/workspace` mounts, published loopback port (`127.0.0.1` or `::1` only), project name, and a per-run candidate token must all match before anything is built or started;
-3. generates a per-run gateway identity certificate (SAN matching the candidate endpoint host) and mounts it into the candidate gateway in place of the base certificate;
-4. builds the candidate without replacing the last known-good image tag — the build fails on unsupported versions or source-layout mismatches — then starts it against the copied data on the isolated endpoint; production keeps running;
-5. verifies the full identity chain before any check runs: the running stack carries this run's candidate token, and `DSH_SMOKE_URL` terminates at the candidate gateway (the TLS peer certificate must be the per-run identity certificate);
-6. executes the verification sequence in a deterministic order (runtime readiness, patch verification, settings read, no-op settings write, live authorization smoke, existing-session resume, web/plugin routes, and the release-limited long-lived transport and terminal checks), with the smoke suites trusting the per-run certificate through `NODE_EXTRA_CA_CERTS`;
-7. stops at the first required failure, marks the remaining checks `not_run`, and still produces a final sanitized report;
-8. reports `compatibility` and `promotion readiness` separately: promotion readiness is eligible only when every required check passed, the exact candidate and baseline identities are recorded, and the snapshot completed; `verify` never evaluates promotion readiness;
-9. exits `0` only for a passed candidate or a passing verification, `1` for a failure, and `2` for configuration or binding errors. The runner environment needs Docker, the compose plugin, and OpenSSL.
+- **Upstream first.** Use official DSH capabilities when they exist. Compatibility patches are a fallback, not a permanent fork.
+- **Fail closed.** Unknown upstream layouts, patch mismatches, unexpected query strings, and route failures stop the path instead of silently weakening security.
+- **No direct DSH exposure.** Remote administration sits behind an authenticated gateway; the Hub's management surface never shares the public path with node machine routes.
+- **Versioned compatibility.** Each supported DSH version has an explicit compatibility contract and test coverage.
+- **Portable deployment.** Public examples use placeholders and environment-driven configuration. Site-specific secrets and addresses stay outside the repository.
 
 ## Development
 
-Requirements:
-
-- Node.js 22 or newer
-
-Run the unit tests:
+Requirements: Node.js 22 or newer.
 
 ```sh
-npm test
+npm test          # unit tests (fixtures and temp directories; no live DSH needed)
+npm run check     # public-tree check + full test suite
 ```
-
-Run repository validation:
-
-```sh
-npm run check
-```
-
-The test suite uses fixtures and temporary directories. It does not require a live DSH installation.
 
 ## Scope
 
 ### In scope
 
 - secure self-hosting patterns for DSH;
-- authenticated reverse-proxy compatibility;
-- DSH upgrade guards and compatibility checks;
-- deployment examples and smoke tests;
-- future multi-node endpoint discovery and selection.
+- a Hub-and-node fleet layer: registry, reverse-connected nodes, deterministic routing, selector;
+- DSH-native plugin integration and scan-to-pair operator sessions;
+- fleet workflows, scheduling, and upgrade guards with audit trails;
+- deployment examples, smoke tests, and evidence-backed releases.
 
 ### Out of scope
 
 - maintaining a fork of DeepSeek Harness;
 - bypassing authentication for public deployments;
 - storing or distributing user credentials;
-- promising compatibility with untested DSH releases.
+- promising compatibility with untested DSH releases;
+- silent cross-node failover or implicit broadcast execution.
 
 ## Contributing
 
-Issues and pull requests are welcome. Changes that touch authentication, proxy trust, or privileged DSH RPCs should include negative tests as well as success-path tests.
+Issues and pull requests are welcome. Changes that touch authentication, proxy trust, route authority, or privileged DSH RPCs should include negative tests as well as success-path tests. Design changes require an RFC first — see how existing milestones were run in [docs/rfc/](docs/rfc/) and [docs/review/](docs/review/).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
