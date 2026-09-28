@@ -1,0 +1,32 @@
+{
+  "version": "0.10.0-rc.1",
+  "candidateSha": "b3bd7b140652973fafe7ef7159b501643be712e6",
+  "runId": "v10-stage5-qual-b3bd7b1",
+  "generatedAt": "2026-09-28T13:21:21.671Z",
+  "scope": "automated",
+  "summary": {
+    "total": 17,
+    "automatedPass": 13,
+    "mountedNotExecuted": 4,
+    "result": "QUALIFIED_AUTOMATED"
+  },
+  "matrix": {
+    "authLandingServedManagementNoQuery": "PASS",
+    "authLandingServedManagementWithToken": "PASS",
+    "fenceRejectsExtraParameters": "PASS",
+    "fenceRejectsShapeAndEncodingVariants": "PASS",
+    "fenceUnchangedOnOtherRoutes": "PASS",
+    "authMethodDiscipline": "PASS",
+    "authLandingServedOnSelectorApex": "PASS",
+    "nodeRouteAuthPassthroughUnintercepted": "PASS",
+    "mintOverrideAppliedWhenSet": "PASS",
+    "mintFallbackRequestHostWhenUnset": "PASS",
+    "mintOverrideInvalidConfigFailsClosed": "PASS",
+    "zeroTokenLeakageAndCookieRegression": "PASS",
+    "apexVerifyRoutingDedicatedDispatch": "PASS",
+    "landingHappyPathScanMobile": "NOT_EXECUTED",
+    "landingDeadCodeScan": "NOT_EXECUTED",
+    "landingAddressBarScrub": "NOT_EXECUTED",
+    "landingReplayDenial": "NOT_EXECUTED"
+  }
+}
