@@ -142,34 +142,45 @@ dsh.example.local, *.dsh.example.local {
     # a separately authorized security-posture decision: the apex session
     # bootstrap is gateway-open, so an edge-exempt selector surface would
     # expose the node list and open session bootstrap to the public.
-    handle path /auth {
-        @landingGet method GET
-        handle @landingGet {
-            reverse_proxy 127.0.0.1:5445 {
-                header_up Host {host}
-                header_up -Authorization
-                header_up -X-Gateway-Auth
-            }
+    # House pattern (mirrors drill.Caddyfile): combined matchers + dedicated
+    # handle blocks for the two exempt pairing paths, and a matcherless
+    # fallback handle that carries the basic_auth gate for everything else.
+    # Caddy's fixed directive order runs site-level basic_auth BEFORE handle
+    # subroutes, so the gate MUST live inside the fallback handle — a
+    # site-level basic_auth would 401 the exempt paths regardless of the
+    # text order in this file.
+    @qrLandingGet {
+        method GET
+        path /auth
+    }
+    handle @qrLandingGet {
+        reverse_proxy 127.0.0.1:5445 {
+            header_up Host {host}
+            header_up -Authorization
+            header_up -X-Gateway-Auth
         }
     }
 
-    handle path /hub/pairing/verify /hub/pairing/verify/ {
-        @verifyPost method POST
-        handle @verifyPost {
-            reverse_proxy 127.0.0.1:5445 {
-                header_up Host {host}
-                header_up -Authorization
-                header_up -X-Gateway-Auth
-            }
+    @qrVerifyPost {
+        method POST
+        path /hub/pairing/verify /hub/pairing/verify/
+    }
+    handle @qrVerifyPost {
+        reverse_proxy 127.0.0.1:5445 {
+            header_up Host {host}
+            header_up -Authorization
+            header_up -X-Gateway-Auth
         }
     }
 
-    basic_auth {
-        operator $2a$10$REPLACE_WITH_BCRYPT_HASH
-    }
-    reverse_proxy 127.0.0.1:5445 {
-        header_up Host {host}
-        header_up -Authorization
-        header_up -X-Gateway-Auth
+    handle {
+        basic_auth {
+            operator $2a$10$REPLACE_WITH_BCRYPT_HASH
+        }
+        reverse_proxy 127.0.0.1:5445 {
+            header_up Host {host}
+            header_up -Authorization
+            header_up -X-Gateway-Auth
+        }
     }
 }

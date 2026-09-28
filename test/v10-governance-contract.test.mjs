@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
@@ -153,4 +154,46 @@ test("v0.10 governance records are present and internally consistent", async () 
   assert.match(firstReview, /Gate A Verdict: FAIL/);
   const rereview = await read("docs/review/2026-09-28-v10-stage0-gate-a-rereview-4ada45c.md");
   assert.match(rereview, /Gate A Verdict: PASS/);
+});
+
+test("Caddyfile.example carries the adjudicated edge-exemption shape", async () => {
+  const example = await read("docker-registry/Caddyfile.example");
+  // Combined matchers + dedicated handle blocks (the house pattern), not
+  // the invalid `handle path X` form a previous draft used.
+  assert.match(example, /@qrLandingGet \{[\s\S]*?method GET[\s\S]*?path \/auth/);
+  assert.match(example, /@qrVerifyPost \{[\s\S]*?method POST[\s\S]*?path \/hub\/pairing\/verify/);
+  assert.doesNotMatch(example, /handle path \/auth/);
+  // The gate lives inside a matcherless fallback handle — a site-level
+  // basic_auth would 401 the exempt paths regardless of text order.
+  const fallback = /handle \{[\s\S]*?basic_auth[\s\S]*?\}\n\}/.exec(example);
+  assert.ok(fallback, "matcherless fallback handle carrying basic_auth is required");
+  // The do-not-widen rationale is inline where an operator will read it.
+  assert.match(example, /Do not widen this list/);
+});
+
+test("Caddyfile.example passes real `caddy validate` (docker-gated)", async (t) => {
+  let dockerOk = false;
+  try {
+    execFileSync("docker", ["info", "--format", "{{.ServerVersion}}"], { stdio: "ignore", timeout: 30000 });
+    dockerOk = true;
+  } catch {
+    dockerOk = false;
+  }
+  if (!dockerOk) {
+    t.skip("docker unavailable");
+    return;
+  }
+  const caddyfilePath = new URL("docker-registry/Caddyfile.example", ROOT);
+  const windowsPath = decodeURIComponent(caddyfilePath.pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+  const stdout = execFileSync(
+    "docker",
+    [
+      "run", "--rm",
+      "-v", `${windowsPath}:/tmp/Caddyfile:ro`,
+      "caddy:2-alpine",
+      "caddy", "validate", "--adapter", "caddyfile", "--config", "/tmp/Caddyfile",
+    ],
+    { encoding: "utf8", timeout: 120000 },
+  );
+  assert.match(stdout, /Valid configuration/);
 });
