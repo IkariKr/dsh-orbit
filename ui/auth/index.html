@@ -80,7 +80,7 @@
     "use strict";
     // RFC-0017 D4: the raw query must be exactly token= plus six digits — the
     // same total grammar the server fence enforces. No URLSearchParams.
-    var TOKEN_QUERY_PATTERN = /^token=([0-9]{6})$/;
+    var TOKEN_QUERY_PATTERN = /^token\=([0-9]{6})$/;
     var VERIFY_ENDPOINT = "/hub/pairing/verify";
     var SUCCESS_TARGET = "/";
 
@@ -102,7 +102,7 @@
       var render = deps.render;
       var onRetryClick = deps.onRetryClick;
       var schedule = deps.schedule || function (fn, ms) { setTimeout(fn, ms); };
-      var token = null;
+      var code = null;
       var stateName = null;
 
       function setState(name) {
@@ -122,7 +122,7 @@
           method: "POST",
           credentials: "same-origin",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ token: token })
+          body: JSON.stringify({ token: code })
         })
           .then(function (res) {
             if (res.status === 200) {
@@ -147,11 +147,11 @@
       }
 
       function start() {
-        token = extractToken();
+        code = extractToken();
         // Scrub before anything else so the code never lingers in the
         // address bar, history, or session restore.
         scrubAddressBar();
-        if (!token) {
+        if (!code) {
           setState("missing");
           return;
         }
@@ -159,7 +159,7 @@
         // Retry re-uses the in-memory token; a page reload intentionally
         // starts over because the address bar no longer carries the code.
         onRetryClick(function () {
-          if (token) verify();
+          if (code) verify();
         });
       }
 
