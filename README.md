@@ -65,7 +65,9 @@ Run from a checkout of this repository:
 ```sh
 export DSH_ORBIT_HUB_GATEWAY_SECRET="$(openssl rand -hex 32)"  # gateway-held assertion; never sent to clients
 export DSH_ORBIT_HUB_ROUTE_DOMAIN="nodes.example.com"          # wildcard hostnames n-<32hex>.nodes.example.com
-export DSH_ORBIT_HUB_QR_PAIRING_BASE_URL="https://orbit.example.com"  # public origin minted into QR URLs
+export DSH_ORBIT_HUB_QR_PAIRING_BASE_URL="https://orbit.example.com"     # public origin minted into QR URLs
+export DSH_ORBIT_HUB_PAIRING_BASE_URL="https://orbit.example.com"        # machine-node bootstrap (distinct from the QR origin above)
+export DSH_ORBIT_HUB_TRUSTED_SCHEME=https                                # pairing endpoints refuse plaintext origins
 node bin/dsh-orbit-hub.mjs
 ```
 
@@ -117,7 +119,7 @@ Open the selector at the Hub, pick a node, and you are routed to its `n-<32hex>.
 
 ## Status
 
-- Current tagged release: **`v0.10.0-rc.1`** (signed tag). Milestones v0.1–v0.10 are implemented and engineering acceptance is closed.
+- Current tagged release: **`v0.10.0-rc.1`** (annotated tag). Milestones v0.1–v0.10 are implemented and engineering acceptance is closed.
 - v0.10 closed with the M17 acceptance matrix at **17/17** (13 automated + 4 mounted on a real deployment, including a real phone scan). Every milestone went through staged independent review — Gate A, per-stage gates, Gate C, Final Review — recorded in `docs/review/`.
 - **This is a release candidate, not production-stable.** Tag, promotion, and DNS cutover were treated as separately authorized steps.
 - Deployment evidence comes from **one operator's two-node fleet** (a NAS and a desktop) running behind a reverse tunnel on a public apex. There is no third-party user base to point at, and none is claimed.
