@@ -9,8 +9,16 @@ import {
   renderLoadingState,
 } from "./view-model.mjs";
 
+// RFC-0018 D5 refresh model: periodic polling with the manual refresh
+// retained. Polls are silent (no loading flicker); a failed poll degrades to
+// the existing error banner. No push/SSE channel is introduced.
+const POLL_INTERVAL_MS = 30_000;
+
 class SelectorApp {
-  constructor() {
+  constructor({ pollIntervalMs = POLL_INTERVAL_MS } = {}) {
+    this.pollIntervalMs = pollIntervalMs;
+    this.pollTimer = null;
+    this.pollInFlight = false;
     this.session = null;
     this.state = {
       loading: true,
@@ -33,8 +41,62 @@ class SelectorApp {
     try {
       await this.ensureSession();
       await this.fetchNodes();
+      this.startPolling();
     } catch (err) {
       this.renderAuthError(err.message);
+    }
+  }
+
+  startPolling() {
+    if (this.pollTimer) return;
+    this.pollTimer = setInterval(() => {
+      this.pollNodes();
+    }, this.pollIntervalMs);
+  }
+
+  stopPolling() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
+  }
+
+  // Silent refresh: never shows the loading banner; a failure degrades to
+  // the existing error banner. Overlapping polls are dropped.
+  async pollNodes() {
+    if (this.pollInFlight) return;
+    this.pollInFlight = true;
+    try {
+      const res = await fetch("/hub/selector/nodes", {
+        headers: { "sec-fetch-site": "same-origin" },
+      });
+      if (res.status === 401 || res.status === 403) {
+        this.state.error = "Session expired — click Refresh to re-authenticate.";
+        this.renderErrorBanner(this.state.error);
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        this.state.error = body?.error?.message || `Refresh failed (${res.status})`;
+        this.renderErrorBanner(this.state.error);
+        return;
+      }
+      const data = await res.json();
+      this.state.nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      this.state.error = null;
+      this.render();
+    } catch (err) {
+      this.state.error = err.message;
+      this.renderErrorBanner(err.message);
+    } finally {
+      this.pollInFlight = false;
+    }
+  }
+
+  renderErrorBanner(message) {
+    if (this.stateBannerEl) {
+      this.stateBannerEl.innerHTML =
+        `<div class="banner error" role="alert">${formatErrorMessage(message)}</div>`;
     }
   }
 
@@ -64,6 +126,7 @@ class SelectorApp {
   }
 
   async handleLogout() {
+    this.stopPolling();
     if (!this.session?.csrfToken) return;
     try {
       await fetch("/hub/session/logout", {
@@ -172,7 +235,11 @@ function escapeHtml(str) {
   }[tag] || tag));
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  const app = new SelectorApp();
-  app.init();
-});
+export { SelectorApp, POLL_INTERVAL_MS };
+
+if (typeof document !== "undefined") {
+  document.addEventListener("DOMContentLoaded", () => {
+    const app = new SelectorApp();
+    app.init();
+  });
+}
