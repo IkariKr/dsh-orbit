@@ -178,6 +178,12 @@ before the `requireCsrf` gate like the other GETs):
   ordered by `created_at`), paired with `revokeSession({ sessionId, actor })`
   which sets `revoked_at` + writes the `session.revoke` audit row in **one
   transaction** (the RFC-0005 D7 pattern used by `bootstrapSession`/`endSession`).
+  Retention decision (Gate A P3): `browser_sessions` rows are currently never
+  deleted and this wave adds no retention job — the list response is accepted
+  as unbounded-but-slow-growing for a single-operator fleet (hundreds of rows
+  over months). Stage 1 implements the SELECT with a sane ORDER BY and MUST
+  add a `LIMIT` cap (newest first) plus a total-count field, so a future
+  retention wave can land without changing the response shape.
 
 **`POST /hub/sessions/revoke`** (mutating; behind the existing
 `requireCsrf` gate at `server.mjs:1006`):
@@ -368,7 +374,14 @@ Mounted qualification (live, two-node deployment — one direct, one reverse):
   principals (the v0.10 sanitization lesson: the evidence's sanitization
   statement must describe exactly what was masked). Residual accepted risk:
   an operator can enumerate/terminate sessions of the same (or, in `inject`
-  mode, other) principals — that is the feature, disclosed in D2.
+  mode, other) principals — that is the feature, disclosed in D2. Stronger
+  still, the listed `sessionId` is itself the bearer credential: an operator
+  reading the list can impersonate another session (reuse its cookie value)
+  until that session expires. In the single-principal mode this adds
+  nothing; in `inject` mode the practical increment is bounded (the operator
+  can already mint enrollment tokens and delete nodes), but it is a
+  credential read, not merely an enumerate/terminate power — disclosed here
+  rather than minimized.
 - **Denial-of-service via revocation.** A compromised operator session can
   revoke other sessions (locking the operator out until re-login /
   re-pairing). Recovery is the existing bootstrap path
