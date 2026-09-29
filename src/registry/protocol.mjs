@@ -87,6 +87,13 @@ export const NONCE_RETENTION_MS = 24 * 60 * 60 * 1000;
 export const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 export const SESSION_IDLE_MS = 30 * 60 * 1000;
 
+// RFC-0018 D2 (Gate A P3 retention decision): browser_sessions rows are never
+// deleted today, so every session-list response is bounded — newest first
+// under a LIMIT cap, plus a total-count field, so a future retention wave can
+// land without changing the response shape.
+export const SESSION_LIST_LIMIT_DEFAULT = 200;
+export const SESSION_LIST_LIMIT_MAX = 1000;
+
 export const EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 export const AUDIT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
 // RFC-0009: reports retention 90 days; every report upload is an event.

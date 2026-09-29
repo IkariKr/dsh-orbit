@@ -30,6 +30,7 @@ import {
   validateTargetScope,
   assertValidTargetScope,
   validateScopedAction,
+  validateSessionTargetScope,
 } from "./flow-tracker.mjs";
 import { FleetJobScheduler } from "./fleet-scheduler.mjs";
 import { ScheduledWorkflowEngine } from "./schedule-engine.mjs";
@@ -71,6 +72,13 @@ const PRINCIPAL_HEADER = "x-dsh-operator-id";
 
 function isLoopback(address) {
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
+}
+
+// RFC-0018 D2: the devices view response carries the full sessionId (it is
+// the explicit revocation target; trust level disclosed in RFC-0018 §4), but
+// the UI renders only the hint — sess_ plus the first 8 hex characters.
+function sessionIdHint(sessionId) {
+  return typeof sessionId === "string" && sessionId.startsWith("sess_") ? sessionId.slice(0, 13) : sessionId;
 }
 
 function socketReasonPhrase(status) {
@@ -845,6 +853,10 @@ export function createHubServer({ registry, options = {} }) {
           trustedScheme: trustedExternalScheme,
           reverseSessions,
           reverseChannels,
+          // RFC-0018 D3: per-node hub-routed flow counts from the same
+          // tracker the proxy path accounts with. Read-model enrichment
+          // only — the apex allowlist tuple itself is untouched.
+          flowTracker,
         });
         return sendJson(response, 200, readModel);
       }
@@ -962,6 +974,22 @@ export function createHubServer({ registry, options = {} }) {
       if (path === "/hub/audit" || path === "/hub/audit/") {
         return sendJson(response, 200, { audit: registry.queryAudit() });
       }
+      if (path === "/hub/sessions" || path === "/hub/sessions/") {
+        // RFC-0018 D2: hub-side session inventory for the Devices and Nodes
+        // view (management surface only; not on the apex allowlist). The
+        // full sessionId is the explicit revocation target — trust level
+        // disclosed in RFC-0018 §4; csrf_token is never included for any
+        // session. Rows include revoked sessions (revocation is visible in
+        // history); activeCount uses the countActiveSessions liveness
+        // predicate and total counts every stored row (Gate A P3 bounded
+        // response: newest first under the registry LIMIT cap).
+        const listed = registry.listSessions();
+        return sendJson(response, 200, {
+          sessions: listed.sessions.map((session) => ({ ...session, sessionIdHint: sessionIdHint(session.sessionId) })),
+          activeCount: registry.countActiveSessions(),
+          total: listed.total,
+        });
+      }
       if (path === "/hub/tokens" || path === "/hub/tokens/") {
         return sendJson(response, 200, { tokens: registry.listTokens() });
       }
@@ -1000,10 +1028,39 @@ export function createHubServer({ registry, options = {} }) {
         request.on("end", cleanup);
         return;
       }
+      if (path === "/hub/sessions/revoke" || path === "/hub/sessions/revoke/") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "method not supported for sessions endpoint" } });
+      }
       return sendJson(response, 404, { error: { code: "not-found", message: "no such management route" } });
     }
 
     requireCsrf(request, session);
+
+    // RFC-0018 D2: explicit single-session revocation — the one new mutation
+    // of the v0.11 wave. Single-target validation follows the
+    // validateTargetScope discipline (wildcards, arrays, multi-ids and
+    // malformed ids are invalid-target-scope); unknown or already-revoked
+    // targets are not-found; revoking the caller's own session is allowed
+    // and is indistinguishable from logout. The mutation and its
+    // session.revoke audit row share one registry transaction.
+    if (path === "/hub/sessions/revoke" || path === "/hub/sessions/revoke/") {
+      if (request.method !== "POST") {
+        return sendJson(response, 405, { error: { code: "method-not-allowed", message: "expected POST" } });
+      }
+      if (!limiter.allow(`session-revoke:${request.socket.remoteAddress ?? "?"}`, 30, 60_000)) {
+        return sendJson(response, 429, { error: { code: "rate-limited", message: "too many session revocations" } });
+      }
+      const body = parseBody(await readBody(request, BODY_LIMIT_KIB));
+      const target = validateSessionTargetScope(body?.sessionId);
+      if (!target.valid) {
+        return sendJson(response, 400, { error: { code: target.code, message: target.message } });
+      }
+      const result = registry.revokeSession({ sessionId: target.sessionId, actor: session.operatorPrincipal });
+      if (!result.ok) {
+        return sendJson(response, 404, { error: { code: "not-found", message: "no such session" } });
+      }
+      return sendJson(response, 200, { ok: true });
+    }
 
     if (path === "/hub/fleet/jobs" || path === "/hub/fleet/jobs/") {
       if (request.method !== "POST") {

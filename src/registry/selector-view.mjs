@@ -69,7 +69,7 @@ export function mapEligibilityReason(serverReason) {
 export function buildSelectorNodeRow(
   registry,
   nodeRow,
-  { routeDomain, trustedScheme = "https", reverseSessions = null, reverseChannels = null } = {},
+  { routeDomain, trustedScheme = "https", reverseSessions = null, reverseChannels = null, flowTracker = null } = {},
 ) {
   const nodeId = nodeRow.node_id;
   const routeMode = nodeRow.route_mode === "reverse" ? "reverse" : "direct";
@@ -97,6 +97,12 @@ export function buildSelectorNodeRow(
     ? `${trustedScheme}://${computeRouteAuthority(nodeId, routeDomain)}/`
     : null;
 
+  // RFC-0018 D3: hub-routed HTTP/WS flows currently in flight to this node,
+  // from the same MultiNodeFlowTracker the hub proxies with. This is a
+  // hub-side transport count — not a browser-tab count and never a claim
+  // about node-local DSH login state (RFC-0011 D4).
+  const activeFlows = flowTracker && typeof flowTracker.getActiveFlowCount === "function" ? flowTracker.getActiveFlowCount(nodeId) : 0;
+
   return {
     nodeId,
     state: nodeRow.state,
@@ -123,6 +129,7 @@ export function buildSelectorNodeRow(
           ? (reverseSessions?.getPresence(nodeId, "reverse") ?? "offline")
           : (reverseSessions?.getPresence(nodeId, "direct") ?? "unknown")
       ),
+      activeFlows,
       reasonCode,
       reason,
       openUrl,
@@ -219,7 +226,7 @@ export function renderUnavailableHtml({ reasonMessage = "Selected node is unavai
 
 export function buildSelectorReadModel(
   registry,
-  { routeDomain, trustedScheme = "https", reverseSessions = null, reverseChannels = null } = {},
+  { routeDomain, trustedScheme = "https", reverseSessions = null, reverseChannels = null, flowTracker = null } = {},
 ) {
   const nodes = registry.db
     .prepare("SELECT * FROM nodes ORDER BY minted_at ASC, node_id ASC")
@@ -232,6 +239,7 @@ export function buildSelectorReadModel(
         trustedScheme,
         reverseSessions,
         reverseChannels,
+        flowTracker,
       }),
     ),
   };

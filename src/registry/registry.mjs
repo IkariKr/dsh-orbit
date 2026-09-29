@@ -42,6 +42,8 @@ import {
   ROTATION_OVERLAP_HOURS_MIN,
   ROUTE_PROBE_FAILURE_THRESHOLD,
   SESSION_IDLE_MS,
+  SESSION_LIST_LIMIT_DEFAULT,
+  SESSION_LIST_LIMIT_MAX,
   SESSION_TTL_MS,
   SIGNATURE_PATTERN,
   SIGNATURE_SKEW_SECONDS,
@@ -1641,6 +1643,58 @@ export class Registry {
       .prepare("SELECT count(*) as count FROM browser_sessions WHERE revoked_at IS NULL AND expires_at > ? AND idle_until > ?")
       .get(at, at);
     return row ? Number(row.count) : 0;
+  }
+
+  // RFC-0018 D2: the Devices and Nodes view projects the hub-side session
+  // store. The projection is exactly what the store knows — session id,
+  // principal, and lifecycle timestamps; csrf_token is NEVER included for any
+  // session. Rows include revoked sessions so revocation is visible in
+  // history. Per the Gate A P3 retention decision the response is bounded:
+  // newest first under a LIMIT cap plus a total count over all rows.
+  listSessions({ limit } = {}) {
+    const requested = Number.parseInt(limit, 10);
+    const cap = Number.isFinite(requested)
+      ? Math.min(Math.max(requested, 1), SESSION_LIST_LIMIT_MAX)
+      : SESSION_LIST_LIMIT_DEFAULT;
+    const rows = this.db
+      .prepare(
+        "SELECT session_id, operator_principal, created_at, expires_at, idle_until, revoked_at FROM browser_sessions ORDER BY created_at DESC, session_id DESC LIMIT ?",
+      )
+      .all(cap);
+    const totalRow = this.db.prepare("SELECT count(*) as count FROM browser_sessions").get();
+    return {
+      total: totalRow ? Number(totalRow.count) : 0,
+      sessions: rows.map((row) => ({
+        sessionId: row.session_id,
+        operatorPrincipal: row.operator_principal,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at,
+        idleUntil: row.idle_until,
+        revokedAt: row.revoked_at ?? null,
+      })),
+    };
+  }
+
+  // RFC-0018 D2: explicit single-session revocation — the one new mutation of
+  // the wave. revoked_at and the session.revoke audit row share one
+  // transaction (RFC-0005 D7 pattern, as endSession). Unknown or
+  // already-revoked sessions fail closed (no audit row, no rewrite of
+  // revoked_at).
+  revokeSession({ sessionId, actor }) {
+    if (typeof sessionId !== "string" || sessionId === "") {
+      return { ok: false, reason: "not-found" };
+    }
+    let revoked = false;
+    withTransaction(this.db, () => {
+      const row = this.db.prepare("SELECT revoked_at FROM browser_sessions WHERE session_id = ?").get(sessionId);
+      if (!row || row.revoked_at !== null) return;
+      this.db.prepare("UPDATE browser_sessions SET revoked_at = ? WHERE session_id = ?").run(nowIso(this.now()), sessionId);
+      // Audit shape per RFC-0018 D2: the revoked target is carried by both
+      // keys; the acting operator is the audit actor. Never the csrf token.
+      this.recordAudit(actor, "session.revoke", { sessionId, targetSessionId: sessionId });
+      revoked = true;
+    });
+    return revoked ? { ok: true } : { ok: false, reason: "not-found" };
   }
 
   // ------------------------------------------------------------------

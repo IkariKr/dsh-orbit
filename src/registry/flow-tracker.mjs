@@ -6,6 +6,10 @@ import { NODE_ID_PATTERN } from "./protocol.mjs";
 
 export const ALLOWED_SCOPED_ACTIONS = Object.freeze(["open", "status", "disconnect", "refresh"]);
 
+// RFC-0018 D2: bootstrapSession mints sess_ + 48 lowercase hex characters;
+// the revocation target must be exactly one such value.
+export const SESSION_ID_PATTERN = /^sess_[0-9a-f]{48}$/;
+
 /**
  * Validates that targetNodeId represents an explicit, single, well-formed node ID.
  * Wildcards, empty targets, arrays, or non-hex identifiers are strictly rejected.
@@ -60,6 +64,65 @@ export function validateTargetScope(targetNodeId) {
   }
 
   return { valid: true, nodeId: normalized };
+}
+
+/**
+ * Validates that sessionId represents an explicit, single, well-formed session
+ * ID (RFC-0018 D2, the validateTargetScope discipline applied to sessions).
+ * Missing, empty, non-string, array, wildcard, multi-id, or wrong-shape inputs
+ * are strictly rejected as invalid-target-scope.
+ *
+ * @param {unknown} sessionId
+ * @returns {{ valid: boolean, sessionId?: string, code?: string, message?: string }}
+ */
+export function validateSessionTargetScope(sessionId) {
+  if (sessionId === null || sessionId === undefined) {
+    return { valid: false, code: "invalid-target-scope", message: "sessionId is required" };
+  }
+
+  if (typeof sessionId !== "string") {
+    return {
+      valid: false,
+      code: "invalid-target-scope",
+      message: "sessionId must be a single string; arrays and multi-targets are denied",
+    };
+  }
+
+  const trimmed = sessionId.trim();
+  if (trimmed === "") {
+    return { valid: false, code: "invalid-target-scope", message: "sessionId must not be empty" };
+  }
+
+  // Reject wildcards, broadcasts, and multi-session tokens
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === "*" ||
+    lower === "all" ||
+    lower === "any" ||
+    lower === "broadcast" ||
+    lower === "cluster" ||
+    trimmed.includes(",") ||
+    trimmed.includes(" ") ||
+    trimmed.includes(";")
+  ) {
+    return {
+      valid: false,
+      code: "invalid-target-scope",
+      message: "wildcard or broadcast target scope is denied; target must specify exactly one session",
+    };
+  }
+
+  // Strict shape: no normalization and no trimming forgiveness — the target
+  // must be exactly sess_ + 48 lowercase hex characters.
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    return {
+      valid: false,
+      code: "invalid-target-scope",
+      message: `sessionId must be a sess_-prefixed 48-hex lowercase session ID: ${JSON.stringify(sessionId)}`,
+    };
+  }
+
+  return { valid: true, sessionId };
 }
 
 /**
