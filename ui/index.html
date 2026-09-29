@@ -14,6 +14,7 @@
 
   <nav>
     <button id="nav-nodes" class="nav-button active" type="button">Nodes</button>
+    <button id="nav-devices" class="nav-button" type="button">Devices &amp; Nodes</button>
     <button id="nav-tokens" class="nav-button" type="button">Tokens</button>
     <button id="nav-fleet" class="nav-button" type="button">Fleet Workflows</button>
     <button id="nav-schedules" class="nav-button" type="button">Scheduled Workflows</button>
@@ -26,6 +27,14 @@
       <div id="nodes-list"></div>
       <div id="reenroll-result"></div>
       <div id="node-detail-view" hidden></div>
+    </section>
+    <section id="devices-view" hidden>
+      <div class="panel fleet-actions-panel">
+        <button id="refresh-devices-btn" class="secondary" type="button">Refresh Devices &amp; Nodes</button>
+      </div>
+      <div id="devices-summary"></div>
+      <div id="devices-sessions-list"></div>
+      <div id="devices-nodes-list"></div>
     </section>
     <section id="tokens-view" hidden>
       <div class="panel">

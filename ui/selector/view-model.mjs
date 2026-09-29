@@ -32,6 +32,19 @@ export function formatBadge(dimension, value) {
   return `<span class="badge ${cls}" title="${safeDim}: ${safeVal}"><span class="dimension">${safeDim}</span>${safeVal}</span>`;
 }
 
+// RFC-0018 D4: the truncated canonical route-authority label rendered on
+// every card — n-<first 8>… per the RFC-0013 D2 truncation convention. This
+// is a display label only; navigation never derives URLs from it (the
+// server-computed openUrl remains the only navigation source).
+export function formatTargetHint(nodeId) {
+  if (typeof nodeId !== "string" || nodeId === "") return "";
+  const hex = nodeId.startsWith("node_") ? nodeId.slice("node_".length) : nodeId;
+  if (/^[0-9a-f]{32}$/.test(hex)) {
+    return `n-${hex.slice(0, 8)}…`;
+  }
+  return `${nodeId.slice(0, 13)}…`;
+}
+
 export function createSelectorRowElement(node) {
   const card = document.createElement("article");
   card.className = `selector-card ${node.route?.eligible ? "eligible" : "ineligible"}`;
@@ -56,11 +69,18 @@ export function createSelectorRowElement(node) {
   const routeMode = escapeHtml(node.route?.routeMode ?? "unknown");
   const reversePresence = escapeHtml(node.route?.reversePresence ?? "unknown");
   const routeReason = escapeHtml(node.route?.reason ?? "-");
+  // RFC-0018 D3: hub-side transport count with honest semantics — the label
+  // states hub-routed flow visibility and never claims DSH login/session
+  // state (the hub cannot see node-local DSH sessions, RFC-0011 D4).
+  const activeFlows = typeof node.route?.activeFlows === "number" && node.route.activeFlows >= 0 ? node.route.activeFlows : 0;
+  const targetHint = escapeHtml(formatTargetHint(node.nodeId));
 
   let actionHtml = "";
   if (node.route?.eligible && node.route?.openUrl) {
     const safeUrl = escapeHtml(node.route.openUrl);
-    actionHtml = `<a href="${safeUrl}" class="open-button" aria-label="Open endpoint ${safeNodeId}">Open</a>`;
+    // The accessible text of the Open control carries the full
+    // server-computed target authority (RFC-0018 D4 / matrix A11).
+    actionHtml = `<a href="${safeUrl}" class="open-button" aria-label="Open endpoint ${safeNodeId} — navigates to target authority ${safeUrl}">Open</a>`;
   } else {
     const reasonText = escapeHtml(node.route?.reason || "Unavailable");
     actionHtml = `
@@ -87,9 +107,11 @@ export function createSelectorRowElement(node) {
       ${compatBadge}
       ${webRoutesBadge}
     </div>
+    <div class="target-line" data-target-line aria-label="Explicit target route authority">target: <strong>${targetHint}</strong></div>
     <div class="route-meta" aria-label="Server-provided route status">
       <span>route mode: <strong>${routeMode}</strong></span>
       <span>reverse presence: <strong>${reversePresence}</strong></span>
+      <span data-flows-indicator>active hub-routed flows: <strong>${activeFlows}</strong></span>
       <span>reason: <strong>${routeReason}</strong></span>
     </div>
     <div class="card-footer">

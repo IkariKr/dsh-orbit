@@ -26,6 +26,7 @@ import {
   mapFleetJobDetail,
   mapScheduleRow,
   mapScheduleList,
+  mapSessionList,
 } from "./view-model.mjs";
 
 const SESSION_ERRORS = new Set(["gateway-denied", "no-principal", "no-session"]);
@@ -311,6 +312,117 @@ export function createRegistryUi({ document, fetchImpl }) {
         showBanner(SESSION_REQUIRED_STATE);
       } else {
         showBanner({ message: `failed to load tokens: ${error.message}` });
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Devices and Nodes (RFC-0018): one section unifying operator sessions
+  // and enrolled nodes. The session table renders ONLY the sessionIdHint —
+  // the full sessionId never enters the DOM; revocation resolves the full
+  // id from the in-memory view state and fails closed when a hint is not
+  // uniquely identifiable.
+
+  let lastSessionsView = { kind: "sessions", rows: [], activeCount: 0, total: 0 };
+  let lastDevicesNodesView = { kind: "empty-nodes" };
+  let pendingRevokeHint = null;
+
+  function renderSessionRows(view) {
+    if (view.rows.length === 0) {
+      return `<tr><td colspan="8"><div class="banner empty">no operator sessions stored</div></td></tr>`;
+    }
+    return view.rows
+      .map((session) => {
+        const statusBadge = session.revoked
+          ? `<span class="${badgeClass("status", "revoked")}">revoked</span>`
+          : `<span class="${badgeClass("status", "active")}">active</span>`;
+        const isPending = !session.revoked && pendingRevokeHint !== null && pendingRevokeHint === session.sessionIdHint;
+        const action = session.revoked
+          ? `<span class="dim">—</span>`
+          : `<button class="danger${isPending ? " confirm-revoke" : ""}" data-revoke-hint="${escapeHtml(session.sessionIdHint)}">${isPending ? "confirm revoke?" : "revoke"}</button>`;
+        return `<tr data-session-row="${escapeHtml(session.sessionIdHint)}">
+          <td data-field="session-hint">${escapeHtml(session.sessionIdHint ?? "-")}</td>
+          <td>${escapeHtml(session.operatorPrincipal ?? "-")}</td>
+          <td>${escapeHtml(session.createdAt ?? "-")}</td>
+          <td>${escapeHtml(session.lastActivity ?? "-")}</td>
+          <td>${escapeHtml(session.idleUntil ?? "-")}</td>
+          <td>${escapeHtml(session.expiresAt ?? "-")}</td>
+          <td data-field="status">${statusBadge}</td>
+          <td>${action}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  function renderDevices(sessionsView, nodesView) {
+    lastSessionsView = sessionsView;
+    lastDevicesNodesView = nodesView;
+    const summary = $("devices-summary");
+    if (summary) {
+      summary.innerHTML = `<div class="panel overview-panel" id="devices-overview">
+        <strong>Operator sessions:</strong> ${sessionsView.activeCount} active · ${sessionsView.total} stored<br>
+        <span class="dim">The hub cannot identify devices (no User-Agent/IP is stored) and cannot see node-local DSH logins. Last activity is derived from the 30-minute idle window.</span>
+      </div>`;
+    }
+    const sessionsList = $("devices-sessions-list");
+    if (sessionsList) {
+      sessionsList.innerHTML = `<div class="panel"><h3>Operator sessions</h3>
+        <table>
+          <thead><tr><th>session</th><th>principal</th><th>created</th><th>last activity</th><th>idle until</th><th>expires</th><th>status</th><th>action</th></tr></thead>
+          <tbody id="session-table-body">${renderSessionRows(sessionsView)}</tbody>
+        </table></div>`;
+    }
+    const nodesList = $("devices-nodes-list");
+    if (nodesList) {
+      const rowsHtml = nodesView.kind === "nodes"
+        ? nodesView.rows.map(renderNodeRow).join("")
+        : `<div class="panel"><div class="banner empty">no nodes registered yet</div></div>`;
+      nodesList.innerHTML = `<div class="panel"><h3>Nodes</h3></div>${rowsHtml}`;
+    }
+  }
+
+  async function revokeSessionByHint(hint) {
+    const matches = lastSessionsView.rows.filter((row) => row.sessionIdHint === hint && !row.revoked);
+    if (matches.length !== 1) {
+      pendingRevokeHint = null;
+      showBanner({ message: `revoke failed: session ${hint} is not uniquely identifiable; refresh and retry` });
+      return;
+    }
+    try {
+      await api("/hub/sessions/revoke", { method: "POST", body: { sessionId: matches[0].sessionId } });
+      pendingRevokeHint = null;
+      await loadDevices();
+      showBanner({ message: `session ${hint} revoked` });
+    } catch (error) {
+      if (error.sessionRequired) {
+        if (await refreshSession()) return loadDevices();
+        showBanner(SESSION_REQUIRED_STATE);
+      } else {
+        showBanner({ message: `revoke failed: ${error.message}` });
+      }
+    }
+  }
+
+  async function loadDevices() {
+    showBanner(LOADING_STATE);
+    try {
+      const sessionsPromise = api("/hub/sessions");
+      const nodesPromise = (async () => {
+        try {
+          return await api("/hub/overview");
+        } catch {
+          return await api("/hub/nodes");
+        }
+      })();
+      const [sessionsBody, nodesBody] = await Promise.all([sessionsPromise, nodesPromise]);
+      renderDevices(mapSessionList(sessionsBody), mapNodeList(nodesBody?.nodes));
+      showBanner({});
+    } catch (error) {
+      if (error.sessionRequired) {
+        if (await refreshSession()) return loadDevices();
+        showBanner(SESSION_REQUIRED_STATE);
+      } else {
+        showBanner({ message: `failed to load devices: ${error.message}` });
       }
     }
   }
@@ -856,20 +968,56 @@ export function createRegistryUi({ document, fetchImpl }) {
       $("nav-tokens")?.classList.remove("active");
       $("nav-fleet")?.classList.remove("active");
       $("nav-schedules")?.classList.remove("active");
+      $("nav-devices")?.classList.remove("active");
       if ($("tokens-view")) $("tokens-view").hidden = true;
       if ($("fleet-view")) $("fleet-view").hidden = true;
       if ($("schedules-view")) $("schedules-view").hidden = true;
+      if ($("devices-view")) $("devices-view").hidden = true;
       if ($("nodes-view")) $("nodes-view").hidden = false;
       await loadNodes();
+    });
+    $("nav-devices")?.addEventListener("click", async () => {
+      $("nav-devices")?.classList.add("active");
+      $("nav-nodes")?.classList.remove("active");
+      $("nav-tokens")?.classList.remove("active");
+      $("nav-fleet")?.classList.remove("active");
+      $("nav-schedules")?.classList.remove("active");
+      if ($("nodes-view")) $("nodes-view").hidden = true;
+      if ($("tokens-view")) $("tokens-view").hidden = true;
+      if ($("fleet-view")) $("fleet-view").hidden = true;
+      if ($("schedules-view")) $("schedules-view").hidden = true;
+      if ($("devices-view")) $("devices-view").hidden = false;
+      await loadDevices();
+    });
+    $("refresh-devices-btn")?.addEventListener("click", loadDevices);
+    $("devices-sessions-list")?.addEventListener("click", async (event) => {
+      let button = null;
+      if (event.target?.dataset?.revokeHint !== undefined) {
+        button = event.target;
+      } else if (typeof event.target?.closest === "function") {
+        button = event.target.closest("[data-revoke-hint]");
+      }
+      if (!button) return;
+      const hint = button.dataset.revokeHint;
+      // Two-step confirmation: the first click arms the row, the second
+      // click revokes. Every mutation stays a single explicit target.
+      if (pendingRevokeHint !== hint) {
+        pendingRevokeHint = hint;
+        renderDevices(lastSessionsView, lastDevicesNodesView);
+        return;
+      }
+      await revokeSessionByHint(hint);
     });
     $("nav-tokens")?.addEventListener("click", async () => {
       $("nav-tokens")?.classList.add("active");
       $("nav-nodes")?.classList.remove("active");
       $("nav-fleet")?.classList.remove("active");
       $("nav-schedules")?.classList.remove("active");
+      $("nav-devices")?.classList.remove("active");
       if ($("nodes-view")) $("nodes-view").hidden = true;
       if ($("fleet-view")) $("fleet-view").hidden = true;
       if ($("schedules-view")) $("schedules-view").hidden = true;
+      if ($("devices-view")) $("devices-view").hidden = true;
       if ($("tokens-view")) $("tokens-view").hidden = false;
       await loadTokens();
     });
@@ -878,9 +1026,11 @@ export function createRegistryUi({ document, fetchImpl }) {
       $("nav-nodes")?.classList.remove("active");
       $("nav-tokens")?.classList.remove("active");
       $("nav-schedules")?.classList.remove("active");
+      $("nav-devices")?.classList.remove("active");
       if ($("nodes-view")) $("nodes-view").hidden = true;
       if ($("tokens-view")) $("tokens-view").hidden = true;
       if ($("schedules-view")) $("schedules-view").hidden = true;
+      if ($("devices-view")) $("devices-view").hidden = true;
       if ($("fleet-view")) $("fleet-view").hidden = false;
       if ($("fleet-jobs-list")) $("fleet-jobs-list").hidden = false;
       if ($("fleet-job-detail-view")) $("fleet-job-detail-view").hidden = true;
@@ -891,9 +1041,11 @@ export function createRegistryUi({ document, fetchImpl }) {
       $("nav-nodes")?.classList.remove("active");
       $("nav-tokens")?.classList.remove("active");
       $("nav-fleet")?.classList.remove("active");
+      $("nav-devices")?.classList.remove("active");
       if ($("nodes-view")) $("nodes-view").hidden = true;
       if ($("tokens-view")) $("tokens-view").hidden = true;
       if ($("fleet-view")) $("fleet-view").hidden = true;
+      if ($("devices-view")) $("devices-view").hidden = true;
       if ($("schedules-view")) $("schedules-view").hidden = false;
       await loadSchedules();
     });

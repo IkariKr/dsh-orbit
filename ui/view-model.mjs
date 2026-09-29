@@ -182,6 +182,42 @@ export function mapTokenList(tokens) {
   return { kind: "tokens", rows: tokens.map(mapTokenRow) };
 }
 
+// RFC-0018 D1/D2: the Devices and Nodes view projects the hub-side session
+// store. The store knows no device identity (no UA/IP columns exist), so a
+// row carries lifecycle state only. `idle_until` is rewritten on every
+// validated request, so derived last activity ≈ idleUntil − SESSION_IDLE_MS.
+export const SESSION_IDLE_MS = 30 * 60 * 1000;
+
+export function mapSessionRow(session) {
+  const idleUntil = typeof session?.idleUntil === "string" ? session.idleUntil : null;
+  const idleMs = idleUntil ? Date.parse(idleUntil) : NaN;
+  const sessionId = typeof session?.sessionId === "string" ? session.sessionId : null;
+  const hint = typeof session?.sessionIdHint === "string"
+    ? session.sessionIdHint
+    : (sessionId !== null ? sessionId.slice(0, 13) : null);
+  return {
+    sessionId,
+    sessionIdHint: hint,
+    operatorPrincipal: session?.operatorPrincipal ?? null,
+    createdAt: session?.createdAt ?? null,
+    expiresAt: session?.expiresAt ?? null,
+    idleUntil,
+    lastActivity: Number.isFinite(idleMs) ? new Date(idleMs - SESSION_IDLE_MS).toISOString() : null,
+    revokedAt: session?.revokedAt ?? null,
+    revoked: session?.revokedAt != null,
+  };
+}
+
+export function mapSessionList(payload) {
+  const rows = Array.isArray(payload?.sessions) ? payload.sessions.map(mapSessionRow) : [];
+  return {
+    kind: "sessions",
+    rows,
+    activeCount: typeof payload?.activeCount === "number" ? payload.activeCount : 0,
+    total: typeof payload?.total === "number" ? payload.total : rows.length,
+  };
+}
+
 // Token minting contract: the plaintext exists exactly once, in the
 // mint response; the view-model never stores or re-renders it later.
 export function mapTokenMint(minted) {

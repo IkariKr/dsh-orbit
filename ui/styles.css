@@ -137,3 +137,13 @@ button.danger { background: var(--bad); color: #fff; border: none; padding: 7px 
 .badge.timeout, .badge.unreachable, .badge.skipped { border-color: var(--bad); color: var(--bad); }
 .node-results-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
 .log-box { background: #0b0f14; border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; font-family: ui-monospace, monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 150px; overflow-y: auto; color: #a5d6ff; }
+
+/* RFC-0018 D6 (SHOULD): minimal responsive pass so the Devices & Nodes view
+   is inspectable from a phone that has edge credentials; desktop-first. */
+@media (max-width: 640px) {
+  nav { display: flex; flex-wrap: wrap; gap: 8px; }
+  main { padding: 12px; }
+  .panel { overflow-x: auto; }
+  .node-row { flex-direction: column; }
+  .events-list div { grid-template-columns: 120px 90px 1fr; }
+}

@@ -36,6 +36,38 @@ as `unknown` — nothing is ever guessed.
   delete flow (node must be tombstoned).
 - **Logout**: terminates the session server-side.
 
+## Devices and Nodes (RFC-0018)
+
+The **Devices &amp; Nodes** nav section unifies operator sessions and enrolled
+nodes in one screen.
+
+- **Operator sessions** come from `GET /hub/sessions` (management surface
+  only, session-gated). The table shows, per session: the `sessionIdHint`
+  (`sess_` + first 8 hex), the operator principal, `createdAt`, derived
+  last activity (`idleUntil − 30 min` idle window), `idleUntil`,
+  `expiresAt`, and the `active`/`revoked` status; revoked rows stay
+  visible in history. A summary line shows `activeCount` and the stored
+  total (the list is newest-first and capped server-side).
+- **Revocation** is a two-step control (arm, then "confirm revoke?") that
+  issues one `POST /hub/sessions/revoke` per click with the session CSRF
+  token. The full `sessionId` never enters the DOM: the button carries
+  only the hint, and the full id is resolved from the in-memory view
+  state, failing closed if a hint is not uniquely identifiable.
+  Self-revocation behaves exactly like logout.
+- **Stated limitations** (also shown in the section's summary line): the
+  hub stores no User-Agent or IP, so it cannot identify *which device* a
+  session belongs to, and it never inspects node-local DSH session state,
+  so nothing here claims a DSH login.
+- **Node rows** repeat the nodes view in the same screen: route mode,
+  reverse presence, `activeFlows` (hub-routed flows), and the truncated
+  target id (`target: node_<first 8>…`) per the RFC-0013 D2 convention.
+
+The Endpoint Selector (`ui/selector/`) renders the same honesty rules:
+every card shows an explicit `target:` authority line (truncated
+`n-<first 8>…`, full authority in the Open control's accessible text),
+an `active hub-routed flows` indicator, and responsive breakpoints for
+phone widths (RFC-0018 D6).
+
 ## Automated walkthrough
 
 `test/ui-browser-flow.test.mjs` drives the full operator flow through a

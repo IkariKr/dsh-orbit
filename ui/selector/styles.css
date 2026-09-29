@@ -228,3 +228,76 @@ main {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+
+.target-line {
+  font-size: 13px;
+  color: var(--muted);
+}
+.target-line strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--text);
+}
+
+/* RFC-0018 D6: defined breakpoints — narrow-viewport behavior is designed,
+   not accidental. Dependency-free: no external fonts, URLs, or frameworks. */
+@media (max-width: 900px) {
+  main {
+    padding: 14px;
+  }
+  .selector-card {
+    padding: 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 12px 14px;
+  }
+  nav {
+    flex-wrap: wrap;
+    padding: 8px 14px;
+  }
+  .nav-button {
+    padding: 8px 14px;
+    min-height: 44px;
+  }
+  main {
+    padding: 12px 10px;
+  }
+  .selector-card {
+    padding: 14px 12px;
+    gap: 10px;
+  }
+  .card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .node-title {
+    font-size: 14px;
+    word-break: break-all;
+  }
+  .dimension-badges {
+    gap: 6px;
+  }
+  .route-meta {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .card-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  /* Touch-safe controls (RFC-0018 D6): Open/Unavailable span the card and
+     meet the 44px touch-target bar; no horizontal overflow at phone widths. */
+  .open-button,
+  .disabled-button {
+    width: 100%;
+    min-height: 44px;
+  }
+  .retry-button {
+    min-height: 44px;
+  }
+}
