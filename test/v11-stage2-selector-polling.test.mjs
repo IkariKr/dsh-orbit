@@ -80,11 +80,17 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("polling: initial fetch then silent periodic refresh without loading flicker", async () => {
   let nodeCalls = 0;
+  let releaseFirstPoll;
+  const firstPollPending = new Promise((resolve) => {
+    releaseFirstPoll = resolve;
+  });
   const { SelectorApp } = await loadApp({
     fetchImpl: (url) => {
       if (String(url).endsWith("/hub/selector/nodes")) {
         nodeCalls += 1;
-        return nodesOk(2);
+        // Hold the first poll in flight so the silent-refresh semantics can
+        // be asserted mid-flight: no loading banner may appear.
+        return nodeCalls === 2 ? firstPollPending : nodesOk(2);
       }
       return sessionOk();
     },
@@ -94,10 +100,16 @@ test("polling: initial fetch then silent periodic refresh without loading flicke
   assert.equal(nodeCalls, 1, "initial fetch");
   assert.equal(app.state.nodes.length, 2);
 
-  await sleep(40);
+  // First poll goes in flight: the banner must NOT show a loading state.
+  await sleep(25);
   assert.ok(nodeCalls >= 2, `expected periodic polls, got ${nodeCalls}`);
+  assert.ok(!app.stateBannerEl.innerHTML.includes("banner loading"), "poll must be silent while in flight");
+  assert.ok(!app.stateBannerEl.innerHTML.includes("banner error"));
+
+  releaseFirstPoll(nodesOk(2));
+  await sleep(30);
   assert.equal(app.state.nodes.length, 2);
-  // Silent refresh: no loading banner, no error banner during successful polls.
+  // Silent refresh: no loading banner, no error banner after successful polls.
   assert.ok(!app.stateBannerEl.innerHTML.includes("banner error"));
   app.stopPolling();
   const afterStop = nodeCalls;

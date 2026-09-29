@@ -26,6 +26,7 @@ class SelectorApp {
       error: null,
       authError: null,
     };
+    this.lastNodesJson = null;
 
     this.sessionStatusEl = document.getElementById("session-status");
     this.stateBannerEl = document.getElementById("state-banner");
@@ -62,7 +63,9 @@ class SelectorApp {
   }
 
   // Silent refresh: never shows the loading banner; a failure degrades to
-  // the existing error banner. Overlapping polls are dropped.
+  // the existing error banner (Retry affordance included, same as the
+  // manual path). Overlapping polls are dropped, and an unchanged node list
+  // is not re-rendered so keyboard focus survives idle polls.
   async pollNodes() {
     if (this.pollInFlight) return;
     this.pollInFlight = true;
@@ -72,31 +75,53 @@ class SelectorApp {
       });
       if (res.status === 401 || res.status === 403) {
         this.state.error = "Session expired — click Refresh to re-authenticate.";
-        this.renderErrorBanner(this.state.error);
+        this.renderErrorBanner(this.state.error, { withRetry: false });
         return;
       }
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         this.state.error = body?.error?.message || `Refresh failed (${res.status})`;
-        this.renderErrorBanner(this.state.error);
+        this.renderErrorBanner(this.state.error, { withRetry: true });
         return;
       }
       const data = await res.json();
-      this.state.nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      const nextNodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      const nextJson = JSON.stringify(nextNodes);
+      this.state.nodes = nextNodes;
       this.state.error = null;
+      if (nextJson === this.lastNodesJson) {
+        // Unchanged data: clear a stale error banner without rebuilding the
+        // list, so keyboard focus and scroll position survive idle polls.
+        if (this.stateBannerEl && this.stateBannerEl.innerHTML !== "") {
+          this.stateBannerEl.innerHTML = "";
+        }
+        return;
+      }
+      this.lastNodesJson = nextJson;
       this.render();
     } catch (err) {
       this.state.error = err.message;
-      this.renderErrorBanner(err.message);
+      this.renderErrorBanner(err.message, { withRetry: true });
     } finally {
       this.pollInFlight = false;
     }
   }
 
-  renderErrorBanner(message) {
-    if (this.stateBannerEl) {
-      this.stateBannerEl.innerHTML =
-        `<div class="banner error" role="alert">${formatErrorMessage(message)}</div>`;
+  // Single shared error-banner renderer: the manual path renders it with a
+  // Retry button; poll failures reuse the identical contract.
+  renderErrorBanner(message, { withRetry = true } = {}) {
+    if (!this.stateBannerEl) return;
+    const retry = withRetry
+      ? `<button type="button" class="retry-button" id="retry-btn">Retry</button>`
+      : "";
+    this.stateBannerEl.innerHTML = `
+      <div class="banner error" role="alert">
+        ${escapeHtml(formatErrorMessage(message))}
+        ${retry}
+      </div>
+    `;
+    if (withRetry) {
+      document.getElementById("retry-btn")?.addEventListener("click", () => this.fetchNodes());
     }
   }
 
@@ -185,19 +210,12 @@ class SelectorApp {
       const data = await res.json();
       this.state.loading = false;
       this.state.nodes = Array.isArray(data?.nodes) ? data.nodes : [];
+      this.lastNodesJson = JSON.stringify(this.state.nodes);
       this.render();
     } catch (err) {
       this.state.loading = false;
       this.state.error = err.message;
-      if (this.stateBannerEl) {
-        this.stateBannerEl.innerHTML = `
-          <div class="banner error" role="alert">
-            ${escapeHtml(formatErrorMessage(err.message))}
-            <button type="button" class="retry-button" id="retry-btn">Retry</button>
-          </div>
-        `;
-        document.getElementById("retry-btn")?.addEventListener("click", () => this.fetchNodes());
-      }
+      this.renderErrorBanner(err.message, { withRetry: true });
       if (this.nodesListEl) {
         this.nodesListEl.innerHTML = "";
       }
